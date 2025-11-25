@@ -12,15 +12,27 @@ import SettingsModal from './components/SettingsModal' // Import the modal
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'oled'>('dark')
   const [isSettingsOpen, setSettingsOpen] = useState(false) // State for the modal
+  const [javaInstallations, setJavaInstallations] = useState([]) // State for Java installations
+  const [accounts, setAccounts] = useState<{ username: string }[]>([]);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
   const nav = useNavigate()
   const loc = useLocation()
 
   useEffect(() => {
     const a: any = (window as any).api;
-    if (a && a.settings) {
-      a.settings.get().then((s: any) => {
-        setTheme(s.theme || 'dark')
-      })
+    if (a) {
+      if (a.settings) {
+        a.settings.get().then((s: any) => {
+          setTheme(s.theme || 'dark')
+        })
+      }
+      if (a.java && typeof a.java.detect === 'function') {
+        a.java.detect().then((installations: any) => {
+          setJavaInstallations(installations);
+        }).catch((err: any) => {
+          console.error("Error detecting Java:", err);
+        });
+      }
     }
   }, [])
 
@@ -56,9 +68,45 @@ export default function App() {
     }
   };
 
+  const handleJavaDetect = () => {
+    const a: any = (window as any).api;
+    if (a.java && typeof a.java.detect === 'function') {
+      a.java.detect().then((installations: any) => {
+        setJavaInstallations(installations);
+      }).catch((err: any) => {
+        console.error("Error detecting Java:", err);
+      });
+    }
+  };
+
+  const handleAddAccount = (username: string) => {
+    const newAccount = { username };
+    setAccounts([...accounts, newAccount]);
+    setCurrentUser(username);
+  };
+
+  const handleDeleteAccount = (username: string) => {
+    setAccounts(accounts.filter(acc => acc.username !== username));
+    if (currentUser === username) {
+      setCurrentUser(accounts.length > 1 ? accounts[0].username : null);
+    }
+  };
+
+  const handleSelectAccount = (username: string) => {
+    setCurrentUser(username);
+  };
+
   return (
     <div className="h-full flex">
-      <Sidebar currentPath={loc.pathname} onNavigate={handleNavigation} />
+      <Sidebar
+        currentPath={loc.pathname}
+        onNavigate={handleNavigation}
+        accounts={accounts}
+        currentUser={currentUser}
+        onAddAccount={handleAddAccount}
+        onDeleteAccount={handleDeleteAccount}
+        onSelectAccount={handleSelectAccount}
+      />
       <main className={`flex-1 p-6 bg-gray-900/30 dark:bg-gray-900/50 transition-all duration-300 ${isSettingsOpen ? 'filter blur-sm' : ''}`}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -74,6 +122,8 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSettingsChanged={handleSettingsChanged}
+        javaInstallations={javaInstallations}
+        onJavaDetect={handleJavaDetect}
       />
     </div>
   )
