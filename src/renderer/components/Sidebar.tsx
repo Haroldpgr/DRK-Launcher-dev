@@ -1,6 +1,15 @@
 import React from 'react'
+import Profile from './Profile'
 
-type Props = { currentPath: string; onNavigate: (p: string) => void }
+type Props = {
+  currentPath: string;
+  onNavigate: (p: string) => void;
+  accounts: { username: string }[];
+  currentUser: string | null;
+  onAddAccount: (username: string) => void;
+  onDeleteAccount: (username: string) => void;
+  onSelectAccount: (username: string) => void;
+}
 
 export function Icon({ name }: { name: 'home' | 'instances' | 'create' | 'servers' | 'crash' | 'import' | 'settings' | 'contenido' | 'skins' | 'privacy' | 'appearance' | 'resources' | 'java' }) {
   const isSolid = ['privacy', 'appearance', 'resources', 'java', 'instances'].includes(name);
@@ -74,37 +83,36 @@ export function Icon({ name }: { name: 'home' | 'instances' | 'create' | 'server
   // Solid icons for settings
   if (name === 'privacy') {
     return (
-      <svg {...commonProps}>
-        <path fillRule="evenodd" d="M12 1.5a7.5 7.5 0 0 0-6.75 10.563.75.75 0 0 0 1.172.66l.5-.666A5.25 5.25 0 0 1 12 2.25a5.25 5.25 0 0 1 4.422 7.834l.5.666a.75.75 0 0 0 1.172-.66A7.5 7.5 0 0 0 12 1.5ZM9.75 15.063V12a3 3 0 1 1 4.5 2.59V15a.75.75 0 0 1-1.5 0v-.528a3 3 0 1 1 1.5 0v.528a.75.75 0 0 1-1.5 0v-.528a3 3 0 1 1 1.5 0v.528a.75.75 0 0 1-1.28.53l-2.22-2.22a.75.75 0 0 1 1.06-1.06l2.22 2.22a.75.75 0 0 1-.53 1.28Z" clipRule="evenodd" />
+      <svg {...commonProps} viewBox="0 0 24 24" fill="currentColor">
+        <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
       </svg>
     )
   }
   if (name === 'appearance') {
     return (
-      <svg {...commonProps}>
-        <path fillRule="evenodd" d="M18 5.25a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5h-15a1.5 1.5 0 0 1-1.5-1.5v-9a1.5 1.5 0 0 1 1.5-1.5h15ZM12 10.5a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0ZM12 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm6-3a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" clipRule="evenodd" />
+      <svg {...commonProps} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.106a.75.75 0 010 1.06l-1.591 1.59a.75.75 0 11-1.06-1.06l1.59-1.59a.75.75 0 011.06 0zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.849 16.243a.75.75 0 011.06 0l1.59 1.591a.75.75 0 11-1.06 1.06l-1.59-1.59a.75.75 0 010-1.061zM12 18a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.757 17.849a.75.75 0 010-1.06l-1.59-1.591a.75.75 0 01-1.061 1.06l1.59 1.59a.75.75 0 011.06 0zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.106 7.151a.75.75 0 011.06 0l1.59 1.591a.75.75 0 11-1.06 1.06l-1.59-1.59a.75.75 0 010-1.06z" />
       </svg>
     )
   }
   if (name === 'resources') {
     return (
-      <svg {...commonProps}>
-        <path fillRule="evenodd" d="M8.25 3.75H19.5a.75.75 0 0 1 .75.75v11.25a.75.75 0 0 1-.75.75h-11.25A.75.75 0 0 1 7.5 15.75V3.75a.75.75 0 0 1 .75-.75ZM18 15V4.5H9v10.5h9ZM4.5 7.5a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-3 0V9A1.5 1.5 0 0 1 4.5 7.5ZM1.5 13.5a1.5 1.5 0 0 1 3 0v1.5a1.5 1.5 0 0 1-3 0v-1.5ZM9 13.5a1.5 1.5 0 0 1 1.5 1.5v1.5a1.5 1.5 0 0 1-3 0v-1.5A1.5 1.5 0 0 1 9 13.5ZM16.5 13.5a1.5 1.5 0 0 1 1.5 1.5v1.5a1.5 1.5 0 0 1-3 0v-1.5a1.5 1.5 0 0 1 1.5-1.5Z" clipRule="evenodd" />
+      <svg {...commonProps} viewBox="0 0 24 24" fill="currentColor">
+        <path fillRule="evenodd" d="M10.5 3.75a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.06l-4.72 4.72a.75.75 0 01-1.06 0l-1.5-1.5a.75.75 0 010-1.06l4.72-4.72h-1.69a.75.75 0 010-1.5h4.5zm4.72 4.72a.75.75 0 011.06 0l1.5 1.5a.75.75 0 010 1.06l-4.72 4.72v1.69a.75.75 0 01-1.5 0v-4.5a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-1.69l4.72-4.72a.75.75 0 010-1.06l-1.5-1.5a.75.75 0 01-1.06 0L15.22 8.47z" clipRule="evenodd" />
       </svg>
     )
   }
   if (name === 'java') {
     return (
-      <svg {...commonProps}>
-        <path d="M2.136 14.748a.75.75 0 0 1 1.018.854c-.17.832-.364 1.501-.55 1.978a.75.75 0 0 1-1.39-.587c.14-.338.28-.76.412-1.266l.008-.032c.02-.08.04-.168.063-.265a.75.75 0 0 1 .854-1.018ZM14.25 8.25a.75.75 0 0 0-1.5 0v.252a4.26 4.26 0 0 0-.175-.002 4.3 4.3 0 0 0-4.3 4.3c0 .31.037.61.105.9.002.01.003.02.005.03l.005.022c.02.08.04.168.063.265a.75.75 0 0 0 1.43.502c-.02-.076-.04-.148-.06-.215l-.007-.025c-.06-.22-.095-.45-.095-.68v-.252A2.25 2.25 0 0 1 12 10.5v-.252ZM7.5 7.5a.75.75 0 0 1 .75.75v.252c.31.037.61.037.9 0 .23-.018.45-.053.66-.115a.75.75 0 1 1 .47 1.42c-.3.09-.62.145-.96.145a2.25 2.25 0 0 1-2.25-2.25v-.252a.75.75 0 0 1 .75-.75Z" />
-        <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM16.5 9a4.5 4.5 0 0 1-9 0 4.5 4.5 0 0 1 9 0Z" clipRule="evenodd" />
+      <svg {...commonProps} viewBox="0 0 24 24" fill="currentColor">
+        <path fillRule="evenodd" d="M2.25 6a3 3 0 013-3h13.5a3 3 0 013 3v12a3 3 0 01-3 3H5.25a3 3 0 01-3-3V6zm3.97.97a.75.75 0 011.06 0l2.25 2.25a.75.75 0 010 1.06l-2.25 2.25a.75.75 0 01-1.06-1.06L7.69 11.5l-1.47-1.47a.75.75 0 010-1.06zm5.25 4.5a.75.75 0 010-1.06l2.25-2.25a.75.75 0 011.06 1.06L13.81 11.5l1.47 1.47a.75.75 0 01-1.06 1.06l-2.25-2.25z" clipRule="evenodd" />
       </svg>
     )
   }
   if (name === 'instances') {
     return (
-      <svg {...commonProps}>
-        <path fillRule="evenodd" d="M1.5 5.625c0-1.036.84-1.875 1.875-1.875h17.25c1.035 0 1.875.84 1.875 1.875v12.75c0 1.035-.84 1.875-1.875 1.875H3.375A1.875 1.875 0 0 1 1.5 18.375V5.625Zm1.875 0v12.75h17.25V5.625H3.375Zm15 2.25H12.75v3h5.625V7.875Zm-15 1.5h5.625v3H3.375v-3Zm6.75 0h5.625v3H10.125v-3Zm-6.75 4.5h5.625v3H3.375v-3Zm6.75 0h5.625v3H10.125v-3Zm6.75 0h3.375v3h-3.375v-3Zm-6.75 4.5h5.625v3H10.125v-3Zm6.75 0h3.375v3h-3.375v-3Zm-10.125 1.5h5.625v3H3.375v-3Zm6.75 0h5.625v3H10.125v-3Zm6.75 0h3.375v3h-3.375v-3Z" clipRule="evenodd" />
+      <svg {...commonProps} viewBox="0 0 24 24" fill="currentColor">
+        <path fillRule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 2.25a.75.75 0 01.75.75v1.5h.75a3 3 0 013 3v9a3 3 0 01-3 3h-9a3 3 0 01-3-3v-9a3 3 0 013-3h.75V3a.75.75 0 01.75-.75zm6 6a.75.75 0 00-1.5 0v3a.75.75 0 001.5 0v-3z" clipRule="evenodd" />
       </svg>
     )
   }
@@ -132,7 +140,15 @@ function Item({ path, current, onClick, icon, title }: { path: string; current: 
   )
 }
 
-export default function Sidebar({ currentPath, onNavigate }: Props) {
+export default function Sidebar({
+  currentPath,
+  onNavigate,
+  accounts,
+  currentUser,
+  onAddAccount,
+  onDeleteAccount,
+  onSelectAccount,
+}: Props) {
   return (
     <div className="w-16 bg-gray-900/90 backdrop-blur-sm border-r border-gray-800 p-2 flex flex-col items-center">
       <div className="w-8 h-8 rounded-lg bg-primary text-black flex items-center justify-center mb-3 text-xs font-bold">DRK</div>
@@ -147,6 +163,13 @@ export default function Sidebar({ currentPath, onNavigate }: Props) {
         <Item title="Crashes" path="/crash" current={currentPath === '/crash'} onClick={() => onNavigate('/crash')} icon="crash" />
         <Item title="Importar" path="/import" current={currentPath === '/import'} onClick={() => onNavigate('/import')} icon="import" />
         <Item title="Ajustes" path="/settings" current={currentPath === '/settings'} onClick={() => onNavigate('/settings')} icon="settings" />
+        <Profile
+          accounts={accounts}
+          currentUser={currentUser}
+          onAddAccount={onAddAccount}
+          onDeleteAccount={onDeleteAccount}
+          onSelectAccount={onSelectAccount}
+        />
       </div>
     </div>
   )

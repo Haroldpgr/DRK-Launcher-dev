@@ -52,9 +52,11 @@ type SettingsModalProps = {
   isOpen: boolean
   onClose: () => void
   onSettingsChanged?: (settings: any) => void
+  javaInstallations?: { version: string, path: string }[]
+  onJavaDetect: () => void
 }
 
-export default function SettingsModal({ isOpen, onClose, onSettingsChanged }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, onSettingsChanged, javaInstallations = [], onJavaDetect }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>('privacidad');
 
   // Settings state
@@ -98,6 +100,20 @@ export default function SettingsModal({ isOpen, onClose, onSettingsChanged }: Se
       });
     })
   }, [isOpen])
+
+  const handleThemeChange = (newTheme: 'dark' | 'light' | 'oled') => {
+    setTheme(newTheme);
+    if (onSettingsChanged) {
+      onSettingsChanged({ theme: newTheme });
+    }
+  };
+
+  const handleLanguageChange = (newLanguage: 'es' | 'en') => {
+    setLanguage(newLanguage);
+    if (onSettingsChanged) {
+      onSettingsChanged({ language: newLanguage });
+    }
+  };
 
   const handleSave = async () => {
     const settingsToSave = {
@@ -184,12 +200,12 @@ export default function SettingsModal({ isOpen, onClose, onSettingsChanged }: Se
                 <h3 className="text-lg font-semibold text-gray-200">Tema de Color</h3>
               </div>
               <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-                <SettingsSelect label="Tema" value={theme} onChange={e => setTheme(e.target.value as 'dark'|'light'|'oled')}>
+                <SettingsSelect label="Tema" value={theme} onChange={e => handleThemeChange(e.target.value as 'dark'|'light'|'oled')}>
                   <option value="dark">Oscuro</option>
                   <option value="light">Claro</option>
                   <option value="oled">OLED (Fondos negros)</option>
                 </SettingsSelect>
-                <SettingsSelect label="Idioma" value={language} onChange={e => setLanguage(e.target.value as 'es'|'en')}>
+                <SettingsSelect label="Idioma" value={language} onChange={e => handleLanguageChange(e.target.value as 'es'|'en')}>
                   <option value="es">Español</option>
                   <option value="en">English</option>
                 </SettingsSelect>
@@ -303,19 +319,15 @@ export default function SettingsModal({ isOpen, onClose, onSettingsChanged }: Se
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <SettingsSelect
                     label="Versión de Java recomendada"
-                    value={javaPath.includes('8') ? '8' : javaPath.includes('17') ? '17' : javaPath.includes('21') ? '21' : 'auto'}
-                    onChange={(e) => {
-                      // Actualizar javaPath según la selección del usuario
-                      // En una implementación real, esto buscaría o instalaría la versión seleccionada
-                      if (e.target.value !== 'auto') {
-                        alert(`Seleccionaste Java ${e.target.value}. Si no está instalado, puedes usar "Instalar recomendado" para descargarlo.`);
-                      }
-                    }}
+                    value={javaPath}
+                    onChange={(e) => setJavaPath(e.target.value)}
                   >
-                    <option value="auto">Detectar automáticamente</option>
-                    <option value="8">Java 8 (Minecraft 1.16.5 o anterior)</option>
-                    <option value="17">Java 17 (Minecraft 1.17-1.20.4)</option>
-                    <option value="21">Java 21 (Minecraft 1.20.5+)</option>
+                    <option value="">Detectar automáticamente</option>
+                    {javaInstallations.map(inst => (
+                      <option key={inst.path} value={inst.path}>
+                        Java {inst.version} ({inst.path})
+                      </option>
+                    ))}
                   </SettingsSelect>
                   <SettingsInput label="Ruta al ejecutable de Java" value={javaPath} onChange={e => setJavaPath(e.target.value)} placeholder="Autodetectar" />
                 </div>
@@ -323,39 +335,7 @@ export default function SettingsModal({ isOpen, onClose, onSettingsChanged }: Se
                 <div className="flex gap-2 pt-1 flex-wrap">
                   <Button
                     variant="secondary"
-                    onClick={async () => {
-                      try {
-                        // Verificar si la API de Java está disponible
-                        if (!(window as any).api || !(window as any).api.java) {
-                          alert('La API de Java no está disponible. Por favor reinicie la aplicación.');
-                          console.error('API de Java no disponible');
-                          return;
-                        }
-
-                        if (typeof (window as any).api.java.detect !== 'function') {
-                          alert('La función de detección de Java no está disponible.');
-                          console.error('Función detect no disponible');
-                          return;
-                        }
-
-                        const installations = await (window as any).api.java.detect();
-                        if (installations && installations.length > 0) {
-                          // Mostrar instalaciones encontradas en un menú desplegable o selector
-                          const foundPaths = installations.map(inst => `${inst.version}: ${inst.path}`).join('\n');
-                          alert(`Instalaciones encontradas:\n${foundPaths}`);
-
-                          // Opcionalmente, podríamos actualizar javaPath si encontramos una instalación adecuada
-                          if (installations[0]) {
-                            setJavaPath(installations[0].path);
-                          }
-                        } else {
-                          alert('No se encontraron instalaciones de Java en tu sistema');
-                        }
-                      } catch (error) {
-                        console.error('Error detectando Java:', error);
-                        alert('Error detectando instalaciones de Java');
-                      }
-                    }}
+                    onClick={onJavaDetect}
                   >
                     Detectar Java
                   </Button>

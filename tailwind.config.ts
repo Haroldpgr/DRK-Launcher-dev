@@ -8,9 +8,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: '#00b06f',
-        dark: '#0f0f10',
-        graysoft: '#1c1d1f'
+        primary: '#007bff',
+        dark: '#000000',
+        graysoft: '#111113'
       },
       borderRadius: {
         xl: '14px'
@@ -22,4 +22,3 @@ export default {
   },
   plugins: []
 } satisfies Config
-
