@@ -1,6 +1,22 @@
-import React from 'react'
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Profile } from '../services/profileService';
+import AddProfileModal from './AddProfileModal';
+// import MicrosoftLoginModal from './MicrosoftLoginModal'; // Not directly used in Sidebar, but can be managed by AddProfileModal
+// import PremiumLoginModal from './PremiumLoginModal'; // Not directly used in Sidebar, but can be managed by AddProfileModal
+import ProfileComponent from './Profile'; // Renamed to avoid conflict with Profile type
+import ProfileViewModal from './ProfileViewModal';
+import DropdownMenu from './DropdownMenu'; // Assuming DropdownMenu is now a dedicated component
 
-type Props = { currentPath: string; onNavigate: (p: string) => void }
+type Props = {
+  currentPath: string;
+  onNavigate: (path: string) => void;
+  accounts: Profile[];
+  currentUser: string | null;
+  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium') => void;
+  onDeleteAccount: (username: string) => void;
+  onSelectAccount: (username: string) => void;
+};
 
 export function Icon({ name }: { name: 'home' | 'instances' | 'create' | 'servers' | 'crash' | 'import' | 'settings' | 'contenido' | 'skins' | 'privacy' | 'appearance' | 'resources' | 'java' }) {
   const isSolid = ['privacy', 'appearance', 'resources', 'java', 'instances'].includes(name);

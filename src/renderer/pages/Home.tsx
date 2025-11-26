@@ -2,11 +2,22 @@ import React, { useEffect, useMemo, useState } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
+import ProfileDropdown from '../components/ProfileDropdown'
+import { Profile } from '../services/profileService';
 
 type NewsItem = { id: string; title: string; body: string }
 type Instance = { id: string; name: string; version: string; loader?: string }
 
-export default function Home() {
+type HomeProps = {
+  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium') => void;
+  onDeleteAccount: (username: string) => void;
+  onSelectAccount: (username: string) => void;
+  onLoginClick: () => void;
+  currentUser: string | null;
+  accounts: Profile[];
+}
+
+export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, onLoginClick, currentUser, accounts }: HomeProps) {
   const [feed, setFeed] = useState<NewsItem[]>([])
   const [instances, setInstances] = useState<Instance[]>([])
   const [username, setUsername] = useState('Usuario'); // Nuevo estado para el nombre de usuario
@@ -106,7 +117,14 @@ export default function Home() {
         </Card>
         <Card>
           <div className="text-xl font-semibold mb-2 text-gray-200">Perfil</div>
-          <div className="text-sm text-gray-400">No conectado</div>
+          <ProfileDropdown
+            currentUser={currentUser}
+            profiles={accounts}
+            onSelectAccount={onSelectAccount}
+            onAddAccount={onAddAccount}
+            onDeleteAccount={onDeleteAccount}
+            onLoginClick={onLoginClick}
+          />
         </Card>
       </div>
     </div>

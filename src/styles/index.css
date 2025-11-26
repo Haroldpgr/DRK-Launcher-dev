@@ -5,7 +5,7 @@
 :root {
   --bg: #0f0f10;
   --panel: #1c1d1f;
-  --accent: #00b06f;
+  --accent: #123983;
   --text-primary: #e5e7eb;
   --text-secondary: #9ca3af;
   --border: #374151;
@@ -14,7 +14,7 @@
 html.dark {
   --bg: #0a0a0b;
   --panel: #111113;
-  --accent: #00b06f;
+  --accent: #123983;
   --text-primary: #f9fafb;
   --text-secondary: #d1d5db;
   --border: #374151;
@@ -23,7 +23,7 @@ html.dark {
 html .oled {
   --bg: #000000;
   --panel: #000000;
-  --accent: #00b06f;
+  --accent: #123983;
   --text-primary: #f9fafb;
   --text-secondary: #d1d5db;
   --border: #1f2937;

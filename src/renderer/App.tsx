@@ -8,19 +8,41 @@ import Servers from './pages/Servers'
 import CrashAnalyzer from './pages/CrashAnalyzer'
 import ModpackImporter from './pages/ModpackImporter'
 import SettingsModal from './components/SettingsModal' // Import the modal
+import LoginModal from './components/LoginModal' // Import the new LoginModal
+import { profileService, type Profile } from './services/profileService' // Import the actual profile service
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'oled'>('dark')
   const [isSettingsOpen, setSettingsOpen] = useState(false) // State for the modal
+  const [isLoginModalOpen, setLoginModalOpen] = useState(false); // State for LoginModal
+  const [javaInstallations, setJavaInstallations] = useState([]) // State for Java installations
+  const [accounts, setAccounts] = useState<Profile[]>([]);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
   const nav = useNavigate()
   const loc = useLocation()
 
   useEffect(() => {
+    // Load profiles and current user from service
+    const initialProfiles = profileService.getAllProfiles();
+    setAccounts(initialProfiles);
+
+    const initialCurrentUser = profileService.getCurrentProfile();
+    setCurrentUser(initialCurrentUser);
+
     const a: any = (window as any).api;
-    if (a && a.settings) {
-      a.settings.get().then((s: any) => {
-        setTheme(s.theme || 'dark')
-      })
+    if (a) {
+      if (a.settings) {
+        a.settings.get().then((s: any) => {
+          setTheme(s.theme || 'dark')
+        })
+      }
+      if (a.java && typeof a.java.detect === 'function') {
+        a.java.detect().then((installations: any) => {
+          setJavaInstallations(installations);
+        }).catch((err: any) => {
+          console.error("Error detecting Java:", err);
+        });
+      }
     }
   }, [])
 
@@ -54,14 +76,89 @@ export default function App() {
     if (settings.theme) {
       setTheme(settings.theme);
     }
+    // Re-detect Java installations if settings changed (e.g., javaPath might have been set manually)
+    if (settings.javaPath) {
+      const a: any = (window as any).api;
+      if (a.java && typeof a.java.detect === 'function') {
+        a.java.detect().then((installations: any) => {
+          setJavaInstallations(installations);
+        }).catch((err: any) => {
+          console.error("Error detecting Java:", err);
+        });
+      }
+    }
+  };
+
+  const handleJavaDetect = () => {
+    const a: any = (window as any).api;
+    if (a.java && typeof a.java.detect === 'function') {
+      a.java.detect().then((installations: any) => {
+        setJavaInstallations(installations);
+      }).catch((err: any) => {
+        console.error("Error detecting Java:", err);
+      });
+    }
+  };
+
+  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' = 'non-premium') => {
+    const newProfile = profileService.addProfile(username, type);
+    setAccounts([...accounts, newProfile]);
+    setCurrentUser(username);
+  };
+
+  const handleDeleteAccount = (username: string) => {
+    const success = profileService.deleteProfile(username);
+    if (success) {
+      const updatedProfiles = profileService.getAllProfiles();
+      setAccounts(updatedProfiles);
+      setCurrentUser(profileService.getCurrentProfile());
+    }
+  };
+
+  const handleSelectAccount = (username: string) => {
+    const success = profileService.setCurrentProfile(username);
+    if (success) {
+      setCurrentUser(username);
+      // Update accounts to reflect last used time
+      setAccounts(profileService.getAllProfiles());
+    }
+  };
+
+  const handleLoginClick = () => {
+    setLoginModalOpen(true);
+  };
+
+  const handleCloseLoginModal = () => {
+    setLoginModalOpen(false);
+  };
+
+  const handleMicrosoftLogin = () => {
+    console.log("Microsoft Login attempt - currently under maintenance.");
+    // No additional logic here, modal component will show maintenance message
+  };
+
+  const handleNonPremiumLogin = (username: string) => {
+    const newProfile = profileService.addProfile(username, 'non-premium');
+    setAccounts([...accounts, newProfile]);
+    setCurrentUser(username);
+    profileService.setCurrentProfile(username); // Ensure the newly added profile is set as current
+    handleCloseLoginModal();
   };
 
   return (
     <div className="h-full flex">
-      <Sidebar currentPath={loc.pathname} onNavigate={handleNavigation} />
-      <main className={`flex-1 p-6 bg-gray-900/30 dark:bg-gray-900/50 transition-all duration-300 ${isSettingsOpen ? 'filter blur-sm' : ''}`}>
+      <Sidebar
+        currentPath={loc.pathname}
+        onNavigate={handleNavigation}
+        accounts={accounts}
+        currentUser={currentUser}
+        onAddAccount={handleAddAccount}
+        onDeleteAccount={handleDeleteAccount}
+        onSelectAccount={handleSelectAccount}
+      />
+      <main className={`flex-1 p-6 bg-gray-900/30 dark:bg-gray-900/50 transition-all duration-300 ${isSettingsOpen || isLoginModalOpen ? 'filter blur-sm' : ''} overflow-y-auto`}>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} currentUser={currentUser} accounts={accounts} />} />
           <Route path="/instances" element={<Instances />} />
           <Route path="/create" element={<CreateInstance />} />
           {/* <Route path="/settings" element={<Settings />} /> */} {/* The route is no longer needed */}
@@ -74,6 +171,14 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSettingsChanged={handleSettingsChanged}
+        javaInstallations={javaInstallations}
+        onJavaDetect={handleJavaDetect}
+      />
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={handleCloseLoginModal}
+        onMicrosoftLogin={handleMicrosoftLogin}
+        onNonPremiumLogin={handleNonPremiumLogin}
       />
     </div>
   )

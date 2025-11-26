@@ -8,8 +8,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: '#00b06f',
-        dark: '#0f0f10',
+        primary: '#1a73e8', // Un azul oscuro
+        dark: '#050505',    // Un negro más intenso
         graysoft: '#1c1d1f'
       },
       borderRadius: {
