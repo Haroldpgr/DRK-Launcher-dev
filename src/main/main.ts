@@ -42,6 +42,8 @@ async function createWindow() {
     height: 800,
     title: 'DRK Launcher',
     backgroundColor: '#0f0f10',
+    autoHideMenuBar: true, // Ocultar automáticamente la barra de menú
+    frame: true, // Mantener el marco para mantener la funcionalidad de ventana
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
