@@ -164,6 +164,23 @@ export default function Sidebar({ currentPath, onNavigate }: Props) {
         <Item title="Importar" path="/import" current={currentPath === '/import'} onClick={() => onNavigate('/import')} icon="import" />
         <Item title="Ajustes" path="/settings" current={currentPath === '/settings'} onClick={() => onNavigate('/settings')} icon="settings" />
       </div>
+      <div className="mt-4 w-full flex justify-center">
+        <button
+          title="Descargas"
+          aria-label="Descargas"
+          onClick={() => onNavigate('/downloads')}
+          className={`w-9 h-9 flex items-center justify-center rounded-lg shadow transition-all duration-300 ease-out ${
+            currentPath === '/downloads' ? 'bg-primary text-black scale-105' : 'bg-gray-800 text-primary'
+          } hover:scale-105 hover:bg-gradient-to-br hover:from-blue-500 hover:to-primary`}
+          style={{ fontFamily: 'Inter, sans-serif' }}
+        >
+          <div className="flex items-center justify-center w-full h-full">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+          </div>
+        </button>
+      </div>
     </div>
   )
 }

@@ -5,6 +5,8 @@ import os from 'node:os'
 import { initDB, hasDB, sqlite } from '../services/db'
 import { queryStatus } from '../services/serverService'
 import { launchJava } from '../services/gameService'
+// Import our Java service
+import javaService from './javaService'
 
 let win: BrowserWindow | null = null
 
@@ -370,7 +372,12 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string }) => {
 })
 
 ipcMain.handle('java:detect', async () => {
-  return await findJavaInstallations();
+  try {
+    return javaService.detectGlobalJava();
+  } catch (error) {
+    console.error('Error detecting Java:', error);
+    return [];
+  }
 })
 
 ipcMain.handle('java:explore', async () => {
@@ -378,7 +385,7 @@ ipcMain.handle('java:explore', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [
-      { name: 'Java Executable', extensions: ['exe'] },
+      { name: 'Java Executable', extensions: [process.platform === 'win32' ? 'exe' : ''] },
       { name: 'All Files', extensions: ['*'] }
     ],
     title: 'Seleccionar archivo ejecutable de Java'
@@ -390,28 +397,32 @@ ipcMain.handle('java:explore', async () => {
   return null;
 })
 
-async function installJava(version: string) {
-  // Simular instalación de Java - en una implementación real, esto descargaría e instalaría Java
-  console.log(`Instalando Java ${version}...`);
-
-  // En una implementación real, aquí se haría:
-  // 1. Descargar el instalador de Java
-  // 2. Ejecutar el instalador
-  // 3. Devolver la ruta de instalación
-
-  // Por ahora, devolveremos un mensaje de simulación
-  return {
-    success: true,
-    message: `Java ${version} instalado exitosamente`,
-    path: `C:/Program Files/Java/jdk-${version}/bin/java.exe` // Ruta simulada
-  };
-}
+ipcMain.handle('java:test', async (_event, javaPath: string) => {
+  try {
+    const result = javaService.testJavaBinary(javaPath);
+    return result;
+  } catch (error) {
+    console.error('Error testing Java:', error);
+    return {
+      isWorking: false,
+      error: error.message
+    };
+  }
+})
 
 ipcMain.handle('java:install', async (_event, version: string) => {
   try {
-    return await installJava(version);
+    // Implementar la lógica de instalación de Java
+    const javaInfo = await javaService.installRecommendedJava(version, (progress) => {
+      // Aquí podríamos emitir eventos de progreso si es necesario
+      console.log('Progreso de descarga:', progress);
+    });
+    return {
+      success: true,
+      javaInfo
+    };
   } catch (error) {
-    console.error('Error instalando Java:', error);
+    console.error('Error installing Java:', error);
     return {
       success: false,
       message: `Error instalando Java ${version}: ${error.message || 'Error desconocido'}`
@@ -419,52 +430,53 @@ ipcMain.handle('java:install', async (_event, version: string) => {
   }
 })
 
-ipcMain.handle('java:test', async (_event, path: string) => {
+ipcMain.handle('java:get-all', async () => {
   try {
-    // Verificar si el archivo existe
-    const fs = require('fs');
-    if (!fs.existsSync(path)) {
-      return { success: false, message: 'La ruta especificada no existe' };
-    }
-
-    // Intentar ejecutar java -version para verificar que sea un ejecutable válido
-    const { spawn } = require('child_process');
-    return new Promise((resolve) => {
-      const child = spawn(path, ['-version']);
-      let output = '';
-      let errorOutput = '';
-
-      child.stdout.on('data', (data: Buffer) => {
-        output += data.toString();
-      });
-
-      child.stderr.on('data', (data: Buffer) => {
-        errorOutput += data.toString();
-      });
-
-      child.on('close', (code) => {
-        if (code === 0 || (errorOutput.includes('version') && errorOutput.includes('"'))) {
-          // Si la ejecución fue exitosa o el error contiene información de versión
-          const versionMatch = errorOutput.match(/version "([^"]+)"/);
-          if (versionMatch && versionMatch[1]) {
-            resolve({ success: true, message: `Java encontrado exitosamente. Versión: ${versionMatch[1]}` });
-          } else {
-            resolve({ success: true, message: 'Java encontrado y parece válido' });
-          }
-        } else {
-          resolve({ success: false, message: `Java no se pudo ejecutar correctamente: ${errorOutput}` });
-        }
-      });
-
-      child.on('error', (error) => {
-        resolve({ success: false, message: `Error ejecutando Java: ${error.message}` });
-      });
-    });
+    return javaService.getAllJavas();
   } catch (error) {
-    console.error('Error probando Java:', error);
-    return { success: false, message: `Error probando Java: ${error.message || 'Error desconocido'}` };
+    console.error('Error getting all Java installations:', error);
+    return [];
   }
 })
+
+ipcMain.handle('java:get-default', async () => {
+  try {
+    return javaService.getDefaultJava();
+  } catch (error) {
+    console.error('Error getting default Java:', error);
+    return null;
+  }
+})
+
+ipcMain.handle('java:set-default', async (_event, javaId: string) => {
+  try {
+    const result = javaService.setDefaultJava(javaId);
+    return result;
+  } catch (error) {
+    console.error('Error setting default Java:', error);
+    return false;
+  }
+})
+
+ipcMain.handle('java:remove', async (_event, javaId: string) => {
+  try {
+    const result = javaService.removeInstalledJava(javaId);
+    return result;
+  } catch (error) {
+    console.error('Error removing Java:', error);
+    return false;
+  }
+})
+
+ipcMain.handle('java:get-compatibility', async (_event, minecraftVersion: string) => {
+  try {
+    return javaService.getMinecraftJavaCompatibility(minecraftVersion);
+  } catch (error) {
+    console.error('Error getting Java compatibility:', error);
+    return null;
+  }
+})
+
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

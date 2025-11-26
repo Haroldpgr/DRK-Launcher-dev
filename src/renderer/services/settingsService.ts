@@ -2,7 +2,14 @@
 export interface Settings {
   appearance: {
     theme: 'dark' | 'light' | 'oled' | 'system';
+    accentColor: string;
     advancedRendering: boolean;
+    globalFontSize: number;
+    enableTransitions: boolean;
+    customBackgroundPath?: string;
+    backgroundOpacity: number;
+    borderRadius: number;
+    colorFilter: 'none' | 'sepia' | 'contrast' | 'saturate';
     windowTransparency?: number;
   };
   behavior: {
@@ -10,11 +17,19 @@ export interface Settings {
     hideNametag: boolean;
     defaultLandingPage: string;
     jumpBackWorlds: JumpBackWorld[];
+    nativeDecorations: boolean;
+    showRecentWorlds: boolean;
+    closeAfterPlay: boolean;
+    systemNotifications: boolean;
+    backgroundFPSLimit: number;
   };
   privacy: {
     telemetryEnabled: boolean;
     discordRPC: boolean;
     personalizedAds: boolean;
+    logLevel: 'Debug' | 'Info' | 'Error';
+    forcedOfflineMode: boolean;
+    privacyPolicyUrl: string;
   };
   java: {
     java8Path?: string;
@@ -37,18 +52,32 @@ const SETTINGS_KEY = 'launcher_settings';
 const DEFAULT_SETTINGS: Settings = {
   appearance: {
     theme: 'dark',
-    advancedRendering: false
+    accentColor: '#3B82F6', // Azul por defecto
+    advancedRendering: false,
+    globalFontSize: 1.0, // 100% - tamaño base
+    enableTransitions: true,
+    backgroundOpacity: 0.3,
+    borderRadius: 8,
+    colorFilter: 'none'
   },
   behavior: {
     minimizeOnLaunch: true,
     hideNametag: false,
     defaultLandingPage: 'home',
-    jumpBackWorlds: []
+    jumpBackWorlds: [],
+    nativeDecorations: false,
+    showRecentWorlds: true,
+    closeAfterPlay: false,
+    systemNotifications: true,
+    backgroundFPSLimit: 30
   },
   privacy: {
     telemetryEnabled: true,
     discordRPC: true,
-    personalizedAds: false
+    personalizedAds: false,
+    logLevel: 'Info',
+    forcedOfflineMode: false,
+    privacyPolicyUrl: 'https://example.com/privacy'
   },
   java: {
     defaultVersion: '17'
@@ -124,6 +153,19 @@ export const settingsService = {
     };
     saveSettings(newSettings);
     return newSettings.java;
+  },
+
+  updatePrivacy(updates: Partial<Settings['privacy']>): Settings['privacy'] {
+    const currentSettings = getStoredSettings();
+    const newSettings = {
+      ...currentSettings,
+      privacy: {
+        ...currentSettings.privacy,
+        ...updates
+      }
+    };
+    saveSettings(newSettings);
+    return newSettings.privacy;
   },
 
   addJumpBackWorld(world: JumpBackWorld): JumpBackWorld[] {

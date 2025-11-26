@@ -7,9 +7,12 @@ import CreateInstance from './pages/CreateInstance'
 import Servers from './pages/Servers'
 import CrashAnalyzer from './pages/CrashAnalyzer'
 import ModpackImporter from './pages/ModpackImporter'
+import DownloadsView from './components/DownloadsView'
 import SettingsModal from './components/SettingsModal' // Import the modal
 import LoginModal from './components/LoginModal' // Import the new LoginModal
 import { profileService, type Profile } from './services/profileService' // Import the actual profile service
+import { themeService } from './services/themeService';
+import { processMonitorService } from './services/processMonitorService';
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'oled'>('dark')
@@ -29,11 +32,22 @@ export default function App() {
     const initialCurrentUser = profileService.getCurrentProfile();
     setCurrentUser(initialCurrentUser);
 
+    // Load settings and initialize theme
     const a: any = (window as any).api;
     if (a) {
       if (a.settings) {
         a.settings.get().then((s: any) => {
-          setTheme(s.theme || 'dark')
+          // Initialize theme service with appearance settings
+          themeService.initializeTheme(s.appearance || {
+            theme: 'dark',
+            accentColor: '#3B82F6',
+            advancedRendering: false,
+            globalFontSize: 1.0,
+            enableTransitions: true,
+            backgroundOpacity: 0.3,
+            borderRadius: 8,
+            colorFilter: 'none'
+          });
         })
       }
       if (a.java && typeof a.java.detect === 'function') {
@@ -73,8 +87,9 @@ export default function App() {
   }
 
   const handleSettingsChanged = (settings: any) => {
-    if (settings.theme) {
-      setTheme(settings.theme);
+    // Handle appearance settings changes
+    if (settings.appearance) {
+      themeService.initializeTheme(settings.appearance);
     }
     // Re-detect Java installations if settings changed (e.g., javaPath might have been set manually)
     if (settings.javaPath) {
@@ -145,6 +160,24 @@ export default function App() {
     handleCloseLoginModal();
   };
 
+  const handlePlay = async (instanceId: string) => {
+    try {
+      // In a real implementation, we would get the game launch command from the instance
+      // and handle the process monitoring
+      const launchResult = await processMonitorService.launchGameAndMonitor(
+        instanceId,
+        ['java', '-jar', 'minecraft.jar'] // This would be replaced with actual instance command
+      );
+
+      if (!launchResult.success) {
+        console.error('Error launching game:', launchResult.error);
+        // Handle error appropriately
+      }
+    } catch (error) {
+      console.error('Error in handlePlay:', error);
+    }
+  };
+
   return (
     <div className="h-full flex">
       <Sidebar
@@ -158,13 +191,14 @@ export default function App() {
       />
       <main className={`flex-1 p-6 bg-gray-900/30 dark:bg-gray-900/50 transition-all duration-300 ${isSettingsOpen || isLoginModalOpen ? 'filter blur-sm' : ''} overflow-y-auto`}>
         <Routes>
-          <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} currentUser={currentUser} accounts={accounts} />} />
+          <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} onPlay={handlePlay} currentUser={currentUser} accounts={accounts} />} />
           <Route path="/instances" element={<Instances />} />
           <Route path="/create" element={<CreateInstance />} />
           {/* <Route path="/settings" element={<Settings />} /> */} {/* The route is no longer needed */}
           <Route path="/servers" element={<Servers />} />
           <Route path="/crash" element={<CrashAnalyzer />} />
           <Route path="/import" element={<ModpackImporter />} />
+          <Route path="/downloads" element={<DownloadsView />} />
         </Routes>
       </main>
       <SettingsModal

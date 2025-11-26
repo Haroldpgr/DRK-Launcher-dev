@@ -13,6 +13,7 @@ type HomeProps = {
   onDeleteAccount: (username: string) => void;
   onSelectAccount: (username: string) => void;
   onLoginClick: () => void;
+  onPlay: (instanceId: string) => void;
   currentUser: string | null;
   accounts: Profile[];
 }
@@ -43,7 +44,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
     }
   }, [])
 
-  const play = async () => { if (!last) return; await window.api.game.launch({ instanceId: last.id }) }
+  const play = async () => { if (!last) return; onPlay(last.id); }
 
   const mods = [
     { id: 'opt', name: 'Optimizado', description: 'Paquete de rendimiento y gráficos suaves', tags: ['Optimización'], img: 'https://picsum.photos/seed/opt/600/300' },
