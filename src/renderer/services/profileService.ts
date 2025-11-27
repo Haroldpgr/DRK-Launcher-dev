@@ -6,6 +6,12 @@ export interface Profile {
   username: string;
   type: 'microsoft' | 'non-premium';
   lastUsed: number;
+  gameTime?: number; // Tiempo total de juego en milisegundos
+  instances?: Array<{
+    id: string;
+    name: string;
+    lastPlayed: string;
+  }>;
   skinUrl?: string; // URL de la skin personalizada
 }
 
