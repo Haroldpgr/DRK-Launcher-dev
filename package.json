@@ -17,7 +17,10 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.3",
+    "react-skinview3d": "^7.0.0",
+    "skinview3d": "^3.4.1",
     "tar": "^6.2.1",
+    "three": "^0.181.2",
     "tree-kill": "^1.2.2",
     "unzip-stream": "^0.3.4"
   },

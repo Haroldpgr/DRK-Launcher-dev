@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Profile } from '../services/profileService';
+import { Profile, profileService } from '../services/profileService';
 
 interface ProfileDropdownProps {
   currentUser: string | null;
@@ -48,8 +48,26 @@ export default function ProfileDropdown({
       >
         {currentUser ? (
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold">
-              {currentUser.charAt(0).toUpperCase()}
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold overflow-hidden">
+              <img 
+                src={profileService.getSkinForProfile(currentUser) || `https://minotar.net/avatar/${currentUser}/40`} 
+                alt={currentUser}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  // If the skin URL fails, try the default avatar
+                  if (target.src !== `https://minotar.net/avatar/${currentUser}/40`) {
+                    target.src = `https://minotar.net/avatar/${currentUser}/40`;
+                    return;
+                  }
+                  // If default avatar also fails, show initial
+                  target.onerror = null;
+                  target.src = '';
+                  target.className = 'w-6 h-6';
+                  target.parentElement!.classList.add('flex', 'items-center', 'justify-center');
+                  target.parentElement!.innerHTML = currentUser.charAt(0).toUpperCase();
+                }}
+              />
             </div>
             <div className="text-left">
               <div className="font-semibold text-white">{currentUser}</div>
@@ -99,8 +117,26 @@ export default function ProfileDropdown({
                     setIsOpen(false);
                   }}
                 >
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold">
-                    {profile.username.charAt(0).toUpperCase()}
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-medium overflow-hidden">
+                    <img 
+                      src={profileService.getSkinForProfile(profile.username) || `https://minotar.net/avatar/${profile.username}/32`}
+                      alt={profile.username}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        // If the skin URL fails, try the default avatar
+                        if (target.src !== `https://minotar.net/avatar/${profile.username}/32`) {
+                          target.src = `https://minotar.net/avatar/${profile.username}/32`;
+                          return;
+                        }
+                        // If default avatar also fails, show initial
+                        target.onerror = null;
+                        target.src = '';
+                        target.className = 'w-5 h-5';
+                        target.parentElement!.classList.add('flex', 'items-center', 'justify-center');
+                        target.parentElement!.innerHTML = profile.username.charAt(0).toUpperCase();
+                      }}
+                    />
                   </div>
                   <div>
                     <div className="text-white text-sm font-medium">{profile.username}</div>

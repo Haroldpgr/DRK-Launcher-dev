@@ -2,9 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import { profileService } from '../services/profileService';
+import { ReactSkinview3d } from 'react-skinview3d';
+import { modernSkins } from "../data/skins";
+import { WalkingAnimation, RunningAnimation, IdleAnimation } from 'skinview3d';
+import * as THREE from 'three';
 
-// Añadir estilos CSS para los scrolls personalizados
-const customScrollStyles = `
+// Añadir estilos CSS para los scrolls personalizados y renderizado pixelado
+const customStyles = `
   .custom-scrollbar::-webkit-scrollbar {
     width: 8px;
   }
@@ -24,34 +28,20 @@ const customScrollStyles = `
     background: linear-gradient(to bottom, #6366f1, #8b5cf6);
   }
 
-  /* Estilos para todos los scrolls en la página */
-  .skin-page-container::-webkit-scrollbar {
-    width: 10px;
-  }
-
-  .skin-page-container::-webkit-scrollbar-track {
-    background: rgba(17, 24, 39, 0.3);
-    border-radius: 6px;
-  }
-
-  .skin-page-container::-webkit-scrollbar-thumb {
-    background: linear-gradient(to bottom, #4f46e5, #7c3aed);
-    border-radius: 6px;
-    border: 2px solid rgba(17, 24, 39, 0.3);
-  }
-
-  .skin-page-container::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(to bottom, #6366f1, #8b5cf6);
+  .pixelated {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
   }
 `;
 
 // Añadir los estilos al documento cuando el componente se monta
 if (typeof document !== 'undefined') {
-  let styleElement = document.getElementById('custom-scroll-skin-styles');
+  let styleElement = document.getElementById('custom-skin-styles');
   if (!styleElement) {
     styleElement = document.createElement('style');
-    styleElement.id = 'custom-scroll-skin-styles';
-    styleElement.textContent = customScrollStyles;
+    styleElement.id = 'custom-skin-styles';
+    styleElement.textContent = customStyles;
     document.head.appendChild(styleElement);
   }
 }
@@ -67,466 +57,333 @@ interface Skin {
 const SkinsPage: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedSkinUrl, setSelectedSkinUrl] = useState<string>('');
-  const [skinPreview, setSkinPreview] = useState<string | null>(null);
+  // Default to Steve if no skin is selected
+  const [skinPreview, setSkinPreview] = useState<string>('https://minotar.net/skin/MHF_Steve');
   const [selectedPublicSkin, setSelectedPublicSkin] = useState<Skin | null>(null);
   const [skinCategory, setSkinCategory] = useState<'basic' | 'modern'>('basic');
   const [currentSkin, setCurrentSkin] = useState<string | null>(null);
-  
+  const [animationState, setAnimationState] = useState<'idle' | 'walk' | 'run'>('idle');
+  const [autoRotate, setAutoRotate] = useState<boolean>(true);
+  const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const skinViewerRef = useRef<any>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const updateSize = () => {
+      if (containerRef.current) {
+        setViewerSize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight
+        });
+      }
+    };
+
+    // Initial size
+    updateSize();
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(containerRef.current);
+
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const currentUser = profileService.getCurrentProfile();
     if (currentUser) {
       const userSkin = profileService.getSkinForProfile(currentUser);
-      setCurrentSkin(userSkin || 'https://mc-heads.net/body/steve.png');
+      // Validate that the skin is not a rendered body image (which causes 180x432 error)
+      if (userSkin && !userSkin.includes('mc-heads.net/body')) {
+        setCurrentSkin(userSkin);
+        setSkinPreview(userSkin);
+      }
     }
   }, []);
 
+  // Effect to update animation without remounting
+  useEffect(() => {
+    if (skinViewerRef.current) {
+      const viewer = skinViewerRef.current;
+      viewer.animation = animationState === 'idle' ? new IdleAnimation() :
+        animationState === 'walk' ? new WalkingAnimation() :
+          new RunningAnimation();
+    }
+  }, [animationState]);
+
+  // Effect to update autoRotate without remounting
+  useEffect(() => {
+    if (skinViewerRef.current) {
+      skinViewerRef.current.autoRotate = autoRotate;
+    }
+  }, [autoRotate]);
+
+  // Lista de skins básicas (5 skins)
   const basicSkins: Skin[] = [
     {
       id: '1',
       name: 'Classic Steve',
-      url: 'https://textures.minecraft.net/texture/1a4af718c7304bd2b886fcf43f887c4d0f6faceac8b4b3c3a0912b643a10235b',
-      previewUrl: 'https://mc-heads.net/body/steve.png',
+      url: 'https://minotar.net/skin/MHF_Steve',
+      previewUrl: 'https://minotar.net/body/MHF_Steve',
       isPublic: true
     },
     {
       id: '2',
       name: 'Classic Alex',
-      url: 'https://textures.minecraft.net/texture/3f4f482e4a7a4c759d9c4a7a4c759d9c4a7a4c759d9c4a7a4c759d9c4a7a4c7',
-      previewUrl: 'https://mc-heads.net/body/alex.png',
+      url: 'https://minotar.net/skin/MHF_Alex',
+      previewUrl: 'https://minotar.net/body/MHF_Alex',
       isPublic: true
     },
     {
       id: '3',
-      name: 'Simple Default',
-      url: 'https://textures.minecraft.net/texture/8d4234a2c86e2329159cf1b5a79b4a7a4c759d9c4a7a4c759d9c4a7a4c759d9c',
-      previewUrl: 'https://mc-heads.net/body/steve.png',
+      name: 'Technoblade',
+      url: 'https://minotar.net/skin/Technoblade',
+      previewUrl: 'https://minotar.net/body/Technoblade',
       isPublic: true
-    }
-  ];
-  
-  const modernSkins: Skin[] = [
+    },
     {
       id: '4',
-      name: 'Desert Nomad',
-      url: 'https://textures.minecraft.net/texture/71b6a1e6281f4c0d9a2a1a3e9d1f2c3b4a5e6f7d8e9f0a1b2c3d4e5f6a7b8c9',
-      previewUrl: 'https://mc-heads.net/body/steve.png',
+      name: 'Dream',
+      url: 'https://minotar.net/skin/Dream',
+      previewUrl: 'https://minotar.net/body/Dream',
       isPublic: true
     },
     {
       id: '5',
-      name: 'Forest Ranger',
-      url: 'https://textures.minecraft.net/texture/8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7',
-      previewUrl: 'https://mc-heads.net/body/alex.png',
-      isPublic: true
-    },
-    {
-      id: '6',
-      name: 'Ocean Explorer',
-      url: 'https://textures.minecraft.net/texture/9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8',
-      previewUrl: 'https://mc-heads.net/body/steve.png',
-      isPublic: true
-    },
-    {
-      id: '7',
-      name: 'Nether Knight',
-      url: 'https://textures.minecraft.net/texture/7e6f5d4c3b2a1f9e8d7c6b5a4f3e2d1c9b8a7f6e5d4c3b2a1f9e8d7c6b5a4f3',
-      previewUrl: 'https://mc-heads.net/body/steve.png',
-      isPublic: true
-    },
-    {
-      id: '8',
-      name: 'Ender Mage',
-      url: 'https://textures.minecraft.net/texture/6f5e4d3c2b1a9f8e7d6c5b4a3f2e1d9c8b7a6f5e4d3c2b1a9f8e7d6c5b4a3f2',
-      previewUrl: 'https://mc-heads.net/body/alex.png',
-      isPublic: true
-    },
-    {
-      id: '9',
-      name: 'Diamond Miner',
-      url: 'https://textures.minecraft.net/texture/5e4d3c2b1a9f8e7d6c5b4a3f2e1d9c8b7a6f5e4d3c2b1a9f8e7d6c5b4a3f2e1',
-      previewUrl: 'https://mc-heads.net/body/steve.png',
+      name: 'TommyInnit',
+      url: 'https://minotar.net/skin/TommyInnit',
+      previewUrl: 'https://minotar.net/body/TommyInnit',
       isPublic: true
     }
   ];
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Combinar con modernSkins
+  const allSkins = [...basicSkins, ...modernSkins];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      setSelectedFile(file);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setSkinPreview(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  const file = e.target.files?.[0];
+  if (file && file.type.startsWith('image/')) {
+    setSelectedFile(file);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      setSkinPreview(result);
+      setSelectedPublicSkin(null); // Clear public selection
+    };
+    reader.readAsDataURL(file);
+  }
+};
 
-  const handleUrlChange = () => {
-    if (selectedSkinUrl) {
-      setSkinPreview(selectedSkinUrl);
-    }
-  };
+const handleUrlChange = () => {
+  if (selectedSkinUrl) {
+    setSkinPreview(selectedSkinUrl);
+    setSelectedPublicSkin(null);
+  }
+};
 
-  const handleUsePublicSkin = (skin: Skin) => {
-    setSelectedPublicSkin(skin);
-    setSkinPreview(skin.previewUrl);
-  };
+const handleUsePublicSkin = (skin: Skin) => {
+  setSelectedPublicSkin(skin);
+  setSkinPreview(skin.url); // Use the actual texture URL for 3D view
+};
 
-  const handleSaveSkin = () => {
-    const currentUser = profileService.getCurrentProfile();
-    if (skinPreview && currentUser) {
-      profileService.setSkinForProfile(currentUser, skinPreview);
-      setCurrentSkin(skinPreview); // Actualizar la skin actual mostrada
-      alert('¡Skin guardada exitosamente en tu perfil!');
-    } else if (!currentUser) {
-      alert('Por favor inicia sesión con un perfil antes de guardar una skin.');
-    } else {
-      alert('Por favor selecciona una skin antes de guardar.');
-    }
-  };
+const handleSaveSkin = () => {
+  const currentUser = profileService.getCurrentProfile();
+  if (skinPreview && currentUser) {
+    profileService.setSkinForProfile(currentUser, skinPreview);
+    setCurrentSkin(skinPreview);
+    alert('¡Skin guardada exitosamente en tu perfil!');
+  } else if (!currentUser) {
+    alert('Por favor inicia sesión con un perfil antes de guardar una skin.');
+  } else {
+    alert('Por favor selecciona una skin antes de guardar.');
+  }
+};
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+const handleUploadClick = () => {
+  fileInputRef.current?.click();
+};
 
-  return (
-    <div className="p-4 max-w-7xl mx-auto skin-page-container">
-      {/* Fondo decorativo */}
-      <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900/20 to-purple-900/20 -z-10"></div>
+return (
+  <div className="h-full flex flex-col p-6 max-w-[1600px] mx-auto">
+    {/* Fondo decorativo */}
+    <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-blue-900/10 to-purple-900/10 -z-10"></div>
 
-      {/* Header moderno con efectos */}
-      <div className="relative mb-6">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-2xl -z-10 blur-xl opacity-50"></div>
-        <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/80 backdrop-blur-lg rounded-2xl p-6 border border-gray-700/50 shadow-xl">
-          <div className="flex flex-col md:flex-row items-center justify-between">
-            <div className="text-center md:text-left mb-2 md:mb-0">
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-1">
-                Personaliza tu Skin
-              </h1>
-              <p className="text-gray-400">
-                Elige y aplica tu skin personalizada
-              </p>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
-                <div className="flex items-center">
-                  <div className="w-2 h-2 rounded-full bg-green-400 mr-2"></div>
-                  <span className="text-gray-300 text-sm">Online</span>
-                </div>
-              </div>
+    {/* Header */}
+    <div className="mb-8">
+      <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+        Personalización de Skin
+      </h1>
+      <p className="text-gray-400 mt-2">
+        Visualiza y personaliza tu apariencia en el juego con nuestro editor 3D
+      </p>
+    </div>
+
+    <div className="flex flex-col lg:flex-row gap-8 h-full min-h-[600px]">
+      {/* Panel Izquierdo: Vista Previa 3D */}
+      <div className="lg:w-5/12 flex flex-col gap-4">
+        <Card className="flex-1 p-0 overflow-hidden relative bg-gray-900/50 border-gray-700/50 backdrop-blur-xl">
+          <div ref={containerRef} className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-gray-800/20 to-gray-900/80">
+            {viewerSize.width > 0 && viewerSize.height > 0 && (
+              <ReactSkinview3d
+                skinUrl={skinPreview}
+                height={viewerSize.height}
+                width={viewerSize.width}
+                onReady={({ viewer }) => {
+                  skinViewerRef.current = viewer;
+                  // Configuración inicial
+                  viewer.animation = animationState === 'idle' ? new IdleAnimation() :
+                    animationState === 'walk' ? new WalkingAnimation() :
+                      new RunningAnimation();
+                  viewer.autoRotate = autoRotate;
+                }}
+                // Only re-mount if dimensions change significantly or skin changes (though skin change might be handled by prop update)
+                // Removing animation and rotation from key to prevent re-mounts
+                key={`${viewerSize.width}-${viewerSize.height}`}
+              />
+            )}
+          </div>
+
+          {/* Controles de Vista Previa */}
+          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/80 backdrop-blur-md rounded-full px-6 py-3 border border-gray-700 flex items-center gap-4 shadow-2xl">
+            <button
+              onClick={() => setAutoRotate(!autoRotate)}
+              className={`p-2 rounded-full transition-all ${autoRotate ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+              title="Auto Rotar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            </button>
+
+            <div className="h-6 w-px bg-gray-700"></div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAnimationState('idle')}
+                className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${animationState === 'idle' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'text-gray-400 hover:text-white'}`}
+              >
+                Quieto
+              </button>
+              <button
+                onClick={() => setAnimationState('walk')}
+                className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${animationState === 'walk' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'text-gray-400 hover:text-white'}`}
+              >
+                Caminar
+              </button>
+              <button
+                onClick={() => setAnimationState('run')}
+                className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${animationState === 'run' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'text-gray-400 hover:text-white'}`}
+              >
+                Correr
+              </button>
             </div>
           </div>
-        </div>
+        </Card>
+
+        <Button
+          onClick={handleSaveSkin}
+          className="w-full py-4 text-lg font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-500/20"
+        >
+          Aplicar Skin al Perfil
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Panel izquierdo: Carga de skins y skin actual */}
-        <div className="lg:col-span-3 space-y-8">
-          {/* Card de carga de skins */}
-          <Card>
-            <div className="p-8">
-              <div className="flex items-center mb-6">
-                <div className="p-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl mr-4">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                  </svg>
-                </div>
-                <h2 className="text-2xl font-bold text-white">Cargar Skin Personalizada</h2>
-              </div>
-              
-              <div className="space-y-6">
-                {/* Botones de carga */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Button 
-                    variant="secondary" 
-                    onClick={handleUploadClick}
-                    className="flex-1 py-4 text-base flex items-center justify-center gap-2 bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border border-gray-700"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                    </svg>
-                    Seleccionar desde PC
-                  </Button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                  
-                  <Button 
-                    variant="secondary" 
-                    onClick={handleUrlChange}
-                    className="flex-1 py-4 text-base flex items-center justify-center gap-2 bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border border-gray-700"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
-                    </svg>
-                    Cargar desde URL
-                  </Button>
-                </div>
-                
-                {/* Campo de URL */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Pega la URL de tu skin aquí (formato .png)..."
-                    value={selectedSkinUrl}
-                    onChange={(e) => setSelectedSkinUrl(e.target.value)}
-                    className="w-full bg-gray-800/70 border border-gray-700 rounded-xl text-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
-                
-                {/* Vista previa */}
-                {skinPreview && (
-                  <div className="mt-8">
-                    <div className="flex items-center mb-4">
-                      <div className="p-2 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg mr-3">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                        </svg>
-                      </div>
-                      <h3 className="text-xl font-semibold text-white">Vista previa de la Skin</h3>
-                    </div>
-                    <div className="flex flex-col items-center">
-                      <div className="relative inline-block mb-4">
-                        <div className="bg-gray-800 border-4 border-gray-700 rounded-xl shadow-2xl overflow-hidden">
-                          <img 
-                            src={skinPreview} 
-                            alt="Vista previa de la skin" 
-                            className="w-64 h-64 object-contain"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = 'https://placehold.co/256x512/1f2937/9ca3af?text=Sin+Vista+Previa';
-                            }}
-                          />
-                        </div>
-                      </div>
-                      
-                      {/* Botones de acción */}
-                      <div className="flex gap-3 w-full max-w-xs">
-                        <Button 
-                          onClick={() => {
-                            // Crear un enlace temporal para descargar la imagen
-                            const link = document.createElement('a');
-                            link.href = skinPreview;
-                            link.download = 'skin-preview.png';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          }}
-                          className="flex-1 py-2 flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-500 hover:to-teal-500"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                          </svg>
-                          Descargar
-                        </Button>
-                        
-                        <Button 
-                          variant="secondary"
-                          onClick={() => {
-                            // Abrir la imagen en una nueva pestaña para verla en tamaño completo
-                            window.open(skinPreview, '_blank');
-                          }}
-                          className="py-2 px-4 flex items-center gap-2"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                          </svg>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </Card>
+      {/* Panel Derecho: Selección y Carga */}
+      <div className="lg:w-7/12 flex flex-col gap-6 overflow-y-auto custom-scrollbar pr-2">
 
-          {/* Card de vista previa de la skin actual */}
-          <Card>
-            <div className="p-8">
-              <div className="flex items-center mb-6">
-                <div className="p-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl mr-4">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                  </svg>
-                </div>
-                <h2 className="text-2xl font-bold text-white">Tu Skin Actual</h2>
-              </div>
-              <div className="flex flex-col items-center">
-                <div className="relative inline-block mb-4">
-                  <div className="bg-gray-800 border-4 border-gray-700 rounded-xl shadow-2xl overflow-hidden">
-                    <img
-                      src={currentSkin}
-                      alt="Tu skin actual"
-                      className="w-64 h-64 object-contain"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.src = 'https://mc-heads.net/body/steve.png';
-                      }}
-                    />
-                  </div>
-                </div>
-                <p className="text-gray-400 text-center">
-                  Esta es la skin que tienes actualmente en tu perfil
-                </p>
-              </div>
-            </div>
-          </Card>
+        {/* Carga de Archivos */}
+        <Card className="p-6 bg-gray-800/50 border-gray-700/50">
+          <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+            <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            Subir tu propia Skin
+          </h3>
 
-          {/* Card de guardado */}
-          <Card>
-            <div className="p-8">
-              <div className="flex items-center mb-6">
-                <div className="p-3 bg-gradient-to-r from-green-600 to-teal-600 rounded-xl mr-4">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                </div>
-                <h2 className="text-2xl font-bold text-white">Aplicar Skin</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div
+              onClick={handleUploadClick}
+              className="border-2 border-dashed border-gray-600 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-gray-700/30 transition-all group"
+            >
+              <div className="p-3 bg-gray-700 rounded-full mb-3 group-hover:bg-blue-500/20 group-hover:text-blue-400 transition-colors">
+                <svg className="w-8 h-8 text-gray-400 group-hover:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
               </div>
-              <div className="flex flex-col items-center">
-                <p className="text-gray-400 mb-8 max-w-2xl text-center">
-                  La skin seleccionada se guardará en tu perfil actual y se aplicará la próxima vez que inicies sesión en Minecraft.
-                </p>
-                <Button 
-                  onClick={handleSaveSkin}
-                  className="py-4 px-12 text-lg flex items-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 shadow-lg shadow-blue-500/30"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  Guardar Skin en Perfil
+              <span className="text-gray-300 font-medium">Seleccionar archivo</span>
+              <span className="text-gray-500 text-sm mt-1">.png (64x64 o 64x32)</span>
+            </div>
+            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+
+            <div className="flex flex-col gap-3">
+              <label className="text-sm text-gray-400">O cargar desde URL:</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="https://..."
+                  value={selectedSkinUrl}
+                  onChange={(e) => setSelectedSkinUrl(e.target.value)}
+                  className="flex-1 bg-gray-900/50 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                />
+                <Button onClick={handleUrlChange} className="px-4 bg-gray-700 hover:bg-gray-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                 </Button>
               </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Panel derecho: Skins públicas y más */}
-        <div className="space-y-8">
-          {/* Skins populares */}
-          <Card>
-            <div className="p-6">
-              <div className="flex items-center mb-4">
-                <div className="p-2 bg-gradient-to-r from-yellow-600 to-orange-600 rounded-lg mr-3">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
-                  </svg>
-                </div>
-                <h2 className="text-xl font-bold text-white">Skins Populares</h2>
-              </div>
-              <p className="text-gray-400 mb-6 text-sm">
-                Selecciona una skin popular para usar temporalmente o como inspiración.
+              <p className="text-xs text-gray-500 mt-auto">
+                Asegúrate de que la URL apunte directamente a la imagen de la skin.
               </p>
-              
-              {/* Selector de categoría */}
-              <div className="flex mb-4 rounded-xl bg-gray-800/50 p-1">
-                <button
-                  className={`flex-1 py-2 px-4 rounded-lg text-center transition-all duration-300 ${
-                    skinCategory === 'basic'
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                  onClick={() => setSkinCategory('basic')}
-                >
-                  Básicas
-                </button>
-                <button
-                  className={`flex-1 py-2 px-4 rounded-lg text-center transition-all duration-300 ${
-                    skinCategory === 'modern'
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                  onClick={() => setSkinCategory('modern')}
-                >
-                  Modernas
-                </button>
-              </div>
-              
-              {/* Lista de skins según categoría */}
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                {(skinCategory === 'basic' ? basicSkins : modernSkins).map(skin => (
-                  <div 
-                    key={skin.id} 
-                    className={`rounded-xl overflow-hidden border cursor-pointer transition-all duration-300 transform hover:scale-[1.02] ${
-                      selectedPublicSkin?.id === skin.id 
-                        ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-500/10' 
-                        : 'border-gray-700 hover:border-gray-500 bg-gray-800/40'
-                    }`}
-                    onClick={() => handleUsePublicSkin(skin)}
-                  >
-                    <div className="p-3 flex items-center gap-3">
-                      <div className="relative flex-shrink-0">
-                        <img 
-                          src={skin.previewUrl} 
-                          alt={skin.name} 
-                          className="w-12 h-12 border border-gray-600 rounded-lg"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.src = 'https://placehold.co/48x48/1f2937/9ca3af?text=Skin';
-                          }}
-                        />
-                        {selectedPublicSkin?.id === skin.id && (
-                          <div className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-1">
-                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-gray-100 text-sm truncate">{skin.name}</h3>
-                        <p className="text-xs text-gray-400">Clic para seleccionar</p>
-                      </div>
-                    </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Galería de Skins */}
+        <Card className="p-6 bg-gray-800/50 border-gray-700/50 flex-1">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+              <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+              Galería de Skins
+            </h3>
+
+            <div className="flex bg-gray-900/50 rounded-lg p-1">
+              <button
+                onClick={() => setSkinCategory('basic')}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${skinCategory === 'basic' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Básicas
+              </button>
+              <button
+                onClick={() => setSkinCategory('modern')}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${skinCategory === 'modern' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Modernas
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+            {(skinCategory === 'basic' ? basicSkins : modernSkins).map((skin) => (
+              <div
+                key={skin.id}
+                onClick={() => handleUsePublicSkin(skin)}
+                className={`group relative bg-gray-900/40 border rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02] ${selectedPublicSkin?.id === skin.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-700 hover:border-gray-500'}`}
+              >
+                <div className="aspect-square bg-gray-800/50 p-4 flex items-center justify-center relative overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity z-10 flex items-end justify-center pb-3">
+                    <span className="text-white text-xs font-bold px-2 py-1 bg-blue-600 rounded-full">Probar</span>
                   </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-          
-          {/* Card de información y más skins */}
-          <Card>
-            <div className="p-6">
-              <div className="flex items-center mb-4">
-                <div className="p-2 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg mr-3">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
+                  <img
+                    src={skin.previewUrl}
+                    alt={skin.name}
+                    className="w-full h-full object-contain pixelated filter drop-shadow-xl transform group-hover:scale-110 transition-transform duration-300"
+                  />
                 </div>
-                <h2 className="text-xl font-bold text-white">Más Skins</h2>
-              </div>
-              
-              <div className="space-y-3 text-gray-400 text-sm">
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Formato: <span className="text-gray-300 font-medium">.png</span></p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Resolución: <span className="text-gray-300 font-medium">64x64 o 64x32</span></p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Estilo: <span className="text-gray-300 font-medium">Steve o Alex</span></p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Comunidad: <span className="text-gray-300 font-medium">Normas de Mojang</span></p>
+                <div className="p-3 bg-gray-900/80">
+                  <h4 className="text-sm font-medium text-gray-200 truncate">{skin.name}</h4>
                 </div>
               </div>
-            </div>
-          </Card>
-        </div>
+            ))}
+          </div>
+        </Card>
       </div>
     </div>
-  );
+  </div>
+);
 };
 
 export default SkinsPage;
