@@ -164,19 +164,15 @@ export default function App() {
 
   const handlePlay = async (instanceId: string) => {
     try {
-      // In a real implementation, we would get the game launch command from the instance
-      // and handle the process monitoring
-      const launchResult = await processMonitorService.launchGameAndMonitor(
-        instanceId,
-        ['java', '-jar', 'minecraft.jar'] // This would be replaced with actual instance command
-      );
-
-      if (!launchResult.success) {
-        console.error('Error launching game:', launchResult.error);
-        // Handle error appropriately
+      // Usar la API de Electron para lanzar el juego
+      if (window.api?.game?.launch) {
+        await window.api.game.launch({ instanceId });
+        console.log(`Juego iniciado para la instancia: ${instanceId}`);
+      } else {
+        console.error('La API de juego no está disponible');
       }
     } catch (error) {
-      console.error('Error in handlePlay:', error);
+      console.error('Error al iniciar el juego:', error);
     }
   };
 
@@ -194,7 +190,7 @@ export default function App() {
       <main className={`flex-1 p-6 bg-gray-900/30 dark:bg-gray-900/50 transition-all duration-300 ${isSettingsOpen || isLoginModalOpen ? 'filter blur-sm' : ''} overflow-y-auto`}>
         <Routes>
           <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} onPlay={handlePlay} currentUser={currentUser} accounts={accounts} />} />
-          <Route path="/instances" element={<Instances />} />
+          <Route path="/instances" element={<Instances onPlay={handlePlay} />} />
           <Route path="/create" element={<CreateInstance />} />
           {/* <Route path="/settings" element={<Settings />} /> */} {/* The route is no longer needed */}
           <Route path="/servers" element={<Servers />} />

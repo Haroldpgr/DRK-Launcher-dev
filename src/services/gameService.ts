@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
+import fs from 'node:fs'
 
 export type LaunchOptions = {
   javaPath: string
@@ -7,6 +8,24 @@ export type LaunchOptions = {
   instancePath: string
   ramMb?: number
   jvmArgs?: string[]
+}
+
+// Verificar si una instancia está completamente descargada y lista para jugar
+export function isInstanceReady(instancePath: string): boolean {
+  try {
+    // Verificar que exista el archivo client.jar principal
+    const clientJarPath = path.join(instancePath, 'client.jar');
+    if (!fs.existsSync(clientJarPath)) {
+      console.log(`client.jar no encontrado en ${clientJarPath}`);
+      return false;
+    }
+
+    // Si llega aquí, se considera que hay los archivos básicos necesarios
+    return true;
+  } catch (error) {
+    console.error('Error al verificar si la instancia está lista:', error);
+    return false;
+  }
 }
 
 export function buildArgs(opts: LaunchOptions) {

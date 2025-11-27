@@ -26,9 +26,10 @@ interface InstanceCardProps {
   onEdit: (instance: Instance) => void
   onDelete: (id: string) => void
   onViewDetails: (instance: Instance) => void
+  isReady?: (instance: Instance) => boolean
 }
 
-const InstanceCard: React.FC<InstanceCardProps> = ({ instance, onPlay, onOpenFolder, onEdit, onDelete, onViewDetails }) => {
+const InstanceCard: React.FC<InstanceCardProps> = ({ instance, onPlay, onOpenFolder, onEdit, onDelete, onViewDetails, isReady }) => {
   const formatTime = (milliseconds: number | undefined) => {
     if (!milliseconds) return '0 min';
     const minutes = Math.floor(milliseconds / (1000 * 60));
@@ -143,7 +144,11 @@ const InstanceCard: React.FC<InstanceCardProps> = ({ instance, onPlay, onOpenFol
   )
 }
 
-export default function Instances() {
+type InstancesProps = {
+  onPlay: (id: string) => void;
+};
+
+export default function Instances({ onPlay }: InstancesProps) {
   const [instances, setInstances] = useState<Instance[]>([])
   const [ownedInstances, setOwnedInstances] = useState<Instance[]>([])
   const [importedInstances, setImportedInstances] = useState<Instance[]>([])
@@ -161,6 +166,17 @@ export default function Instances() {
   const [importSource, setImportSource] = useState('')
   const [importType, setImportType] = useState<'link' | 'folder'>('link')
   const [showCreateModal, setShowCreateModal] = useState(false)
+
+  // Estado para rastrear si las instancias están listas para jugar
+  const [readyStatus, setReadyStatus] = useState<Record<string, boolean>>({});
+
+  // Función para verificar si una instancia está lista para jugar
+  // Verifica si los archivos esenciales están presentes
+  const checkInstanceReady = (instance: Instance): boolean => {
+    // En una implementación completa, se verificaría la existencia de client.jar u otros archivos
+    // En esta versión, asumimos que está lista si tiene un path y no está marcada como incompleta
+    return instance.path && instance.path.length > 0;
+  };
 
   // Cargar perfiles
   useEffect(() => {
@@ -331,19 +347,9 @@ export default function Instances() {
     }
   }
 
-  const play = async (id: string) => {
-    // Verificar que la API esté completamente disponible
-    if (!window.api?.game) {
-      setError('Servicio de juego no disponible aún. Esperando inicialización...');
-      return;
-    }
-
-    try {
-      await window.api.game.launch({ instanceId: id })
-    } catch (err) {
-      console.error('Error al iniciar juego:', err)
-      setError(`Error al iniciar juego: ${(err as Error).message || 'Error desconocido'}`)
-    }
+  const handlePlay = async (id: string) => {
+    // Usar la función onPlay pasada como prop
+    onPlay(id);
   }
 
   const startEdit = (instance: Instance) => {
@@ -694,11 +700,12 @@ export default function Instances() {
               <InstanceCard
                 key={instance.id}
                 instance={instance}
-                onPlay={play}
+                onPlay={handlePlay}
                 onOpenFolder={open}
                 onEdit={startEdit}
                 onDelete={remove}
                 onViewDetails={viewInstanceDetails}
+                isReady={checkInstanceReady}
               />
             ))}
           </AnimatePresence>
@@ -713,7 +720,7 @@ export default function Instances() {
         instance={selectedInstance}
         isOpen={showInstanceDetails}
         onClose={() => setShowInstanceDetails(false)}
-        onPlay={play}
+        onPlay={handlePlay}
         onOpenFolder={open}
       />
 

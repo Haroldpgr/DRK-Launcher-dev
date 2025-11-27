@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { initDB, hasDB, sqlite } from '../services/db'
 import { queryStatus } from '../services/serverService'
-import { launchJava } from '../services/gameService'
+import { launchJava, isInstanceReady } from '../services/gameService'
 import { javaDetector } from './javaDetector'
 // Import our Java service
 import javaService from './javaService';
@@ -64,9 +64,32 @@ async function createWindow() {
 function basePaths() {
   const data = getUserDataPath()
   const settingsPath = path.join(data, 'settings.json')
-  const instancesBaseDefault = path.join(data, 'instances')
-  ensureDir(instancesBaseDefault)
-  return { data, settingsPath, instancesBaseDefault }
+  // Cambiar la estructura de carpetas a .DRK Launcher
+  const drkLauncherDir = path.join(data, '.DRK Launcher')
+  ensureDir(drkLauncherDir)
+
+  // Carpetas para diferentes tipos de archivos
+  const downloadsDir = path.join(drkLauncherDir, 'downloads')
+  const versionsDir = path.join(drkLauncherDir, 'versions')
+  const librariesDir = path.join(drkLauncherDir, 'libraries')
+  const configsDir = path.join(drkLauncherDir, 'configs')
+  const instancesDir = path.join(drkLauncherDir, 'instances')
+
+  ensureDir(downloadsDir)
+  ensureDir(versionsDir)
+  ensureDir(librariesDir)
+  ensureDir(configsDir)
+  ensureDir(instancesDir)
+
+  return {
+    data,
+    settingsPath,
+    instancesBaseDefault: instancesDir,
+    downloadsBase: downloadsDir,
+    versionsBase: versionsDir,
+    librariesBase: librariesDir,
+    configsBase: configsDir
+  }
 }
 
 function readJSON<T>(file: string, fallback: T) {
@@ -112,6 +135,7 @@ type Instance = {
   path: string
   ramMb?: number
   userProfile?: string
+  ready?: boolean // Nuevo campo para indicar si la instancia está lista para jugar
 }
 
 type ServerInfo = {
@@ -168,8 +192,18 @@ function instancesFile() {
   return path.join(data, 'instances.json')
 }
 
+// Crear una función para verificar si una instancia está completamente lista
+function isInstanceFullyReady(instance: Instance): boolean {
+  // Verifica si los archivos esenciales están presentes en la carpeta de la instancia
+  const clientJarPath = path.join(instance.path, 'client.jar');
+
+  // Si el archivo client.jar existe en la carpeta de la instancia, consideramos que está completamente listo
+  return fs.existsSync(clientJarPath);
+}
+
+// Mantener la función original para compatibilidad con otros procesos internos
 function listInstances(): Instance[] {
-  return readJSON<Instance[]>(instancesFile(), [])
+  return readJSON<Instance[]>(instancesFile(), []);
 }
 
 function saveInstances(list: Instance[]) {
@@ -299,11 +333,19 @@ ipcMain.handle('servers:save', async (_e, list: ServerInfo[]) => {
 
 ipcMain.handle('servers:ping', async (_e, ip: string) => queryStatus(ip))
 
+// ... otros handlers ...
 
 ipcMain.handle('game:launch', async (_e, p: { instanceId: string }) => {
   const i = listInstances().find(x => x.id === p.instanceId)
   const s = settings()
   if (!i) return null
+
+  // Verificar si la instancia está completamente descargada
+  if (!isInstanceReady(i.path)) {
+    console.log(`La instancia ${i.name} no está lista para jugar. Archivos esenciales faltantes.`);
+    throw new Error('La instancia no está completamente descargada. Espere a que terminen las descargas.')
+  }
+
   launchJava({ javaPath: s.javaPath || 'java', mcVersion: i.version, instancePath: i.path, ramMb: i.ramMb || s.defaultRamMb }, () => {}, () => {})
   return { started: true }
 })
@@ -389,9 +431,9 @@ ipcMain.on('download:start', async (event, { url, filename, itemId }) => {
   // Limpiar el nombre de archivo para evitar caracteres problemáticos
   const cleanFilename = sanitizeFileName(filename);
 
-  // Guardar en el directorio de instancias del launcher (en userData)
-  const { instancesBaseDefault } = basePaths();
-  const downloadPath = path.join(instancesBaseDefault, '.downloads'); // Usar una carpeta temporal para descargas
+  // Guardar en el directorio de descargas del launcher (en .DRK Launcher/downloads)
+  const { downloadsBase } = basePaths();
+  const downloadPath = downloadsBase; // Usar la carpeta de descargas principal
   ensureDir(downloadPath);
 
   // Crear la ruta completa del archivo y asegurarse de que los directorios existan
@@ -445,6 +487,35 @@ ipcMain.on('download:start', async (event, { url, filename, itemId }) => {
       itemId,
       filePath
     });
+
+    // Lógica para mover archivos a sus ubicaciones correctas si son archivos esenciales
+    try {
+      // Solo procesar si el archivo contiene información sobre versiones de Minecraft
+      if (cleanFilename.includes('versions') && cleanFilename.includes('.jar')) {
+        // Capturar información de la versión del nombre del archivo
+        // Ejemplo: versions/1.21.1/1.21.1.jar
+        const jarMatch = cleanFilename.match(/versions[\/\\]?([^\/\\]+)[\/\\]([^\/\\]+\.jar)/);
+        if (jarMatch) {
+          const [, versionId, jarFileName] = jarMatch;
+
+          // Buscar instancia que coincida con esta versión
+          const allInstances = listInstances();
+          const targetInstance = allInstances.find(instance =>
+            instance.version === versionId
+          );
+
+          if (targetInstance) {
+            // Mover archivo al directorio de la instancia con el nombre client.jar
+            const targetPath = path.join(targetInstance.path, 'client.jar');
+            ensureDir(path.dirname(targetPath));
+            fs.copyFileSync(filePath, targetPath);
+            console.log(`Archivo ${jarFileName} renombrado a client.jar y movido a la instancia ${targetInstance.id}`);
+          }
+        }
+      }
+    } catch (moveError) {
+      console.error('Error al mover archivo a destino final:', moveError);
+    }
   } catch (error) {
     console.error(`Error downloading ${url}:`, error);
     win.webContents.send('download:error', {

@@ -3132,6 +3132,20 @@ async function queryStatus(ip) {
 // src/services/gameService.ts
 var import_node_child_process = require("node:child_process");
 var import_node_path2 = __toESM(require("node:path"), 1);
+var import_node_fs = __toESM(require("node:fs"), 1);
+function isInstanceReady(instancePath) {
+  try {
+    const clientJarPath = import_node_path2.default.join(instancePath, "client.jar");
+    if (!import_node_fs.default.existsSync(clientJarPath)) {
+      console.log(`client.jar no encontrado en ${clientJarPath}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("Error al verificar si la instancia est\xE1 lista:", error);
+    return false;
+  }
+}
 function buildArgs(opts) {
   const mem = Math.max(512, opts.ramMb || 2048);
   const args = [
@@ -3621,7 +3635,7 @@ var javaService = new JavaService();
 var javaService_default = javaService;
 
 // src/main/main.ts
-var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_fs2 = __toESM(require("node:fs"), 1);
 var import_node_stream = require("node:stream");
 var import_node_util = require("node:util");
 var import_node_fetch = __toESM(require_lib2(), 1);
@@ -3642,7 +3656,7 @@ function getUserDataPath() {
   return import_electron2.app.getPath("userData");
 }
 function ensureDir(dir) {
-  if (!import_node_fs.default.existsSync(dir)) import_node_fs.default.mkdirSync(dir, { recursive: true });
+  if (!import_node_fs2.default.existsSync(dir)) import_node_fs2.default.mkdirSync(dir, { recursive: true });
 }
 async function createWindow() {
   win = new import_electron2.BrowserWindow({
@@ -3672,14 +3686,32 @@ async function createWindow() {
 function basePaths() {
   const data = getUserDataPath();
   const settingsPath = import_node_path3.default.join(data, "settings.json");
-  const instancesBaseDefault = import_node_path3.default.join(data, "instances");
-  ensureDir(instancesBaseDefault);
-  return { data, settingsPath, instancesBaseDefault };
+  const drkLauncherDir = import_node_path3.default.join(data, ".DRK Launcher");
+  ensureDir(drkLauncherDir);
+  const downloadsDir = import_node_path3.default.join(drkLauncherDir, "downloads");
+  const versionsDir = import_node_path3.default.join(drkLauncherDir, "versions");
+  const librariesDir = import_node_path3.default.join(drkLauncherDir, "libraries");
+  const configsDir = import_node_path3.default.join(drkLauncherDir, "configs");
+  const instancesDir = import_node_path3.default.join(drkLauncherDir, "instances");
+  ensureDir(downloadsDir);
+  ensureDir(versionsDir);
+  ensureDir(librariesDir);
+  ensureDir(configsDir);
+  ensureDir(instancesDir);
+  return {
+    data,
+    settingsPath,
+    instancesBaseDefault: instancesDir,
+    downloadsBase: downloadsDir,
+    versionsBase: versionsDir,
+    librariesBase: librariesDir,
+    configsBase: configsDir
+  };
 }
 function readJSON(file, fallback) {
   try {
-    if (!import_node_fs.default.existsSync(file)) return fallback;
-    const raw = import_node_fs.default.readFileSync(file, "utf-8");
+    if (!import_node_fs2.default.existsSync(file)) return fallback;
+    const raw = import_node_fs2.default.readFileSync(file, "utf-8");
     return JSON.parse(raw);
   } catch {
     return fallback;
@@ -3687,7 +3719,7 @@ function readJSON(file, fallback) {
 }
 function writeJSON(file, value) {
   ensureDir(import_node_path3.default.dirname(file));
-  import_node_fs.default.writeFileSync(file, JSON.stringify(value, null, 2));
+  import_node_fs2.default.writeFileSync(file, JSON.stringify(value, null, 2));
 }
 function settings() {
   const { settingsPath, instancesBaseDefault } = basePaths();
@@ -3753,7 +3785,7 @@ function deleteInstance(id) {
   const list = listInstances();
   const item = list.find((x) => x.id === id);
   saveInstances(list.filter((x) => x.id !== id));
-  if (item && import_node_fs.default.existsSync(item.path)) import_node_fs.default.rmSync(item.path, { recursive: true, force: true });
+  if (item && import_node_fs2.default.existsSync(item.path)) import_node_fs2.default.rmSync(item.path, { recursive: true, force: true });
 }
 async function mojangVersions() {
   const res = await (0, import_node_fetch.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
@@ -3832,8 +3864,8 @@ import_electron2.ipcMain.handle("crash:analyze", async (_e, p) => {
   const i = listInstances().find((x) => x.id === p.instanceId);
   if (!i) return null;
   const target = p.logPath || import_node_path3.default.join(i.path, "logs", "latest.log");
-  if (!import_node_fs.default.existsSync(target)) return null;
-  const txt = import_node_fs.default.readFileSync(target, "utf-8");
+  if (!import_node_fs2.default.existsSync(target)) return null;
+  const txt = import_node_fs2.default.readFileSync(target, "utf-8");
   const res = analyzeLog(txt);
   const rec = { id: Math.random().toString(36).slice(2), instanceId: i.id, createdAt: Date.now(), summary: res.summary, logPath: target, recommendation: res.recommendation };
   const list = listCrashes();
@@ -3858,6 +3890,10 @@ import_electron2.ipcMain.handle("game:launch", async (_e, p) => {
   const i = listInstances().find((x) => x.id === p.instanceId);
   const s = settings();
   if (!i) return null;
+  if (!isInstanceReady(i.path)) {
+    console.log(`La instancia ${i.name} no est\xE1 lista para jugar. Archivos esenciales faltantes.`);
+    throw new Error("La instancia no est\xE1 completamente descargada. Espere a que terminen las descargas.");
+  }
   launchJava({ javaPath: s.javaPath || "java", mcVersion: i.version, instancePath: i.path, ramMb: i.ramMb || s.defaultRamMb }, () => {
   }, () => {
   });
@@ -3917,8 +3953,8 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
   const win2 = import_electron2.BrowserWindow.getFocusedWindow();
   if (!win2) return;
   const cleanFilename = sanitizeFileName(filename);
-  const { instancesBaseDefault } = basePaths();
-  const downloadPath = import_node_path3.default.join(instancesBaseDefault, ".downloads");
+  const { downloadsBase } = basePaths();
+  const downloadPath = downloadsBase;
   ensureDir(downloadPath);
   const filePath = import_node_path3.default.join(downloadPath, cleanFilename);
   const fileDir = import_node_path3.default.dirname(filePath);
@@ -3930,7 +3966,7 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
     }
     const totalBytes = parseInt(response.headers.get("content-length") || "0", 10);
     let downloadedBytes = 0;
-    const fileStream = import_node_fs.default.createWriteStream(filePath);
+    const fileStream = import_node_fs2.default.createWriteStream(filePath);
     const progressStream = new (require("stream")).Transform({
       transform(chunk, encoding, callback) {
         downloadedBytes += chunk.length;
@@ -3952,6 +3988,26 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
       itemId,
       filePath
     });
+    try {
+      if (cleanFilename.includes("versions") && cleanFilename.includes(".jar")) {
+        const jarMatch = cleanFilename.match(/versions[\/\\]?([^\/\\]+)[\/\\]([^\/\\]+\.jar)/);
+        if (jarMatch) {
+          const [, versionId, jarFileName] = jarMatch;
+          const allInstances = listInstances();
+          const targetInstance = allInstances.find(
+            (instance) => instance.version === versionId
+          );
+          if (targetInstance) {
+            const targetPath = import_node_path3.default.join(targetInstance.path, "client.jar");
+            ensureDir(import_node_path3.default.dirname(targetPath));
+            import_node_fs2.default.copyFileSync(filePath, targetPath);
+            console.log(`Archivo ${jarFileName} renombrado a client.jar y movido a la instancia ${targetInstance.id}`);
+          }
+        }
+      }
+    } catch (moveError) {
+      console.error("Error al mover archivo a destino final:", moveError);
+    }
   } catch (error) {
     console.error(`Error downloading ${url}:`, error);
     win2.webContents.send("download:error", {

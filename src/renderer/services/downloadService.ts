@@ -18,12 +18,11 @@ export interface Download {
 export class DownloadService {
   private downloads: Map<string, Download> = new Map();
   private observers: Array<(downloads: Download[]) => void> = [];
-  private progressListeners: Map<string, (event: any, data: { itemId: string; progress: number }) => void> = new Map();
-  private completeListeners: Map<string, (event: any, data: { itemId: string; filePath: string }) => void> = new Map();
-  private errorListeners: Map<string, (event: any, error: { itemId: string; message: string }) => void> = new Map();
 
   constructor() {
     // Registrar listeners globales para los eventos de descarga
+    // Nota: Estos listeners ya están registrados globalmente en el constructor,
+    // por lo que no hay que registrarlos múltiples veces
     window.api.download.onProgress(this.handleProgress.bind(this));
     window.api.download.onComplete(this.handleComplete.bind(this));
     window.api.download.onError(this.handleError.bind(this));
@@ -32,8 +31,9 @@ export class DownloadService {
   private handleProgress(event: any, data: { itemId: string; progress: number }) {
     const download = this.downloads.get(data.itemId);
     if (download) {
-      // Calcular bytes descargados basado en progreso
+      // Actualizar con los datos reales del progreso
       download.progress = Math.round(data.progress * 100);
+      // Actualizar los bytes descargados basados en el progreso y tamaño total
       download.downloadedBytes = Math.round(download.totalBytes * data.progress);
 
       // Calcular velocidad aproximada
@@ -43,6 +43,38 @@ export class DownloadService {
       }
 
       this.notifyObservers();
+
+      // Si es parte de una descarga agrupada, actualizar también el progreso del grupo
+      for (const [groupId, progressInfo] of this.instanceDownloadProgress) {
+        if (progressInfo.downloads.includes(data.itemId)) {
+          // Recalcular el progreso total del grupo basado en bytes reales descargados
+          let groupDownloadedBytes = 0;
+          let groupTotalBytes = 0;
+
+          for (const downloadId of progressInfo.downloads) {
+            const groupDownload = this.downloads.get(downloadId);
+            if (groupDownload) {
+              groupDownloadedBytes += groupDownload.downloadedBytes;
+              groupTotalBytes += groupDownload.totalBytes;
+            }
+          }
+
+          const group = this.downloads.get(groupId);
+          if (group && groupTotalBytes > 0) {
+            group.progress = Math.round((groupDownloadedBytes / groupTotalBytes) * 100);
+            group.downloadedBytes = groupDownloadedBytes;
+
+            // Calcular velocidad del grupo
+            const groupElapsedSeconds = (Date.now() - group.startTime) / 1000;
+            if (groupElapsedSeconds > 0) {
+              group.speed = Math.round(groupDownloadedBytes / groupElapsedSeconds);
+            }
+
+            this.notifyObservers();
+          }
+          break; // Solo actualizar el primer grupo encontrado
+        }
+      }
     }
   }
 

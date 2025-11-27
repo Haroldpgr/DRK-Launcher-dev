@@ -18,7 +18,7 @@ type HomeProps = {
   accounts: Profile[];
 }
 
-export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, onLoginClick, currentUser, accounts }: HomeProps) {
+export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, onLoginClick, onPlay, currentUser, accounts }: HomeProps) {
   const [feed, setFeed] = useState<NewsItem[]>([])
   const [instances, setInstances] = useState<Instance[]>([])
   const [modpacks, setModpacks] = useState<any[]>([]); // Estado para almacenar modpacks
