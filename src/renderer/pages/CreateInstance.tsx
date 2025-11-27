@@ -1,35 +1,36 @@
-import React, { useEffect, useState } from 'react'
-import Card from '../components/Card'
-import Button from '../components/Button'
-
-type Loader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'liteloader'
+import React, { useState } from 'react';
+import Card from '../components/Card';
+import CreateInstanceModal from '../components/CreateInstanceModal';
 
 export default function CreateInstance() {
-  const [name, setName] = useState('')
-  const [version, setVersion] = useState('')
-  const [loader, setLoader] = useState<Loader>('vanilla')
-  const [versions, setVersions] = useState<{ id: string; type: string }[]>([])
-  useEffect(() => { window.api.versions.list().then((v: any) => setVersions(v.slice(0, 50))) }, [])
-  const create = async () => { if (!name || !version) return; await window.api.instances.create({ name, version, loader }); location.assign('#/instances') }
+  const [showCreateModal, setShowCreateModal] = useState(true);
+
+  // Si no se debe mostrar el modal (por ejemplo, después de cerrarlo y redirigir),
+  // podemos manejarlo aquí, pero para esta implementación simplemente mostramos el modal
   return (
-    <Card>
-      <div className="text-xl mb-4">Crear instancia</div>
-      <div className="grid grid-cols-2 gap-4">
-        <input value={name} onChange={e => setName(e.target.value)} className="bg-gray-800 p-2 rounded-xl" placeholder="Nombre" />
-        <select value={version} onChange={e => setVersion(e.target.value)} className="bg-gray-800 p-2 rounded-xl">
-          <option value="">Versión</option>
-          {versions.map(v => <option key={v.id} value={v.id}>{v.id}</option>)}
-        </select>
-        <select value={loader} onChange={e => setLoader(e.target.value as Loader)} className="bg-gray-800 p-2 rounded-xl">
-          <option value="vanilla">Vanilla</option>
-          <option value="forge">Forge</option>
-          <option value="fabric">Fabric</option>
-          <option value="quilt">Quilt</option>
-          <option value="liteloader">Liteloader</option>
-        </select>
-        <Button onClick={create}>Crear</Button>
+    <Card className="p-6">
+      <div className="text-xl font-bold text-white mb-4">Crear Nueva Instancia</div>
+      <p className="text-gray-400 mb-6">Usa el formulario a continuación para crear una nueva instancia de Minecraft</p>
+
+      <div className="flex justify-center items-center h-[300px]">
+        <div className="text-center">
+          <div className="mx-auto w-16 h-16 bg-gray-700/50 rounded-full flex items-center justify-center mb-4">
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+          </div>
+          <p className="text-gray-500">Abriendo formulario de creación...</p>
+        </div>
       </div>
+
+      <CreateInstanceModal
+        isOpen={showCreateModal}
+        onClose={() => {
+          // Cerrar y redirigir al usuario a la página de instancias
+          window.location.hash = '#/instances';
+        }}
+      />
     </Card>
-  )
+  );
 }
 

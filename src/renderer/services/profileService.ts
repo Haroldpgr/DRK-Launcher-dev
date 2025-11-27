@@ -7,11 +7,7 @@ export interface Profile {
   type: 'microsoft' | 'non-premium';
   lastUsed: number;
   gameTime?: number; // Tiempo total de juego en milisegundos
-  instances?: Array<{
-    id: string;
-    name: string;
-    lastPlayed: string;
-  }>;
+  instances?: string[]; // IDs de las instancias asociadas
   skinUrl?: string; // URL de la skin personalizada
 }
 
@@ -121,5 +117,18 @@ export const profileService = {
   getSkinForProfile(username: string): string | undefined {
     const profile = this.getProfileByUsername(username);
     return profile?.skinUrl;
+  },
+
+  updateProfile(username: string, updatedProfile: Partial<Profile>): boolean {
+    const profiles = getProfiles();
+    const profileIndex = profiles.findIndex(p => p.username === username);
+
+    if (profileIndex !== -1) {
+      profiles[profileIndex] = { ...profiles[profileIndex], ...updatedProfile };
+      saveProfiles(profiles);
+      return true;
+    }
+
+    return false;
   },
 };
