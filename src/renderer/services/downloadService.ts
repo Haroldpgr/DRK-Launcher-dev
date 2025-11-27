@@ -18,12 +18,59 @@ export interface Download {
 export class DownloadService {
   private downloads: Map<string, Download> = new Map();
   private observers: Array<(downloads: Download[]) => void> = [];
+  private progressListeners: Map<string, (event: any, data: { itemId: string; progress: number }) => void> = new Map();
+  private completeListeners: Map<string, (event: any, data: { itemId: string; filePath: string }) => void> = new Map();
+  private errorListeners: Map<string, (event: any, error: { itemId: string; message: string }) => void> = new Map();
+
+  constructor() {
+    // Registrar listeners globales para los eventos de descarga
+    window.api.download.onProgress(this.handleProgress.bind(this));
+    window.api.download.onComplete(this.handleComplete.bind(this));
+    window.api.download.onError(this.handleError.bind(this));
+  }
+
+  private handleProgress(event: any, data: { itemId: string; progress: number }) {
+    const download = this.downloads.get(data.itemId);
+    if (download) {
+      // Calcular bytes descargados basado en progreso
+      download.progress = Math.round(data.progress * 100);
+      download.downloadedBytes = Math.round(download.totalBytes * data.progress);
+
+      // Calcular velocidad aproximada
+      const elapsedSeconds = (Date.now() - download.startTime) / 1000;
+      if (elapsedSeconds > 0) {
+        download.speed = Math.round(download.downloadedBytes / elapsedSeconds);
+      }
+
+      this.notifyObservers();
+    }
+  }
+
+  private handleComplete(event: any, data: { itemId: string; filePath: string }) {
+    const download = this.downloads.get(data.itemId);
+    if (download) {
+      download.status = 'completed';
+      download.progress = 100;
+      download.endTime = Date.now();
+      download.path = data.filePath;
+      this.notifyObservers();
+    }
+  }
+
+  private handleError(event: any, error: { itemId: string; message: string }) {
+    const download = this.downloads.get(error.itemId);
+    if (download) {
+      download.status = 'error';
+      download.endTime = Date.now();
+      this.notifyObservers();
+    }
+  }
 
   subscribe(callback: (downloads: Download[]) => void) {
     this.observers.push(callback);
     // Notificar inmediatamente con la lista actual
     callback(this.getAllDownloads());
-    
+
     return () => {
       this.observers = this.observers.filter(obs => obs !== callback);
     };
@@ -43,14 +90,17 @@ export class DownloadService {
       status: 'pending',
       progress: 0,
       downloadedBytes: 0,
-      totalBytes: 0,
+      totalBytes: 100 * 1024 * 1024, // Valor por defecto (100MB), se actualizará al iniciar la descarga real
       startTime: Date.now(),
       speed: 0
     };
-    
+
     this.downloads.set(downloadId, newDownload);
     this.notifyObservers();
-    
+
+    // Iniciar la descarga real usando el API de Electron
+    this.startDownload(newDownload.id);
+
     return newDownload;
   }
 
@@ -62,7 +112,6 @@ export class DownloadService {
       // Reiniciar descarga si ya está completada
       download.progress = 0;
       download.downloadedBytes = 0;
-      download.totalBytes = 0;
       download.startTime = Date.now();
       download.speed = 0;
     }
@@ -71,9 +120,14 @@ export class DownloadService {
     this.notifyObservers();
 
     try {
-      // En una implementación real, usaríamos el API de Electron para descargar
-      // Por ahora, simularemos la descarga
-      await this.simulateDownload(download);
+      // Usar el API real de Electron para iniciar la descarga
+      const downloadData = {
+        url: download.url,
+        filename: download.name.replace(/\s+/g, '_'), // Nombre del archivo limpio sin espacios
+        itemId: downloadId
+      };
+
+      window.api.download.start(downloadData);
     } catch (error) {
       console.error('Error downloading file:', error);
       download.status = 'error';
@@ -81,65 +135,192 @@ export class DownloadService {
     }
   }
 
-  private async simulateDownload(download: Download) {
-    try {
-      // Intentar una descarga real de la URL proporcionada
-      // Hacer una request HEAD para obtener el tamaño del archivo
-      const headResponse = await fetch(download.url, {
-        method: 'HEAD',
-        mode: 'no-cors' // Permite manejar recursos externos aunque no podamos leer la respuesta completa
-      });
+  // Almacenamiento para descargas por instancia
+  private instanceDownloadProgress: Map<string, { total: number; completed: number; downloads: string[] }> = new Map();
 
-      // Si no podemos hacer HEAD request debido a CORS, usar valores por defecto
-      let totalBytes = 50 * 1024 * 1024; // 50MB por defecto
+  // Método para iniciar descargas de archivos específicos
+  downloadFile(url: string, filename: string, displayName?: string): Download {
+    const downloadId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const name = displayName || filename;
+    const newDownload: Download = {
+      id: downloadId,
+      name,
+      url,
+      status: 'pending',
+      progress: 0,
+      downloadedBytes: 0,
+      totalBytes: 100 * 1024 * 1024, // Valor por defecto (100MB)
+      startTime: Date.now(),
+      speed: 0
+    };
 
-      if (headResponse.ok && headResponse.headers.get('content-length')) {
-        totalBytes = parseInt(headResponse.headers.get('content-length') || '0', 10) || totalBytes;
+    this.downloads.set(downloadId, newDownload);
+    this.notifyObservers();
+
+    // Iniciar la descarga real usando el API de Electron
+    const downloadData = {
+      url,
+      filename,
+      itemId: downloadId
+    };
+
+    window.api.download.start(downloadData);
+
+    return newDownload;
+  }
+
+  // Método para iniciar una descarga agrupada por instancia
+  async downloadInstance(instanceName: string, filesToDownload: Array<{ url: string; filename: string; displayName: string }>): Promise<void> {
+    const groupId = `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Estimar tamaño total de forma realista (usando estimaciones promedio por tipo de archivo)
+    // Los archivos JAR de Minecraft suelen ser de 1-15MB, así que usaremos un valor promedio
+    const avgFileSize = 5 * 1024 * 1024; // 5MB promedio por archivo
+    const totalBytes = filesToDownload.length * avgFileSize;
+
+    // Crear una descarga agrupada para mostrar el progreso general
+    const groupDownload: Download = {
+      id: groupId,
+      name: `Instalación de ${instanceName} - ${filesToDownload.length} archivos`,
+      url: '',
+      status: 'downloading',
+      progress: 0,
+      downloadedBytes: 0,
+      totalBytes: totalBytes,
+      startTime: Date.now(),
+      speed: 0
+    };
+
+    this.downloads.set(groupId, groupDownload);
+    this.notifyObservers();
+
+    // Almacenar el progreso de la descarga agrupada
+    this.instanceDownloadProgress.set(groupId, {
+      total: filesToDownload.length,
+      completed: 0,
+      downloads: []
+    });
+
+    // Procesar descargas secuencialmente
+    let completedCount = 0;
+
+    for (const file of filesToDownload) {
+      const downloadId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const estimatedSize = avgFileSize; // Usar tamaño promedio
+
+      const newDownload: Download = {
+        id: downloadId,
+        name: file.displayName,
+        url: file.url,
+        status: 'pending',
+        progress: 0,
+        downloadedBytes: 0,
+        totalBytes: estimatedSize,
+        startTime: Date.now(),
+        speed: 0
+      };
+
+      this.downloads.set(downloadId, newDownload);
+
+      // Actualizar el progreso de la descarga agrupada
+      const progressInfo = this.instanceDownloadProgress.get(groupId);
+      if (progressInfo) {
+        progressInfo.downloads.push(downloadId);
+        this.instanceDownloadProgress.set(groupId, progressInfo);
       }
 
-      download.totalBytes = totalBytes;
+      this.notifyObservers();
 
-      // Simular la descarga con progreso real
-      let downloadedBytes = 0;
-      const chunkSize = 2 * 1024 * 1024; // 2MB por chunk
-      const interval = 500; // ms por chunk
+      // Iniciar la descarga real usando el API de Electron
+      const downloadData = {
+        url: file.url,
+        filename: file.filename,
+        itemId: downloadId
+      };
 
-      // Iniciar descarga
-      while (downloadedBytes < totalBytes && download.status === 'downloading') {
-        const chunk = Math.min(chunkSize, totalBytes - downloadedBytes);
-        downloadedBytes += chunk;
+      // Esperar a que esta descarga se complete antes de iniciar la siguiente
+      await this.startDownloadAndWait(downloadId, downloadData);
 
-        // Actualizar estadísticas
-        download.downloadedBytes = downloadedBytes;
-        download.progress = Math.round((downloadedBytes / totalBytes) * 100);
+      // Actualizar el progreso de la descarga agrupada basado en archivos completados
+      completedCount++;
+      const groupProgress = Math.round((completedCount / filesToDownload.length) * 100);
+      groupDownload.progress = Math.min(100, groupProgress); // No exceder 100%
 
-        // Calcular velocidad (bytes por segundo)
-        const elapsedSeconds = (Date.now() - download.startTime) / 1000;
-        download.speed = elapsedSeconds > 0 ? Math.round(downloadedBytes / elapsedSeconds) : 0;
-
-        this.notifyObservers();
-
-        // Esperar un poco
-        await new Promise(resolve => setTimeout(resolve, interval));
-      }
-
-      if (download.status === 'downloading') {
-        download.status = 'completed';
-        download.endTime = Date.now();
-        download.progress = 100;
-        download.downloadedBytes = totalBytes;
-        this.notifyObservers();
-      }
-    } catch (error) {
-      console.error(`Error during download simulation for ${download.id}:`, error);
-      // Marcar como completado con error
-      download.status = 'error';
-      download.endTime = Date.now();
       this.notifyObservers();
     }
+
+    // Marcar la descarga agrupada como completada
+    groupDownload.status = 'completed';
+    groupDownload.progress = 100;
+    groupDownload.endTime = Date.now();
+
+    this.notifyObservers();
+
+    // Eliminar el progreso de la instancia después de completar
+    setTimeout(() => {
+      this.instanceDownloadProgress.delete(groupId);
+      this.downloads.delete(groupId);
+      this.notifyObservers();
+    }, 10000); // Eliminar después de 10 segundos
+  }
+
+  // Método auxiliar para esperar a que una descarga se complete
+  private async startDownloadAndWait(downloadId: string, downloadData: any): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Registrar listeners temporales para esta descarga específica
+      const unsubscribeProgress = window.api.download.onProgress((event, data) => {
+        if (data.itemId === downloadId) {
+          const download = this.downloads.get(downloadId);
+          if (download) {
+            download.progress = Math.round(data.progress * 100);
+            download.downloadedBytes = Math.round(download.totalBytes * data.progress);
+
+            // Calcular velocidad aproximada
+            const elapsedSeconds = (Date.now() - download.startTime) / 1000;
+            if (elapsedSeconds > 0) {
+              download.speed = Math.round(download.downloadedBytes / elapsedSeconds);
+            }
+          }
+          this.notifyObservers();
+        }
+      });
+
+      const unsubscribeComplete = window.api.download.onComplete((event, data) => {
+        if (data.itemId === downloadId) {
+          const download = this.downloads.get(downloadId);
+          if (download) {
+            download.status = 'completed';
+            download.progress = 100;
+            download.endTime = Date.now();
+            download.path = data.filePath;
+          }
+          this.notifyObservers();
+          resolve(); // Resolver la promesa cuando se completa
+        }
+      });
+
+      const unsubscribeError = window.api.download.onError((event, error) => {
+        if (error.itemId === downloadId) {
+          const download = this.downloads.get(downloadId);
+          if (download) {
+            download.status = 'error';
+            download.endTime = Date.now();
+          }
+          this.notifyObservers();
+          reject(new Error(error.message)); // Rechazar la promesa si hay error
+        }
+      });
+
+      // Iniciar la descarga
+      window.api.download.start(downloadData);
+
+      // Limpieza de listeners cuando se complete o haya error
+      // (Los listeners se manejan globalmente en el constructor, así que solo se notificará al completar)
+    });
   }
 
   pauseDownload(downloadId: string) {
+    // Nota: La API de Electron no tiene pausa directa, así que solo cambiamos el estado visualmente
     const download = this.downloads.get(downloadId);
     if (download && download.status === 'downloading') {
       download.status = 'paused';
@@ -191,7 +372,7 @@ export class DownloadService {
     const completedIds = Array.from(this.downloads.entries())
       .filter(([_, download]) => download.status === 'completed')
       .map(([id, _]) => id);
-    
+
     completedIds.forEach(id => this.downloads.delete(id));
     this.notifyObservers();
   }
@@ -209,22 +390,22 @@ export class DownloadService {
 
       const downloadInfo = await response.json();
       const downloadUrl = downloadInfo.uri || downloadInfo.binary.link; // Adaptar según formato real de la API
-      
-      const download = this.createDownload(
+
+      const download = this.downloadFile(
         downloadUrl,
+        `java-${javaVersion}-${osFamily}-${arch}.zip`,
         `Java ${javaVersion} (${osFamily}/${arch})`
       );
 
-      await this.startDownload(download.id);
       return download;
     } catch (error) {
       console.error('Error downloading Java from Adoptium:', error);
-      const download = this.createDownload(
+      const download = this.downloadFile(
         '',
-        `Java ${javaVersion} (${osFamily}/${arch})`
+        `java-${javaVersion}-${osFamily}-${arch}.zip`,
+        `Error: Java ${javaVersion} (${osFamily}/${arch})`
       );
       download.status = 'error';
-      download.name = `Error: Java ${javaVersion} (${osFamily}/${arch})`;
       this.notifyObservers();
       throw error;
     }

@@ -366,57 +366,92 @@ ipcMain.handle('java:explore', async () => {
 
 
 // ===== MANEJO DE DESCARGAS =====
-ipcMain.on('download:start', (event, { url, filename, itemId }) => {
+import fs from 'node:fs';
+import { pipeline } from 'node:stream';
+import { promisify } from 'node:util';
+import fetch from 'node-fetch';
+
+const pipelineAsync = promisify(pipeline);
+
+// Función para limpiar nombres de archivos y rutas
+function sanitizeFileName(fileName: string): string {
+  // Reemplazar caracteres problemáticos
+  return fileName
+    .replace(/[:<>|*?"]/g, '_')  // Reemplazar caracteres prohibidos en Windows
+    .replace(/@/g, '_at_')       // Reemplazar @
+    .replace(/:/g, '_');         // Reemplazar dos puntos específicamente
+}
+
+ipcMain.on('download:start', async (event, { url, filename, itemId }) => {
   const win = BrowserWindow.getFocusedWindow();
   if (!win) return;
 
-  const downloadsPath = app.getPath('downloads');
-  const filePath = path.join(downloadsPath, filename);
+  // Limpiar el nombre de archivo para evitar caracteres problemáticos
+  const cleanFilename = sanitizeFileName(filename);
 
-  win.webContents.downloadURL(url);
+  // Guardar en el directorio de instancias del launcher (en userData)
+  const { instancesBaseDefault } = basePaths();
+  const downloadPath = path.join(instancesBaseDefault, '.downloads'); // Usar una carpeta temporal para descargas
+  ensureDir(downloadPath);
 
-  win.webContents.session.once('will-download', (e, item) => {
-    item.setSavePath(filePath);
+  // Crear la ruta completa del archivo y asegurarse de que los directorios existan
+  const filePath = path.join(downloadPath, cleanFilename);
+  const fileDir = path.dirname(filePath);
+  ensureDir(fileDir); // Asegurar que el directorio del archivo exista
 
-    item.on('updated', (_e, state) => {
-      if (state === 'interrupted') {
-        win.webContents.send('download:error', {
+  try {
+    // Realizar la descarga usando fetch y streams para evitar ventanas emergentes
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const totalBytes = parseInt(response.headers.get('content-length') || '0', 10);
+    let downloadedBytes = 0;
+
+    // Crear un stream de escritura para el archivo
+    const fileStream = fs.createWriteStream(filePath);
+
+    // Controlar el progreso de la descarga
+    const progressStream = new (require('stream').Transform)({
+      transform(chunk, encoding, callback) {
+        downloadedBytes += chunk.length;
+        const progress = totalBytes > 0 ? downloadedBytes / totalBytes : 0;
+
+        // Enviar progreso al frontend
+        win.webContents.send('download:progress', {
           itemId,
-          message: 'La descarga fue interrumpida'
+          progress
         });
-      } else if (state === 'progressing') {
-        if (item.isPaused()) {
-          win.webContents.send('download:error', {
-            itemId,
-            message: 'La descarga está en pausa'
-          });
-        } else {
-          const total = item.getTotalBytes();
-          const received = item.getReceivedBytes();
-          const progress = total > 0 ? received / total : 0;
 
-          win.webContents.send('download:progress', {
-            itemId,
-            progress
-          });
-        }
+        callback(null, chunk);
       }
     });
 
-    item.once('done', (_e, state) => {
-      if (state === 'completed') {
-        win.webContents.send('download:complete', {
-          itemId,
-          filePath: item.getSavePath()
-        });
-      } else {
-        win.webContents.send('download:error', {
-          itemId,
-          message: `Error en la descarga: ${state}`
-        });
-      }
+    // Conectar los streams
+    response.body
+      .pipe(progressStream)
+      .pipe(fileStream);
+
+    // Esperar a que la descarga termine
+    await new Promise((resolve, reject) => {
+      fileStream.on('finish', resolve);
+      fileStream.on('error', reject);
+      progressStream.on('error', reject);
     });
-  });
+
+    // Enviar evento de descarga completada
+    win.webContents.send('download:complete', {
+      itemId,
+      filePath
+    });
+  } catch (error) {
+    console.error(`Error downloading ${url}:`, error);
+    win.webContents.send('download:error', {
+      itemId,
+      message: `Error en la descarga: ${(error as Error).message}`
+    });
+  }
 });
 
 // --- Modrinth API Integration --- //

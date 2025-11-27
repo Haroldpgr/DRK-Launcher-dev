@@ -3035,7 +3035,6 @@ var require_lib2 = __commonJS({
 // src/main/main.ts
 var import_electron2 = require("electron");
 var import_node_path3 = __toESM(require("node:path"), 1);
-var import_node_fs = __toESM(require("node:fs"), 1);
 
 // src/services/db.ts
 var import_node_path = __toESM(require("node:path"), 1);
@@ -3622,6 +3621,9 @@ var javaService = new JavaService();
 var javaService_default = javaService;
 
 // src/main/main.ts
+var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_stream = require("node:stream");
+var import_node_util = require("node:util");
 var import_node_fetch = __toESM(require_lib2(), 1);
 var win = null;
 import_electron2.app.whenReady().then(async () => {
@@ -3907,51 +3909,56 @@ import_electron2.ipcMain.handle("java:explore", async () => {
   }
   return null;
 });
-import_electron2.ipcMain.on("download:start", (event, { url, filename, itemId }) => {
+var pipelineAsync = (0, import_node_util.promisify)(import_node_stream.pipeline);
+function sanitizeFileName(fileName) {
+  return fileName.replace(/[:<>|*?"]/g, "_").replace(/@/g, "_at_").replace(/:/g, "_");
+}
+import_electron2.ipcMain.on("download:start", async (event, { url, filename, itemId }) => {
   const win2 = import_electron2.BrowserWindow.getFocusedWindow();
   if (!win2) return;
-  const downloadsPath = import_electron2.app.getPath("downloads");
-  const filePath = import_node_path3.default.join(downloadsPath, filename);
-  win2.webContents.downloadURL(url);
-  win2.webContents.session.once("will-download", (e, item) => {
-    item.setSavePath(filePath);
-    item.on("updated", (_e, state) => {
-      if (state === "interrupted") {
-        win2.webContents.send("download:error", {
+  const cleanFilename = sanitizeFileName(filename);
+  const { instancesBaseDefault } = basePaths();
+  const downloadPath = import_node_path3.default.join(instancesBaseDefault, ".downloads");
+  ensureDir(downloadPath);
+  const filePath = import_node_path3.default.join(downloadPath, cleanFilename);
+  const fileDir = import_node_path3.default.dirname(filePath);
+  ensureDir(fileDir);
+  try {
+    const response = await (0, import_node_fetch.default)(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const totalBytes = parseInt(response.headers.get("content-length") || "0", 10);
+    let downloadedBytes = 0;
+    const fileStream = import_node_fs.default.createWriteStream(filePath);
+    const progressStream = new (require("stream")).Transform({
+      transform(chunk, encoding, callback) {
+        downloadedBytes += chunk.length;
+        const progress = totalBytes > 0 ? downloadedBytes / totalBytes : 0;
+        win2.webContents.send("download:progress", {
           itemId,
-          message: "La descarga fue interrumpida"
+          progress
         });
-      } else if (state === "progressing") {
-        if (item.isPaused()) {
-          win2.webContents.send("download:error", {
-            itemId,
-            message: "La descarga est\xE1 en pausa"
-          });
-        } else {
-          const total = item.getTotalBytes();
-          const received = item.getReceivedBytes();
-          const progress = total > 0 ? received / total : 0;
-          win2.webContents.send("download:progress", {
-            itemId,
-            progress
-          });
-        }
+        callback(null, chunk);
       }
     });
-    item.once("done", (_e, state) => {
-      if (state === "completed") {
-        win2.webContents.send("download:complete", {
-          itemId,
-          filePath: item.getSavePath()
-        });
-      } else {
-        win2.webContents.send("download:error", {
-          itemId,
-          message: `Error en la descarga: ${state}`
-        });
-      }
+    response.body.pipe(progressStream).pipe(fileStream);
+    await new Promise((resolve, reject) => {
+      fileStream.on("finish", resolve);
+      fileStream.on("error", reject);
+      progressStream.on("error", reject);
     });
-  });
+    win2.webContents.send("download:complete", {
+      itemId,
+      filePath
+    });
+  } catch (error) {
+    console.error(`Error downloading ${url}:`, error);
+    win2.webContents.send("download:error", {
+      itemId,
+      message: `Error en la descarga: ${error.message}`
+    });
+  }
 });
 var MODRINTH_API_URL = "https://api.modrinth.com/v2";
 async function fetchModrinthContent(contentType, search) {

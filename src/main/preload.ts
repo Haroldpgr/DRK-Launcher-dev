@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('api', {
       return ipcRenderer.invoke('modrinth:search', options);
     }
   },
-  
+
   // Métodos de descarga
   download: {
     start: (data: { url: string; filename: string; itemId: string }) =>
@@ -21,15 +21,41 @@ contextBridge.exposeInMainWorld('api', {
     onError: (callback: (event: any, error: any) => void) =>
       ipcRenderer.on('download:error', callback)
   },
-  
+
   // Otros métodos necesarios (mantén solo los que necesites)
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (s: unknown) => ipcRenderer.invoke('settings:set', s)
   },
-  
-  // Agrega aquí otros métodos necesarios
-  // ...
+
+  // API de instancias
+  instances: {
+    list: () => ipcRenderer.invoke('instances:list'),
+    create: (p: unknown) => ipcRenderer.invoke('instances:create', p),
+    update: (p: unknown) => ipcRenderer.invoke('instances:update', p),
+    delete: (id: string) => ipcRenderer.invoke('instances:delete', id),
+    openFolder: (id: string) => ipcRenderer.invoke('instances:openFolder', id)
+  },
+
+  // Otros APIs
+  versions: {
+    list: () => ipcRenderer.invoke('versions:list')
+  },
+
+  crash: {
+    analyze: (p: unknown) => ipcRenderer.invoke('crash:analyze', p),
+    list: () => ipcRenderer.invoke('crash:list')
+  },
+
+  servers: {
+    list: () => ipcRenderer.invoke('servers:list'),
+    save: (list: unknown) => ipcRenderer.invoke('servers:save', list),
+    ping: (ip: string) => ipcRenderer.invoke('servers:ping', ip)
+  },
+
+  game: {
+    launch: (p: unknown) => ipcRenderer.invoke('game:launch', p)
+  }
 });
 
 // Declaración de tipos para TypeScript
@@ -48,6 +74,28 @@ declare global {
       settings: {
         get: () => Promise<any>;
         set: (s: unknown) => Promise<any>;
+      };
+      instances: {
+        list: () => Promise<any>;
+        create: (p: unknown) => Promise<any>;
+        update: (p: unknown) => Promise<any>;
+        delete: (id: string) => Promise<any>;
+        openFolder: (id: string) => Promise<any>;
+      };
+      versions: {
+        list: () => Promise<any>;
+      };
+      crash: {
+        analyze: (p: unknown) => Promise<any>;
+        list: () => Promise<any>;
+      };
+      servers: {
+        list: () => Promise<any>;
+        save: (list: unknown) => Promise<any>;
+        ping: (ip: string) => Promise<any>;
+      };
+      game: {
+        launch: (p: unknown) => Promise<any>;
       };
     };
   }

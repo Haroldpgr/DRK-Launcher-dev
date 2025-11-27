@@ -25,7 +25,7 @@ export const instanceProfileService = {
   linkInstanceToProfile(instanceId: string, profileUsername: string): boolean {
     const links = getLinks();
     const existingLinkIndex = links.findIndex(link => link.instanceId === instanceId);
-    
+
     if (existingLinkIndex !== -1) {
       // Actualiza la asociación existente
       links[existingLinkIndex].profileUsername = profileUsername;
@@ -33,18 +33,18 @@ export const instanceProfileService = {
       // Crea una nueva asociación
       links.push({ instanceId, profileUsername });
     }
-    
+
     saveLinks(links);
-    
+
     // Actualiza el perfil para incluir esta instancia
     const profile = profileService.getProfileByUsername(profileUsername);
     if (profile) {
       const profileInstances = profile.instances || [];
       if (!profileInstances.includes(instanceId)) {
-        profileService.updateProfile(profileUsername, { ...profile, instances: [...profileInstances, instanceId] });
+        profileService.updateProfile(profileUsername, { instances: [...profileInstances, instanceId] });
       }
     }
-    
+
     return true;
   },
 
@@ -131,15 +131,5 @@ export const instanceProfileService = {
 };
 
 // Agregar método para actualizar perfiles en el servicio de perfiles
-(profileService as any).updateProfile = function(username: string, updatedProfile: Partial<Profile>): boolean {
-  const profiles = getProfiles();
-  const profileIndex = profiles.findIndex(p => p.username === username);
-  
-  if (profileIndex !== -1) {
-    profiles[profileIndex] = { ...profiles[profileIndex], ...updatedProfile };
-    saveProfiles(profiles);
-    return true;
-  }
-  
-  return false;
-};
+// Nota: Esta funcionalidad se ha movido al servicio de perfiles original para evitar conflictos
+// Si se necesita actualizar perfiles desde aquí, se puede hacer a través de profileService directamente

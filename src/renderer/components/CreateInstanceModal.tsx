@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Profile, profileService } from '../services/profileService';
+import { downloadService } from '../services/downloadService';
+import { instanceProfileService } from '../services/instanceProfileService';
 import '../components/slider.css';
 
 interface CreateInstanceModalProps {
@@ -276,132 +278,163 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
 
   // Función para iniciar el proceso de descarga de archivos necesarios
   const startDownloadProcess = async (
-    instanceName: string, 
-    mcVersion: string, 
-    loaderType: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge', 
+    instanceName: string,
+    mcVersion: string,
+    loaderType: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge',
     loaderVersion: string
   ) => {
     try {
       // Obtener información del cliente de Minecraft de la API de Mojang
       const manifestResponse = await fetch('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json');
       const manifest = await manifestResponse.json();
-      
+
       // Encontrar la versión específica
       const versionInfo = manifest.versions.find((v: any) => v.id === mcVersion);
       if (!versionInfo) {
         throw new Error(`Versión ${mcVersion} no encontrada`);
       }
-      
+
       // Obtener metadatos de la versión
       const versionResponse = await fetch(versionInfo.url);
       const versionData = await versionResponse.json();
-      
-      // Descargar el JAR del cliente
-      const clientDownload = {
+
+      // Preparar lista de archivos a descargar
+      const filesToDownload = [];
+
+      // Agregar el JAR del cliente
+      filesToDownload.push({
         url: versionData.downloads.client.url,
         filename: `versions/${mcVersion}/${mcVersion}.jar`,
-        itemId: `${instanceName}-client-jar`
-      };
-      
-      window.api.download.start(clientDownload);
-      
-      // Descargar librerías necesarias
+        displayName: `${instanceName} - Client JAR`
+      });
+
+      // Agregar librerías necesarias
       if (versionData.libraries && Array.isArray(versionData.libraries)) {
         for (const library of versionData.libraries) {
           if (library.downloads && library.downloads.artifact) {
-            const libraryDownload = {
+            // Limpiar el nombre del archivo para evitar caracteres problemáticos
+            const cleanLibraryName = library.name.replace(/[:<>|*?"]/g, '_').replace(/\./g, '_');
+            const fileName = `libraries/${cleanLibraryName.replace(/\//g, '_')}.jar`;
+
+            filesToDownload.push({
               url: library.downloads.artifact.url,
-              filename: `libraries/${library.name.replace(':', '/')}.jar`,
-              itemId: `${instanceName}-${library.name.replace(':', '-')}`
-            };
-            
-            window.api.download.start(libraryDownload);
+              filename: fileName,
+              displayName: `${instanceName} - ${library.name}`
+            });
           }
         }
       }
-      
-      // Si es un mod loader, descargar los archivos adicionales
+
+      // Si es un mod loader, agregar los archivos adicionales
       if (loaderType !== 'vanilla') {
-        await downloadLoaderFiles(loaderType, mcVersion, loaderVersion, instanceName);
+        const loaderFiles = await getLoaderFiles(loaderType, mcVersion, loaderVersion, instanceName);
+        filesToDownload.push(...loaderFiles);
       }
+
+      // Iniciar descarga agrupada
+      await downloadService.downloadInstance(instanceName, filesToDownload);
     } catch (err) {
       console.error('Error en el proceso de descarga:', err);
       throw err;
     }
   };
 
-  // Función para descargar archivos del loader
+  // Función para obtener los archivos del loader
+  const getLoaderFiles = async (
+    loaderType: 'forge' | 'fabric' | 'quilt' | 'neoforge',
+    mcVersion: string,
+    loaderVersion: string,
+    instanceName: string
+  ): Promise<Array<{url: string, filename: string, displayName: string}>> => {
+    const filesToDownload = [];
+
+    switch (loaderType) {
+      case 'fabric':
+        // Obtener la versión del loader de Fabric
+        const fabricResponse = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${mcVersion}/${loaderVersion}/profile/json`);
+        const fabricProfile = await fabricResponse.json();
+
+        // Procesar e iniciar descargas de Fabric
+        if (fabricProfile.libraries && Array.isArray(fabricProfile.libraries)) {
+          for (const library of fabricProfile.libraries) {
+            if (library.downloads && library.downloads.artifact) {
+              // Limpiar el nombre del archivo para evitar caracteres problemáticos
+              const cleanLibraryName = library.name.replace(/[:<>|*?"]/g, '_').replace(/\./g, '_');
+              const fileName = `libraries/${cleanLibraryName.replace(/\//g, '_')}.jar`;
+
+              filesToDownload.push({
+                url: library.downloads.artifact.url,
+                filename: fileName,
+                displayName: `${instanceName} - Fabric - ${library.name}`
+              });
+            }
+          }
+        }
+        break;
+
+      case 'forge':
+        // Para Forge, necesitamos encontrar el instalador o la versión específica
+        const forgeResponse = await fetch('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_v3.json');
+        const forgeData = await forgeResponse.json();
+        const forgeVersion = forgeData.promos[`${mcVersion}-latest`] || forgeData.promos[`${mcVersion}-recommended`];
+
+        if (forgeVersion && forgeVersion.url) {
+          // Limpiar caracteres problemáticos del nombre de archivo
+          const cleanVersion = forgeVersion.version.replace(/[:<>|*?"]/g, '_');
+          const cleanMcVersion = mcVersion.replace(/[:<>|*?"]/g, '_');
+          const fileName = `libraries/net/minecraftforge/forge/${cleanMcVersion}-${cleanVersion}/forge-${cleanMcVersion}-${cleanVersion}.jar`;
+
+          filesToDownload.push({
+            url: forgeVersion.url,
+            filename: fileName,
+            displayName: `${instanceName} - Forge Installer - ${forgeVersion.version}`
+          });
+        }
+        break;
+
+      case 'quilt':
+        // Obtener la versión del loader de Quilt
+        const quiltResponse = await fetch(`https://meta.quiltmc.org/v3/versions/loader/${mcVersion}/${loaderVersion}/profile/json`);
+        const quiltProfile = await quiltResponse.json();
+
+        // Procesar e iniciar descargas de Quilt
+        if (quiltProfile.libraries && Array.isArray(quiltProfile.libraries)) {
+          for (const library of quiltProfile.libraries) {
+            if (library.downloads && library.downloads.artifact) {
+              // Limpiar el nombre del archivo para evitar caracteres problemáticos
+              const cleanLibraryName = library.name.replace(/[:<>|*?"]/g, '_').replace(/\./g, '_');
+              const fileName = `libraries/${cleanLibraryName.replace(/\//g, '_')}.jar`;
+
+              filesToDownload.push({
+                url: library.downloads.artifact.url,
+                filename: fileName,
+                displayName: `${instanceName} - Quilt - ${library.name}`
+              });
+            }
+          }
+        }
+        break;
+
+      case 'neoforge':
+        // Obtener versiones de NeoForge
+        // Nota: NeoForge usa la API de Forge para obtener información pero con diferencias
+        // La implementación específica dependerá de la API oficial de NeoForge
+        break;
+    }
+
+    return filesToDownload;
+  };
+
+  // Función para descargar archivos del loader (mantenida para compatibilidad)
   const downloadLoaderFiles = async (
     loaderType: 'forge' | 'fabric' | 'quilt' | 'neoforge',
     mcVersion: string,
     loaderVersion: string,
     instanceName: string
   ) => {
-    switch (loaderType) {
-      case 'fabric':
-        // Obtener la versión del loader de Fabric
-        const fabricResponse = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${mcVersion}/${loaderVersion}/profile/json`);
-        const fabricProfile = await fabricResponse.json();
-        
-        // Procesar e iniciar descargas de Fabric
-        if (fabricProfile.libraries && Array.isArray(fabricProfile.libraries)) {
-          for (const library of fabricProfile.libraries) {
-            if (library.downloads && library.downloads.artifact) {
-              const libraryDownload = {
-                url: library.downloads.artifact.url,
-                filename: `libraries/${library.name.replace(':', '/')}.jar`,
-                itemId: `${instanceName}-fabric-${library.name.replace(':', '-')}`
-              };
-              
-              window.api.download.start(libraryDownload);
-            }
-          }
-        }
-        break;
-        
-      case 'forge':
-        // Para Forge, necesitamos encontrar el instalador o la versión específica
-        const forgeResponse = await fetch('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_v3.json');
-        const forgeData = await forgeResponse.json();
-        const forgeVersion = forgeData.promos[`${mcVersion}-latest`] || forgeData.promos[`${mcVersion}-recommended`];
-        
-        if (forgeVersion && forgeVersion.url) {
-          const forgeDownload = {
-            url: forgeVersion.url,
-            filename: `libraries/net/minecraftforge/forge/${mcVersion}-${forgeVersion.version}/forge-${mcVersion}-${forgeVersion.version}.jar`,
-            itemId: `${instanceName}-forge-installer`
-          };
-          
-          window.api.download.start(forgeDownload);
-        }
-        break;
-        
-      case 'quilt':
-        // Obtener la versión del loader de Quilt
-        const quiltResponse = await fetch(`https://meta.quiltmc.org/v3/versions/loader/${mcVersion}/${loaderVersion}/profile/json`);
-        const quiltProfile = await quiltResponse.json();
-        
-        // Procesar e iniciar descargas de Quilt
-        if (quiltProfile.libraries && Array.isArray(quiltProfile.libraries)) {
-          for (const library of quiltProfile.libraries) {
-            if (library.downloads && library.downloads.artifact) {
-              const libraryDownload = {
-                url: library.downloads.artifact.url,
-                filename: `libraries/${library.name.replace(':', '/')}.jar`,
-                itemId: `${instanceName}-quilt-${library.name.replace(':', '-')}`
-              };
-              
-              window.api.download.start(libraryDownload);
-            }
-          }
-        }
-        break;
-        
-      case 'neoforge':
-        // Obtener versiones de NeoForge
-        // Nota: NeoForge usa la API de Forge para obtener información pero con diferencias
-        // La implementación específica dependerá de la API oficial de NeoForge
-        break;
+    const loaderFiles = await getLoaderFiles(loaderType, mcVersion, loaderVersion, instanceName);
+    if (loaderFiles.length > 0) {
+      await downloadService.downloadInstance(`${instanceName} - ${loaderType}`, loaderFiles);
     }
   };
 
@@ -453,12 +486,25 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
       };
 
       // Crear la carpeta de la instancia y estructura necesaria
-      await window.api.instances.create(instanceData);
+      const createdInstance = await window.api.instances.create(instanceData);
 
-      // Iniciar el proceso de descarga de archivos necesarios
-      await startDownloadProcess(instanceName, mcVersion, loaderType, selectedLoaderVersion || '');
-      
-      // Cerrar modal después de crear
+      // Enlazar la instancia recién creada con el perfil actual del usuario
+      const currentProfile = profileService.getCurrentProfile();
+      if (currentProfile) {
+        instanceProfileService.linkInstanceToProfile(createdInstance.id, currentProfile);
+      } else {
+        // Si no hay perfil actual, usar el primer perfil disponible
+        const profiles = profileService.getAllProfiles();
+        if (profiles.length > 0) {
+          instanceProfileService.linkInstanceToProfile(createdInstance.id, profiles[0].username);
+        }
+      }
+
+      // Iniciar el proceso de descarga de archivos necesarios en segundo plano
+      // No esperar a que se completen las descargas
+      startDownloadProcess(instanceName, mcVersion, loaderType, selectedLoaderVersion || '');
+
+      // Cerrar modal inmediatamente después de crear la instancia
       onClose();
     } catch (err) {
       console.error('Error al crear instancia:', err);
