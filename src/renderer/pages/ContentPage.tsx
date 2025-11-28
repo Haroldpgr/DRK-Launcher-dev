@@ -307,6 +307,13 @@ const ContentPage: React.FC = () => {
     }
   }, [selectedInstanceId, selectedContent, installedContent]);
 
+  // Actualizar versiones y loaders compatibles cuando cambia la selección
+  useEffect(() => {
+    if (selectedContent && (selectedVersion || selectedLoader)) {
+      loadCompatibleVersionsAndLoaders(selectedContent, selectedVersion, selectedLoader);
+    }
+  }, [selectedVersion, selectedLoader]);
+
   const handleContentClick = (item: ContentItem) => {
     navigate(`/contenido/${type}/${item.id}`);
   };
@@ -387,7 +394,7 @@ const ContentPage: React.FC = () => {
           }
 
           // Validar que se haya seleccionado una versión
-          if (!selectedVersion || selectedVersion === 'all') {
+          if (!selectedVersion || selectedVersion === 'all' || selectedVersion === '') {
             alert('Por favor, selecciona una versión de Minecraft.');
             return;
           }
@@ -396,6 +403,43 @@ const ContentPage: React.FC = () => {
           if ((contentType === 'mod' || contentType === 'modpack') && !selectedLoader) {
             alert('Por favor, selecciona un loader compatible.');
             return;
+          }
+
+          // Verificar si la combinación de versión y loader es compatible con el contenido
+          if (window.api.modrinth.getCompatibleVersions) {
+            try {
+              // Verificar si existe una versión compatible con la versión y loader seleccionados
+              const compatibleVersionsCheck = await window.api.modrinth.getCompatibleVersions({
+                projectId: item.id,
+                mcVersion: selectedVersion,
+                loader: selectedLoader || undefined
+              });
+
+              if (compatibleVersionsCheck.length === 0) {
+                alert(`No se encontró una versión compatible para ${selectedVersion} y ${selectedLoader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+                return;
+              }
+
+              // Para modpacks, verificar también si tiene versiones específicas disponibles
+              if (contentType === 'modpack') {
+                const hasSpecificVersion = compatibleVersionsCheck.some(version =>
+                  version.game_versions.includes(selectedVersion) &&
+                  (!selectedLoader || version.loaders.includes(selectedLoader))
+                );
+
+                if (!hasSpecificVersion) {
+                  alert(`El modpack no tiene una versión compatible para ${selectedVersion} y ${selectedLoader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+                  return;
+                }
+              }
+            } catch (error) {
+              console.log('No se pudo verificar compatibilidad detallada, usando validación básica:', error);
+              // Si no se puede verificar, mostrar advertencia pero permitir continuar
+              const continueAnyway = confirm(`No se pudo verificar la compatibilidad completa. ¿Deseas intentar instalar de todas formas?`);
+              if (!continueAnyway) {
+                return;
+              }
+            }
           }
         }
 
