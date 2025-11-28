@@ -138,10 +138,15 @@ function Item({ path, current, onClick, icon, title }: { path: string; current: 
       title={title}
       aria-label={title}
       onClick={onClick}
-      className={`w-9 h-9 flex items-center justify-center rounded-lg mb-2 shadow transition-all duration-300 ease-out transform hover:scale-105 hover:bg-gradient-to-br hover:from-blue-500 hover:to-primary ${current ? 'bg-primary text-black scale-105' : 'bg-gray-800 text-primary'}`}
+      className={`relative w-10 h-10 flex items-center justify-center rounded-2xl mb-2 shadow-lg border border-gray-700/60 overflow-hidden group transition-all duration-300 ease-out ${
+        current
+          ? 'bg-gradient-to-br from-primary via-blue-500 to-indigo-600 text-black scale-105 ring-2 ring-blue-400/70'
+          : 'bg-gray-900/90 text-primary hover:bg-gradient-to-br hover:from-blue-500 hover:via-indigo-500 hover:to-primary hover:text-black hover:shadow-blue-500/40 hover:scale-105'
+      }`}
       style={{ fontFamily: 'Inter, sans-serif' }}
     >
-      <div className="flex items-center justify-center w-full h-full">
+      <div className="pointer-events-none absolute inset-0 opacity-40 bg-gradient-to-b from-white/20 via-transparent to-transparent" />
+      <div className="relative flex items-center justify-center w-full h-full">
         <Icon name={icon} />
       </div>
     </button>
@@ -151,7 +156,9 @@ function Item({ path, current, onClick, icon, title }: { path: string; current: 
 export default function Sidebar({ currentPath, onNavigate }: Props) {
   return (
     <div className="w-16 bg-gray-900/90 backdrop-blur-sm border-r border-gray-800 p-2 flex flex-col items-center">
-      <div className="w-8 h-8 rounded-lg bg-primary text-black flex items-center justify-center mb-3 text-xs font-bold">DRK</div>
+      <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-blue-500 to-indigo-600 text-black flex items-center justify-center mb-4 text-xs font-bold shadow-lg border border-gray-700/60">
+        DRK
+      </div>
       <Item title="Inicio" path="/" current={currentPath === '/'} onClick={() => onNavigate('/')} icon="home" />
       <Item title="Contenido" path="/contenido" current={currentPath === '/contenido'} onClick={() => onNavigate('/contenido')} icon="contenido" />
       <Item title="Skins" path="/skins" current={currentPath === '/skins'} onClick={() => onNavigate('/skins')} icon="skins" />
@@ -169,14 +176,18 @@ export default function Sidebar({ currentPath, onNavigate }: Props) {
           title="Descargas"
           aria-label="Descargas"
           onClick={() => onNavigate('/downloads')}
-          className={`w-9 h-9 flex items-center justify-center rounded-lg shadow transition-all duration-300 ease-out ${
-            currentPath === '/downloads' ? 'bg-primary text-black scale-105' : 'bg-gray-800 text-primary'
-          } hover:scale-105 hover:bg-gradient-to-br hover:from-blue-500 hover:to-primary`}
+          className={`relative w-10 h-10 flex items-center justify-center rounded-2xl shadow-lg border border-gray-700/60 overflow-hidden group transition-all duration-300 ease-out ${
+            currentPath === '/downloads'
+              ? 'bg-gradient-to-br from-primary via-blue-500 to-indigo-600 text-black scale-105 ring-2 ring-blue-400/70'
+              : 'bg-gray-900/90 text-primary hover:bg-gradient-to-br hover:from-blue-500 hover:via-indigo-500 hover:to-primary hover:text-black hover:shadow-blue-500/40 hover:scale-105'
+          }`}
           style={{ fontFamily: 'Inter, sans-serif' }}
         >
-          <div className="flex items-center justify-center w-full h-full">
+          {/* brillo superior */}
+          <div className="pointer-events-none absolute inset-0 opacity-40 bg-gradient-to-b from-white/20 via-transparent to-transparent" />
+          <div className="relative flex items-center justify-center w-full h-full">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4-4 4m0 0-4-4m4 4V4"></path>
             </svg>
           </div>
         </button>

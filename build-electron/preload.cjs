@@ -6,7 +6,8 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     search: (options) => {
       console.log("Buscando en Modrinth:", options);
       return import_electron.ipcRenderer.invoke("modrinth:search", options);
-    }
+    },
+    getCompatibleVersions: (payload) => import_electron.ipcRenderer.invoke("modrinth:get-compatible-versions", payload)
   },
   // Métodos de descarga
   download: {

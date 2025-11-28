@@ -1,6 +1,7 @@
 // src/renderer/services/downloadService.ts
 import { settingsService } from './settingsService';
 import { notificationService } from './notificationService';
+import { profileService } from './profileService';
 
 export interface Download {
   id: string;
@@ -14,12 +15,15 @@ export interface Download {
   endTime?: number;
   speed: number; // bytes per second
   path?: string;
+  /** Usuario/perfil dueño de esta descarga (para historial por perfil) */
+  profileUsername?: string;
 }
 
 export class DownloadService {
   private downloads: Map<string, Download> = new Map();
   private observers: Array<(downloads: Download[]) => void> = [];
   private downloadNotifications: Map<string, string> = new Map(); // Mapa de downloadId a notificationId
+  private readonly STORAGE_KEY = 'launcher_downloads_v1';
 
   constructor() {
     // Registrar listeners globales para los eventos de descarga
@@ -28,6 +32,9 @@ export class DownloadService {
     window.api.download.onProgress(this.handleProgress.bind(this));
     window.api.download.onComplete(this.handleComplete.bind(this));
     window.api.download.onError(this.handleError.bind(this));
+
+    // Cargar historial persistido
+    this.loadFromStorage();
   }
 
   private handleProgress(event: any, data: { itemId: string; progress: number }) {
@@ -100,6 +107,8 @@ export class DownloadService {
       download.endTime = Date.now();
       download.path = data.filePath;
 
+      this.persistDownloads();
+
       // Mostrar notificación de éxito
       const notificationId = this.downloadNotifications.get(data.itemId);
       if (notificationId) {
@@ -129,6 +138,8 @@ export class DownloadService {
     if (download) {
       download.status = 'error';
       download.endTime = Date.now();
+
+      this.persistDownloads();
 
       // Mostrar notificación de error
       const notificationId = this.downloadNotifications.get(error.itemId);
@@ -165,8 +176,41 @@ export class DownloadService {
     this.observers.forEach(observer => observer(downloadsArray));
   }
 
+  private loadFromStorage() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      if (!raw) return;
+      const parsed: Download[] = JSON.parse(raw);
+      this.downloads = new Map(parsed.map(d => [d.id, d]));
+      this.notifyObservers();
+    } catch (e) {
+      console.error('Error cargando historial de descargas', e);
+    }
+  }
+
+  private persistDownloads() {
+    try {
+      const all = Array.from(this.downloads.values());
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch (e) {
+      console.error('Error guardando historial de descargas', e);
+    }
+  }
+
+  private getCurrentProfileUsername(): string | null {
+    return profileService.getCurrentProfile();
+  }
+
+  private isOwnedByCurrentProfile(download: Download): boolean {
+    const current = this.getCurrentProfileUsername();
+    if (!current) return true; // si no hay perfil actual, mostrar todo
+    // Descargas antiguas sin perfil asignado se muestran para todos
+    return download.profileUsername === current || !download.profileUsername;
+  }
+
   createDownload(url: string, name: string): Download {
     const downloadId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const profileUsername = this.getCurrentProfileUsername() || undefined;
     const newDownload: Download = {
       id: downloadId,
       name,
@@ -176,10 +220,12 @@ export class DownloadService {
       downloadedBytes: 0,
       totalBytes: 100 * 1024 * 1024, // Valor por defecto (100MB), se actualizará al iniciar la descarga real
       startTime: Date.now(),
-      speed: 0
+      speed: 0,
+      profileUsername,
     };
 
     this.downloads.set(downloadId, newDownload);
+    this.persistDownloads();
 
     // Mostrar notificación de inicio de descarga
     const notificationId = notificationService.show({
@@ -214,6 +260,7 @@ export class DownloadService {
     }
 
     download.status = 'downloading';
+    this.persistDownloads();
     this.notifyObservers();
 
     try {
@@ -228,6 +275,7 @@ export class DownloadService {
     } catch (error) {
       console.error('Error downloading file:', error);
       download.status = 'error';
+      this.persistDownloads();
       this.notifyObservers();
     }
   }
@@ -239,6 +287,7 @@ export class DownloadService {
   downloadFile(url: string, filename: string, displayName?: string): Download {
     const downloadId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const name = displayName || filename;
+    const profileUsername = this.getCurrentProfileUsername() || undefined;
     const newDownload: Download = {
       id: downloadId,
       name,
@@ -248,10 +297,12 @@ export class DownloadService {
       downloadedBytes: 0,
       totalBytes: 100 * 1024 * 1024, // Valor por defecto (100MB)
       startTime: Date.now(),
-      speed: 0
+      speed: 0,
+      profileUsername,
     };
 
     this.downloads.set(downloadId, newDownload);
+    this.persistDownloads();
     this.notifyObservers();
 
     // Iniciar la descarga real usando el API de Electron
@@ -269,6 +320,7 @@ export class DownloadService {
   // Método para iniciar una descarga agrupada por instancia
   async downloadInstance(instanceName: string, filesToDownload: Array<{ url: string; filename: string; displayName: string }>): Promise<void> {
     const groupId = `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const profileUsername = this.getCurrentProfileUsername() || undefined;
 
     // Estimar tamaño total de forma realista (usando estimaciones promedio por tipo de archivo)
     // Los archivos JAR de Minecraft suelen ser de 1-15MB, así que usaremos un valor promedio
@@ -285,10 +337,12 @@ export class DownloadService {
       downloadedBytes: 0,
       totalBytes: totalBytes,
       startTime: Date.now(),
-      speed: 0
+      speed: 0,
+      profileUsername,
     };
 
     this.downloads.set(groupId, groupDownload);
+    this.persistDownloads();
 
     // Mostrar notificación de inicio de instalación de instancia
     const groupNotificationId = notificationService.show({
@@ -327,10 +381,12 @@ export class DownloadService {
         downloadedBytes: 0,
         totalBytes: estimatedSize,
         startTime: Date.now(),
-        speed: 0
+        speed: 0,
+        profileUsername,
       };
 
       this.downloads.set(downloadId, newDownload);
+      this.persistDownloads();
 
       // Actualizar el progreso de la descarga agrupada
       const progressInfo = this.instanceDownloadProgress.get(groupId);
@@ -366,6 +422,7 @@ export class DownloadService {
     groupDownload.status = 'completed';
     groupDownload.progress = 100;
     groupDownload.endTime = Date.now();
+    this.persistDownloads();
 
     // Actualizar notificación de la descarga agrupada a completado
     notificationService.updateProgress(groupNotificationId, 100, `${instanceName} - ¡Instalación completada!`);
@@ -378,12 +435,11 @@ export class DownloadService {
 
     this.notifyObservers();
 
-    // Eliminar el progreso de la instancia después de completar
+    // Eliminar solo el registro de progreso interno después de completar,
+    // pero mantener la descarga en el historial
     setTimeout(() => {
       this.instanceDownloadProgress.delete(groupId);
-      this.downloads.delete(groupId);
-      this.notifyObservers();
-    }, 10000); // Eliminar después de 10 segundos
+    }, 10000); // Limpiar progreso interno después de 10 segundos
   }
 
   // Método auxiliar para esperar a que una descarga se complete
@@ -416,6 +472,7 @@ export class DownloadService {
             download.endTime = Date.now();
             download.path = data.filePath;
           }
+          this.persistDownloads();
           this.notifyObservers();
           resolve(); // Resolver la promesa cuando se completa
         }
@@ -428,6 +485,7 @@ export class DownloadService {
             download.status = 'error';
             download.endTime = Date.now();
           }
+          this.persistDownloads();
           this.notifyObservers();
           reject(new Error(error.message)); // Rechazar la promesa si hay error
         }
@@ -461,12 +519,9 @@ export class DownloadService {
     const download = this.downloads.get(downloadId);
     if (download) {
       download.status = 'error';
+      download.endTime = Date.now();
+      this.persistDownloads();
       this.notifyObservers();
-      // Remover después de un tiempo para no dejar entradas huérfanas
-      setTimeout(() => {
-        this.downloads.delete(downloadId);
-        this.notifyObservers();
-      }, 5000);
     }
   }
 
@@ -475,28 +530,43 @@ export class DownloadService {
   }
 
   getAllDownloads(): Download[] {
-    return Array.from(this.downloads.values()).sort((a, b) => b.startTime - a.startTime);
+    return Array.from(this.downloads.values())
+      .filter(d => this.isOwnedByCurrentProfile(d))
+      .sort((a, b) => b.startTime - a.startTime);
   }
 
   getActiveDownloads(): Download[] {
     return Array.from(this.downloads.values())
-      .filter(d => d.status === 'downloading' || d.status === 'paused')
+      .filter(d => (d.status === 'downloading' || d.status === 'paused') && this.isOwnedByCurrentProfile(d))
       .sort((a, b) => b.startTime - a.startTime);
   }
 
   getCompletedDownloads(): Download[] {
     return Array.from(this.downloads.values())
-      .filter(d => d.status === 'completed')
+      .filter(d => d.status === 'completed' && this.isOwnedByCurrentProfile(d))
       .sort((a, b) => (b.endTime || 0) - (a.endTime || 0));
   }
 
   clearCompleted() {
-    const completedIds = Array.from(this.downloads.entries())
-      .filter(([_, download]) => download.status === 'completed')
-      .map(([id, _]) => id);
+    const current = this.getCurrentProfileUsername();
+    const entries = Array.from(this.downloads.entries());
 
-    completedIds.forEach(id => this.downloads.delete(id));
+    for (const [id, download] of entries) {
+      if (download.status === 'completed' && (!current || download.profileUsername === current || !download.profileUsername)) {
+        this.downloads.delete(id);
+      }
+    }
+
+    this.persistDownloads();
     this.notifyObservers();
+  }
+
+  removeFromHistory(downloadId: string) {
+    if (this.downloads.has(downloadId)) {
+      this.downloads.delete(downloadId);
+      this.persistDownloads();
+      this.notifyObservers();
+    }
   }
 
   // Método especial para descargar Java desde Adoptium API

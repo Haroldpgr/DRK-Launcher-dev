@@ -208,8 +208,6 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSettingsChanged={handleSettingsChanged}
-        javaInstallations={javaInstallations}
-        onJavaDetect={handleJavaDetect}
       />
       <LoginModal
         isOpen={isLoginModalOpen}

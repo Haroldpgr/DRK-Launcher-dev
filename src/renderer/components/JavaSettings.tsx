@@ -275,7 +275,7 @@ export default function JavaSettings({ settings, onSettingsChange }: JavaSetting
             <div className="flex gap-2">
               <input
                 type="text"
-                value={settings.java8Path}
+                value={settings.java8Path || ''}
                 onChange={(e) => handlePathChange('8', e.target.value)}
                 placeholder="Ruta al ejecutable de Java 8"
                 className="flex-1 p-2 rounded-lg bg-gray-700/80 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -344,7 +344,7 @@ export default function JavaSettings({ settings, onSettingsChange }: JavaSetting
             <div className="flex gap-2">
               <input
                 type="text"
-                value={settings.java17Path}
+                value={settings.java17Path || ''}
                 onChange={(e) => handlePathChange('17', e.target.value)}
                 placeholder="Ruta al ejecutable de Java 17"
                 className="flex-1 p-2 rounded-lg bg-gray-700/80 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -413,7 +413,7 @@ export default function JavaSettings({ settings, onSettingsChange }: JavaSetting
             <div className="flex gap-2">
               <input
                 type="text"
-                value={settings.java21Path}
+                value={settings.java21Path || ''}
                 onChange={(e) => handlePathChange('21', e.target.value)}
                 placeholder="Ruta al ejecutable de Java 21"
                 className="flex-1 p-2 rounded-lg bg-gray-700/80 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"

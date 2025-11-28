@@ -20,7 +20,8 @@ let telemetryEnabled = true; // Valor inicial que se actualizará al cargar conf
 // Actualizar el estado de telemetría cuando se carguen las configuraciones
 export function updateTelemetryStatus() {
   const settings = settingsService.getSettings();
-  telemetryEnabled = settings.privacy.telemetryEnabled;
+  // Respeta tanto la casilla de telemetría como el modo offline forzado
+  telemetryEnabled = settings.privacy.telemetryEnabled && !settings.privacy.forcedOfflineMode;
 }
 
 // Función que se llama a lo largo del código para registrar eventos

@@ -5,13 +5,21 @@ import BehaviorSettings from './BehaviorSettings';
 import PrivacySettings from './PrivacySettings';
 import JavaSettings from './JavaSettings';
 import Button from './Button';
+import { themeService } from '../services/themeService';
+import { privacyService } from '../services/privacyService';
+import { processMonitorService } from '../services/processMonitorService';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Callback opcional para notificar a la app que las configuraciones cambiaron
+   * (por ejemplo, para re-aplicar tema o redetectar Java).
+   */
+  onSettingsChanged?: (settings: Settings) => void;
 }
 
-export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, onSettingsChanged }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'privacy' | 'java'>('appearance');
   const [settings, setSettings] = useState<Settings>(settingsService.getSettings());
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -50,7 +58,29 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   };
 
   const handleSave = () => {
-    settingsService.updateSettings(settings);
+    // Guardar configuración completa en el servicio de settings
+    const persisted = settingsService.updateSettings(settings);
+
+    // Aplicar apariencia inmediatamente (tema, colores, etc.)
+    if (persisted.appearance) {
+      themeService.initializeTheme(persisted.appearance);
+    }
+
+    // Aplicar ajustes de comportamiento a nivel de monitor de procesos
+    if (persisted.behavior) {
+      processMonitorService.updateSettings(persisted.behavior);
+    }
+
+    // Aplicar cambios de privacidad (incluye actualizar telemetría)
+    if (persisted.privacy) {
+      privacyService.updatePrivacySettings(persisted.privacy);
+    }
+
+    // Notificar a la app que la configuración cambió
+    if (onSettingsChanged) {
+      onSettingsChanged(persisted);
+    }
+
     setHasUnsavedChanges(false);
     onClose();
   };

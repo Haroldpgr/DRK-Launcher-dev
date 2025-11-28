@@ -27,11 +27,14 @@ export default function IconButton({ icon, label, onClick }: { icon: IconName; l
   return (
     <button
       onClick={onClick}
-      className="w-24 flex flex-col items-center gap-2 group"
+      className="w-24 flex flex-col items-center gap-2 group text-primary"
       style={{ fontFamily: 'Inter, sans-serif' }}
     >
-      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-gray-800 shadow-lg flex items-center justify-center transition-transform group-hover:scale-105 group-hover:from-blue-500 group-hover:to-gray-700">
-        <Icon name={icon} className="w-7 h-7 text-white" />
+      <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-primary via-blue-500 to-indigo-600 shadow-lg border border-gray-700/60 flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:scale-105 group-hover:shadow-blue-500/40">
+        <div className="pointer-events-none absolute inset-0 opacity-40 bg-gradient-to-b from-white/30 via-transparent to-transparent" />
+        <div className="relative flex items-center justify-center w-full h-full">
+          <Icon name={icon} className="w-7 h-7 text-black" />
+        </div>
       </div>
       <div className="text-xs font-semibold text-primary group-hover:text-blue-400 transition-colors drop-shadow-sm">
         {label}
