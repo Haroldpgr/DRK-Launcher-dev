@@ -16,12 +16,18 @@ contextBridge.exposeInMainWorld('api', {
   download: {
     start: (data: { url: string; filename: string; itemId: string }) =>
       ipcRenderer.send('download:start', data),
-    onProgress: (callback: (event: any, data: any) => void) =>
-      ipcRenderer.on('download:progress', callback),
-    onComplete: (callback: (event: any, data: any) => void) =>
-      ipcRenderer.on('download:complete', callback),
-    onError: (callback: (event: any, error: any) => void) =>
-      ipcRenderer.on('download:error', callback)
+    onProgress: (callback: (event: any, data: any) => void) => {
+      ipcRenderer.on('download:progress', callback);
+      return () => ipcRenderer.removeListener('download:progress', callback);
+    },
+    onComplete: (callback: (event: any, data: any) => void) => {
+      ipcRenderer.on('download:complete', callback);
+      return () => ipcRenderer.removeListener('download:complete', callback);
+    },
+    onError: (callback: (event: any, error: any) => void) => {
+      ipcRenderer.on('download:error', callback);
+      return () => ipcRenderer.removeListener('download:error', callback);
+    }
   },
 
   // Otros métodos necesarios (mantén solo los que necesites)
@@ -38,6 +44,11 @@ contextBridge.exposeInMainWorld('api', {
     delete: (id: string) => ipcRenderer.invoke('instances:delete', id),
     openFolder: (id: string) => ipcRenderer.invoke('instances:openFolder', id),
     installContent: (payload: unknown) => ipcRenderer.invoke('instance:install-content', payload)
+  },
+
+  // API para creación completa de instancias
+  instance: {
+    createFull: (payload: unknown) => ipcRenderer.invoke('instance:create-full', payload)
   },
 
   // Otros APIs
@@ -57,7 +68,7 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   game: {
-    launch: (p: unknown) => ipcRenderer.invoke('game:launch', p)
+    launch: (p: { instanceId: string, userProfile?: any }) => ipcRenderer.invoke('game:launch', p)
   },
 
   // API de diálogo del sistema
@@ -76,9 +87,9 @@ declare global {
       };
       download: {
         start: (data: { url: string; filename: string; itemId: string }) => void;
-        onProgress: (callback: (event: any, data: any) => void) => void;
-        onComplete: (callback: (event: any, data: any) => void) => void;
-        onError: (callback: (event: any, error: any) => void) => void;
+        onProgress: (callback: (event: any, data: any) => void) => () => void;
+        onComplete: (callback: (event: any, data: any) => void) => () => void;
+        onError: (callback: (event: any, error: any) => void) => () => void;
       };
       settings: {
         get: () => Promise<any>;
@@ -91,6 +102,9 @@ declare global {
         delete: (id: string) => Promise<any>;
         openFolder: (id: string) => Promise<any>;
         installContent: (payload: unknown) => Promise<any>;
+      };
+      instance: {
+        createFull: (payload: { name: string; version: string; loader?: any; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => Promise<any>;
       };
       versions: {
         list: () => Promise<any>;
@@ -105,7 +119,7 @@ declare global {
         ping: (ip: string) => Promise<any>;
       };
       game: {
-        launch: (p: unknown) => Promise<any>;
+        launch: (p: { instanceId: string, userProfile?: any }) => Promise<any>;
       };
       dialog: {
         showOpenDialog: (options: any) => Promise<any>;

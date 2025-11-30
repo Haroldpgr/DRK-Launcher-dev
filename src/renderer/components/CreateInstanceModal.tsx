@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Profile, profileService } from '../services/profileService';
-import { downloadService } from '../services/downloadService';
+import { downloadService, Download } from '../services/downloadService';
 import { instanceProfileService } from '../services/instanceProfileService';
 import '../components/slider.css';
 
@@ -58,6 +58,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
 
     loadSystemMemory();
   }, []);
+
   const [javaArgs, setJavaArgs] = useState('');
   const [javaPath, setJavaPath] = useState('');
   
@@ -469,24 +470,28 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
       // Obtener la versión del loader correspondiente
       const selectedLoaderVersion = loaderType !== 'vanilla' ? getLoaderVersionForMc() : undefined;
 
-      // Crear la instancia con la API
-      const instanceData = {
+      // Crear la instancia básica con la API
+      const basicInstanceData = {
         name: instanceName,
         version: mcVersion,
-        loader: loaderType,
-        loaderVersion: selectedLoaderVersion,
-        icon: iconUrl || undefined,
-        config: {
-          minMemory: Math.max(512, Math.floor(maxMemory / 4)), // Establecer minMemory como 1/4 de maxMemory
-          maxMemory,
-          javaArgs,
-          javaPath
-        },
-        type: 'owned' as const // Establecer como instancia propia
+        loader: loaderType
       };
 
-      // Crear la carpeta de la instancia y estructura necesaria
-      const createdInstance = await window.api.instances.create(instanceData);
+      // Crear la carpeta de la instancia
+      const createdInstance = await window.api.instances.create(basicInstanceData);
+
+      // Actualizar la instancia con la configuración específica
+      await window.api.instances.update({
+        id: createdInstance.id,
+        patch: {
+          ramMb: maxMemory,
+          javaPath: javaPath || undefined // Solo si se especificó una ruta personalizada
+        }
+      });
+
+      // Iniciar el proceso de descarga de archivos necesarios en segundo plano
+      // No esperar a que se completen las descargas para no bloquear la UI
+      startDownloadProcess(instanceName, mcVersion, loaderType, selectedLoaderVersion || '');
 
       // Enlazar la instancia recién creada con el perfil actual del usuario
       const currentProfile = profileService.getCurrentProfile();
@@ -499,10 +504,6 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
           instanceProfileService.linkInstanceToProfile(createdInstance.id, profiles[0].username);
         }
       }
-
-      // Iniciar el proceso de descarga de archivos necesarios en segundo plano
-      // No esperar a que se completen las descargas
-      startDownloadProcess(instanceName, mcVersion, loaderType, selectedLoaderVersion || '');
 
       // Cerrar modal inmediatamente después de crear la instancia
       onClose();
@@ -855,7 +856,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                 </svg>
-                {loading ? 'Creando...' : 'Crear Instancia'}
+                {loading ? 'Creando y descargando...' : 'Crear Instancia'}
               </button>
             </div>
           </form>

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { initDB, hasDB, sqlite } from '../services/db'
 import { queryStatus } from '../services/serverService'
-import { launchJava, isInstanceReady } from '../services/gameService'
+import { launchJava, isInstanceReady, areAssetsReadyForVersion, ensureClientJar } from '../services/gameService'
 import { javaDetector } from './javaDetector'
 // Import our Java service
 import javaService from './javaService';
@@ -338,40 +338,87 @@ ipcMain.handle('servers:ping', async (_e, ip: string) => queryStatus(ip))
 
 // ... otros handlers ...
 
-ipcMain.handle('game:launch', async (_e, p: { instanceId: string }) => {
+// Definir tipo para el perfil de usuario que puede ser enviado desde el renderer
+type UserProfile = {
+  id: string;
+  username: string;
+  type: 'microsoft' | 'non-premium';
+  lastUsed: number;
+  gameTime?: number;
+  instances?: string[];
+  skinUrl?: string;
+};
+
+ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: UserProfile }) => {
   const i = listInstances().find(x => x.id === p.instanceId)
   const s = settings()
   if (!i) return null
 
-  // Verificar si la instancia está completamente descargada
+  // Asegurar que el client.jar esté disponible antes de verificar si la instancia está lista
+  const clientJarReady = await ensureClientJar(i.path, i.version);
+  if (!clientJarReady) {
+    console.log(`No se pudo asegurar el archivo client.jar para la instancia ${i.name}.`);
+    throw new Error('No se pudo descargar el archivo client.jar necesario para el juego.')
+  }
+
+  // Verificar si la instancia está completamente descargada (ahora client.jar debería estar presente)
   if (!isInstanceReady(i.path)) {
     console.log(`La instancia ${i.name} no está lista para jugar. Archivos esenciales faltantes.`);
     throw new Error('La instancia no está completamente descargada. Espere a que terminen las descargas.')
+  }
+
+  // Verificar si los assets necesarios para la versión están disponibles
+  // IMPORTANTE: Esta verificación se hace con tolerancia ya que Minecraft puede descargar assets faltantes en tiempo de ejecución
+  const assetsReady = areAssetsReadyForVersion(i.path, i.version);
+  if (!assetsReady) {
+    console.log(`Advertencia: Los assets para la versión ${i.version} pueden no estar completamente descargados, pero se intentará iniciar el juego.`);
+    // No lanzar error, permitir que el juego se inicie y descargue assets según sea necesario
   }
 
   // Usar la configuración de la instancia si está disponible
   const instanceConfig = instanceService.getInstanceConfig(i.path);
   const ramMb = instanceConfig?.maxMemory || i.ramMb || s.defaultRamMb;
   const javaPath = instanceConfig?.javaPath || s.javaPath || 'java';
+  const windowWidth = instanceConfig?.windowWidth || 1280;
+  const windowHeight = instanceConfig?.windowHeight || 720;
+  const jvmArgs = instanceConfig?.jvmArgs || [];
 
+  // Launch the game with all configurations
   launchJava({
     javaPath: javaPath,
     mcVersion: i.version,
     instancePath: i.path,
-    ramMb: ramMb
-  }, () => {}, () => {})
+    ramMb: ramMb,
+    jvmArgs: jvmArgs,
+    userProfile: p.userProfile,
+    windowSize: {
+      width: windowWidth,
+      height: windowHeight
+    },
+    loader: i.loader || 'vanilla', // Pasar el tipo de loader de la instancia
+    loaderVersion: instanceConfig?.loaderVersion // Versión específica del loader si está disponible
+  }, (data) => {
+    // Handle output from the game process (logs, errors, etc.)
+    console.log(`[Minecraft] ${data}`);
+  }, (exitCode) => {
+    // Handle when the game process exits
+    console.log(`Minecraft closed with exit code: ${exitCode}`);
+  });
 
   return { started: true }
 })
 
 // --- IPC Handlers for Instance Creation --- //
-ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; javaVersion?: string }) => {
+ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => {
   try {
     const instance = await instanceCreationService.createFullInstance(
       payload.name,
       payload.version,
       payload.loader || 'vanilla',
-      payload.javaVersion || '17'
+      payload.javaVersion || '17',
+      payload.maxMemory,
+      payload.minMemory,
+      payload.jvmArgs
     );
     return instance;
   } catch (error) {
@@ -605,35 +652,6 @@ ipcMain.on('download:start', async (event, { url, filename, itemId }) => {
       itemId,
       filePath
     });
-
-    // Lógica para mover archivos a sus ubicaciones correctas si son archivos esenciales
-    try {
-      // Solo procesar si el archivo contiene información sobre versiones de Minecraft
-      if (cleanFilename.includes('versions') && cleanFilename.includes('.jar')) {
-        // Capturar información de la versión del nombre del archivo
-        // Ejemplo: versions/1.21.1/1.21.1.jar
-        const jarMatch = cleanFilename.match(/versions[\/\\]?([^\/\\]+)[\/\\]([^\/\\]+\.jar)/);
-        if (jarMatch) {
-          const [, versionId, jarFileName] = jarMatch;
-
-          // Buscar instancia que coincida con esta versión
-          const allInstances = listInstances();
-          const targetInstance = allInstances.find(instance =>
-            instance.version === versionId
-          );
-
-          if (targetInstance) {
-            // Mover archivo al directorio de la instancia con el nombre client.jar
-            const targetPath = path.join(targetInstance.path, 'client.jar');
-            ensureDir(path.dirname(targetPath));
-            fs.copyFileSync(filePath, targetPath);
-            console.log(`Archivo ${jarFileName} renombrado a client.jar y movido a la instancia ${targetInstance.id}`);
-          }
-        }
-      }
-    } catch (moveError) {
-      console.error('Error al mover archivo a destino final:', moveError);
-    }
   } catch (error) {
     console.error(`Error downloading ${url}:`, error);
     win.webContents.send('download:error', {

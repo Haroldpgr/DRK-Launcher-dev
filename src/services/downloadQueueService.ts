@@ -18,6 +18,8 @@ export interface DownloadInfo {
   error?: string;
   totalBytes?: number;
   downloadedBytes?: number;
+  expectedHash?: string; // Hash esperado para verificación de integridad
+  hashAlgorithm?: string; // Algoritmo de hash (por ejemplo, 'sha1', 'sha256')
 }
 
 /**
@@ -26,20 +28,22 @@ export interface DownloadInfo {
 export class DownloadQueueService {
   private downloads: Map<string, DownloadInfo> = new Map();
   private activeDownloads: Set<string> = new Set();
-  private maxConcurrentDownloads: number = 3; // Limitar descargas concurrentes
-  private timeoutMs: number = 30000; // 30 segundos de timeout por defecto
+  private maxConcurrentDownloads: number = 5; // Aumentar el número de descargas concurrentes
+  private timeoutMs: number = 60000; // Aumentar timeout a 60 segundos
 
   /**
    * Añade una descarga a la cola
    */
-  async addDownload(url: string, outputPath: string): Promise<string> {
+  async addDownload(url: string, outputPath: string, expectedHash?: string, hashAlgorithm: string = 'sha1'): Promise<string> {
     const downloadId = this.generateId();
     const downloadInfo: DownloadInfo = {
       id: downloadId,
       url,
       outputPath,
       progress: 0,
-      status: 'pending'
+      status: 'pending',
+      expectedHash,
+      hashAlgorithm
     };
 
     this.downloads.set(downloadId, downloadInfo);
@@ -112,6 +116,28 @@ export class DownloadQueueService {
         fileStream.on('error', reject);
         progressStream.on('error', reject);
       });
+
+      // Validar que el archivo se haya descargado completamente
+      const finalFileSize = fs.statSync(download.outputPath).size;
+
+      // Si conocemos el tamaño total, verificar que coincida
+      if (download.totalBytes && download.totalBytes > 0) {
+        if (finalFileSize !== download.totalBytes) {
+          console.warn(`Tamaño del archivo descargado (${finalFileSize}) no coincide con el tamaño esperado (${download.totalBytes})`);
+          // Considerar como error si hay una gran discrepancia
+          if (finalFileSize < download.totalBytes * 0.95) { // Permitir un 5% de diferencia por posibles redondeos
+            throw new Error(`Archivo descargado incompleto: tamaño esperado ${download.totalBytes}, tamaño real ${finalFileSize}`);
+          }
+        }
+      }
+
+      // Si se proporcionó un hash esperado, verificar la integridad del archivo
+      if (download.expectedHash) {
+        const calculatedHash = await this.calculateFileHash(download.outputPath, download.hashAlgorithm || 'sha1');
+        if (calculatedHash.toLowerCase() !== download.expectedHash.toLowerCase()) {
+          throw new Error(`Hash del archivo no coincide: esperado ${download.expectedHash}, obtenido ${calculatedHash}`);
+        }
+      }
 
       download.status = 'completed';
       download.progress = 1;
@@ -217,6 +243,24 @@ export class DownloadQueueService {
   }
 
   /**
+   * Calcula el hash de un archivo
+   */
+  private async calculateFileHash(filePath: string, algorithm: string): Promise<string> {
+    const crypto = await import('node:crypto');
+    const fs = await import('node:fs');
+    const stream = await import('node:stream');
+
+    return new Promise((resolve, reject) => {
+      const hash = crypto.createHash(algorithm);
+      const input = fs.createReadStream(filePath);
+
+      input.on('error', reject);
+      input.on('data', chunk => hash.update(chunk));
+      input.on('close', () => resolve(hash.digest('hex')));
+    });
+  }
+
+  /**
    * Genera un ID único para la descarga
    */
   private generateId(): string {
@@ -228,6 +272,15 @@ export class DownloadQueueService {
    */
   getActiveDownloadCount(): number {
     return this.activeDownloads.size;
+  }
+
+  /**
+   * Establece el número máximo de descargas concurrentes
+   */
+  setMaxConcurrentDownloads(max: number): void {
+    this.maxConcurrentDownloads = max;
+    // Procesar la cola con el nuevo límite
+    this.processQueue();
   }
 
   /**

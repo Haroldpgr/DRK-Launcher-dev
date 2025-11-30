@@ -547,51 +547,24 @@ const ContentPage: React.FC = () => {
     }
   `;
 
-  // Efecto para escuchar eventos de descarga
   useEffect(() => {
-    const handleDownloadProgress = (event: any, data: { itemId: string; progress: number }) => {
-      setDownloadProgress(prev => ({
-        ...prev,
-        [data.itemId]: Math.round(data.progress * 100)
-      }));
-    };
-
-    const handleDownloadComplete = (event: any, data: { itemId: string; filePath: string }) => {
-      setIsDownloading(prev => ({
-        ...prev,
-        [data.itemId]: false
-      }));
-      setDownloadProgress(prev => {
-        const newProgress = { ...prev };
-        delete newProgress[data.itemId];
-        return newProgress;
+    const unsubscribe = downloadService.subscribe(downloads => {
+      const newProgress: { [key: string]: number } = {};
+      const newDownloading: { [key: string]: boolean } = {};
+      
+      downloads.forEach(download => {
+        newProgress[download.id] = download.progress;
+        if (download.status === 'downloading' || download.status === 'pending') {
+          newDownloading[download.id] = true;
+        }
       });
-      // Si la descarga era para instalar en una instancia, marcar como instalado
-      if (selectedInstanceId) {
-        setInstalledContent(prev => new Set(prev).add(`${selectedInstanceId}-${data.itemId}`));
-      }
-    };
 
-    const handleDownloadError = (event: any, error: { itemId: string; message: string }) => {
-      setIsDownloading(prev => ({
-        ...prev,
-        [error.itemId]: false
-      }));
-      setDownloadProgress(prev => {
-        const newProgress = { ...prev };
-        delete newProgress[error.itemId];
-        return newProgress;
-      });
-    };
+      setDownloadProgress(newProgress);
+      setIsDownloading(newDownloading);
+    });
 
-    // Registrar listeners
-    window.api.download.onProgress(handleDownloadProgress);
-    window.api.download.onComplete(handleDownloadComplete);
-    window.api.download.onError(handleDownloadError);
-
-    // Cleanup
     return () => {
-      // No hay función de unsubscribe para estos listeners
+      unsubscribe();
     };
   }, []);
 

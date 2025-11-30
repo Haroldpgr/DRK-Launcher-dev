@@ -167,7 +167,11 @@ export default function App() {
     try {
       // Usar la API de Electron para lanzar el juego
       if (window.api?.game?.launch) {
-        await window.api.game.launch({ instanceId });
+        // Pasar también el perfil de usuario actual
+        await window.api.game.launch({
+          instanceId,
+          userProfile: currentUser ? profileService.getProfileByUsername(currentUser) : undefined
+        });
         console.log(`Juego iniciado para la instancia: ${instanceId}`);
       } else {
         console.error('La API de juego no está disponible');

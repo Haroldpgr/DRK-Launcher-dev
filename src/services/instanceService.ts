@@ -119,9 +119,11 @@ export class InstanceService {
       'shaderpacks',    // Shaders (para OptiFine/Iris)
       'config',         // Configuración de mods y loader
       'saves',          // Mundos guardados
-      'logs'            // Registros del cliente
+      'logs',           // Registros del cliente
+      'assets',         // Assets del juego (texturas, sonidos, etc.)
+      'natives'         // Bibliotecas nativas
     ];
-    
+
     requiredFolders.forEach(folder => {
       const folderPath = path.join(instancePath, folder);
       this.ensureDir(folderPath);
@@ -156,6 +158,39 @@ export class InstanceService {
     const clientJarPath = path.join(instancePath, 'client.jar');
     if (!fs.existsSync(clientJarPath)) {
       console.log(`client.jar no encontrado en ${clientJarPath}`);
+      try {
+        const files = fs.readdirSync(instancePath);
+        console.log(`Archivos en la instancia:`, files.join(', '));
+      } catch (dirError) {
+        console.log(`No se pudo leer el directorio de la instancia:`, dirError);
+      }
+      return false;
+    }
+
+    // Verificar si podemos acceder al archivo y obtener su tamaño
+    let clientJarStats;
+    try {
+      clientJarStats = fs.statSync(clientJarPath);
+    } catch (statError) {
+      console.log(`No se pudo acceder al archivo client.jar: ${statError}`);
+      return false;
+    }
+
+    // Verificar si el client.jar tiene un tamaño razonable (al menos 1MB para ser considerado válido)
+    if (clientJarStats.size < 1024 * 1024) { // 1MB en bytes
+      console.log(`client.jar es demasiado pequeño (${clientJarStats.size} bytes), probablemente no esté completamente descargado`);
+      return false;
+    }
+
+    console.log(`client.jar encontrado y válido: ${clientJarPath} (${clientJarStats.size} bytes)`);
+
+    // Verificar que exista la carpeta de assets o que exista en la ubicación compartida
+    const launcherPath = getLauncherDataPath();
+    const launcherAssetsPath = path.join(launcherPath, 'assets');
+
+    // Solo verificamos que exista la carpeta compartida donde están los assets
+    if (!fs.existsSync(launcherAssetsPath)) {
+      console.log(`No se encontró la carpeta de assets compartida en (${launcherAssetsPath})`);
       return false;
     }
 
@@ -164,8 +199,14 @@ export class InstanceService {
     for (const folder of requiredFolders) {
       const folderPath = path.join(instancePath, folder);
       if (!fs.existsSync(folderPath)) {
-        console.log(`Carpeta requerida no encontrada: ${folderPath}`);
-        return false;
+        // Creamos la carpeta si no existe
+        try {
+          fs.mkdirSync(folderPath, { recursive: true });
+          console.log(`Carpeta creada: ${folderPath}`);
+        } catch (mkdirErr) {
+          console.log(`No se pudo crear carpeta ${folder}:`, mkdirErr);
+          return false;
+        }
       }
     }
 

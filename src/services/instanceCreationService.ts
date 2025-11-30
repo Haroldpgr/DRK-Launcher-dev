@@ -5,6 +5,7 @@ import { javaDownloadService } from './javaDownloadService';
 import { minecraftDownloadService } from './minecraftDownloadService';
 import { modrinthDownloadService } from './modrinthDownloadService';
 import { downloadQueueService, DownloadInfo } from './downloadQueueService';
+import { getLauncherDataPath } from '../utils/paths';
 
 /**
  * Servicio maestro para manejar la creación completa de instancias
@@ -18,12 +19,18 @@ export class InstanceCreationService {
    * @param version Versión de Minecraft (ej. '1.20.1')
    * @param loader Loader a usar ('vanilla', 'fabric', 'forge', etc.)
    * @param javaVersion Versión de Java a usar (por defecto '17')
+   * @param maxMemory Memoria máxima en MB (por defecto 4096)
+   * @param minMemory Memoria mínima en MB (por defecto 1024)
+   * @param jvmArgs Argumentos JVM adicionales
    */
   async createFullInstance(
     name: string,
     version: string,
     loader: InstanceConfig['loader'] = 'vanilla',
-    javaVersion: string = '17'
+    javaVersion: string = '17',
+    maxMemory?: number,
+    minMemory?: number,
+    jvmArgs?: string[]
   ): Promise<InstanceConfig> {
     console.log(`Iniciando creación de instancia: ${name} (${version}, ${loader})`);
 
@@ -36,7 +43,10 @@ export class InstanceCreationService {
     const instance = instanceService.createInstance({
       name,
       version,
-      loader
+      loader,
+      maxMemory,
+      javaPath,
+      jvmArgs
     });
 
     // PASO 2.2: Descarga de archivos base de Minecraft
@@ -88,20 +98,53 @@ export class InstanceCreationService {
    * PASO 2.3: Descarga del cliente y loader para la instancia específica
    */
   private async downloadClientForInstance(
-    version: string, 
-    loader: InstanceConfig['loader'], 
+    version: string,
+    loader: InstanceConfig['loader'],
     instancePath: string
   ): Promise<void> {
     try {
-      // Si es vanilla, descargar directamente el client.jar
+      // Si es vanilla, descargar todos los archivos necesarios (cliente, librerías, assets)
       if (loader === 'vanilla') {
-        await minecraftDownloadService.downloadClientJar(version, instancePath);
+        await minecraftDownloadService.downloadCompleteVersion(version, instancePath);
       } else {
         // Para otros loaders (fabric, forge, etc.), necesitamos descargar el loader
         // y combinarlo con el cliente base
         await this.downloadLoaderAndMerge(version, loader, instancePath);
+        // Asegurarse de que también se descarguen los componentes base
+        await minecraftDownloadService.downloadCompleteVersion(version, instancePath);
       }
-      
+
+      // Crear enlace simbólico para la carpeta de assets
+      const assetsSourcePath = path.join(getLauncherDataPath(), 'assets');
+      const assetsDestPath = path.join(instancePath, 'assets');
+
+      try {
+        // Asegurarse de que la carpeta de assets de la instancia esté vacía antes de crear el enlace
+        if (fs.existsSync(assetsDestPath)) {
+          const files = fs.readdirSync(assetsDestPath);
+          if (files.length > 0) {
+            console.warn(`La carpeta de assets en ${instancePath} no está vacía, no se creará el enlace simbólico.`);
+          } else {
+            fs.rmdirSync(assetsDestPath); // Eliminar la carpeta vacía para poder crear el enlace
+          }
+        }
+
+        // Solo crear el enlace simbólico si la carpeta principal de assets existe
+        if (fs.existsSync(assetsSourcePath)) {
+          // Crear el enlace simbólico
+          fs.symlinkSync(assetsSourcePath, assetsDestPath, 'junction'); // 'junction' es para Windows
+          console.log(`Enlace simbólico para assets creado en ${instancePath}`);
+        } else {
+          console.log(`Carpeta de assets principal no existe en ${assetsSourcePath}, creando estructura vacía`);
+          // Si no existen los assets principales, crear la carpeta assets base en la instancia
+          fs.mkdirSync(assetsDestPath, { recursive: true });
+        }
+      } catch (error) {
+        console.error(`Error al crear el enlace simbólico de assets en ${instancePath}:`, error);
+        // Si falla el enlace simbólico, crear carpeta vacía como fallback
+        fs.mkdirSync(assetsDestPath, { recursive: true });
+      }
+
       console.log(`Cliente de Minecraft ${version} con ${loader} listo en ${instancePath}`);
     } catch (error) {
       console.error(`Error al descargar cliente para ${version} con ${loader}:`, error);
@@ -135,52 +178,165 @@ export class InstanceCreationService {
    * Descarga el loader de Fabric
    */
   private async downloadFabricLoader(version: string, instancePath: string): Promise<void> {
-    // Obtener versión compatible de Fabric API
-    const fabricApiUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}`;
-    const response = await fetch(fabricApiUrl);
-    const fabricVersions = await response.json();
-    
-    // Tomar la última versión estable
-    const latestFabric = fabricVersions.find((v: any) => v.loader.stable);
-    if (!latestFabric) {
-      throw new Error(`No se encontró versión estable de Fabric para Minecraft ${version}`);
+    try {
+      console.log(`Descargando Fabric para Minecraft ${version}...`);
+
+      // Obtener la versión compatible de Fabric Loader
+      const fabricApiUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}`;
+      const response = await fetch(fabricApiUrl);
+      const fabricVersions = await response.json();
+
+      // Tomar la última versión estable
+      const latestFabric = fabricVersions.find((v: any) => v.loader.stable);
+      if (!latestFabric) {
+        throw new Error(`No se encontró versión estable de Fabric para Minecraft ${version}`);
+      }
+
+      const fabricLoaderVersion = latestFabric.loader.version;
+      console.log(`Usando Fabric Loader ${fabricLoaderVersion} para Minecraft ${version}`);
+
+      // Descargar el JAR del loader de Fabric
+      const fabricLoaderUrl = `https://maven.fabricmc.net/net/fabricmc/fabric-loader/${fabricLoaderVersion}/fabric-loader-${fabricLoaderVersion}.jar`;
+      const fabricLoaderPath = path.join(instancePath, 'loader', `fabric-loader-${fabricLoaderVersion}.jar`);
+
+      // Asegurar que la carpeta loader exista
+      const loaderDir = path.join(instancePath, 'loader');
+      if (!fs.existsSync(loaderDir)) {
+        fs.mkdirSync(loaderDir, { recursive: true });
+      }
+
+      // Descargar el archivo
+      const responseLoader = await fetch(fabricLoaderUrl);
+      if (!responseLoader.ok) {
+        throw new Error(`Error al descargar Fabric Loader: ${responseLoader.status} ${responseLoader.statusText}`);
+      }
+
+      // Guardar el archivo
+      const buffer = await responseLoader.buffer();
+      fs.writeFileSync(fabricLoaderPath, buffer);
+
+      console.log(`Fabric Loader descargado en: ${fabricLoaderPath}`);
+    } catch (error) {
+      console.error(`Error al descargar Fabric Loader:`, error);
+      // De todas formas, descargar el client.jar base como fallback
+      await minecraftDownloadService.downloadClientJar(version, instancePath);
+      throw error;
     }
-    
-    // En realidad, para Fabric necesitamos usar el installer
-    // Esto es un ejemplo simplificado
-    // Para implementación real, necesitaríamos usar el installer de Fabric
-    
-    // Por ahora, solo descargamos el client.jar base
-    await minecraftDownloadService.downloadClientJar(version, instancePath);
-    
-    // TODO: Implementar lógica completa para descargar e instalar Fabric loader
-    console.log(`Fabric loader para ${version} descarga pendiente de implementación completa`);
   }
-  
+
   /**
    * Descarga el loader de Forge
    */
   private async downloadForgeLoader(version: string, instancePath: string): Promise<void> {
-    // Obtener información de Forge para la versión específica
-    // URL de ejemplo: https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.2.20/forge-1.20.1-47.2.20-installer.jar
-    // TODO: Implementar lógica completa para descargar e instalar Forge
-    
-    // Por ahora, solo descargamos el client.jar base
-    await minecraftDownloadService.downloadClientJar(version, instancePath);
-    
-    console.log(`Forge loader para ${version} descarga pendiente de implementación completa`);
+    try {
+      console.log(`Descargando Forge para Minecraft ${version}...`);
+
+      // Para Forge, necesitamos encontrar la versión compatible
+      // Usamos el API de Forge para obtener la lista de versiones
+      const forgeApiUrl = 'https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json';
+      const response = await fetch(forgeApiUrl);
+      const forgeMetadata = await response.json();
+
+      // Buscar una versión compatible con la versión de Minecraft
+      // Esto es una simplificación: en realidad, se necesitaría una búsqueda más detallada
+      let forgeVersion = null;
+      const versions = forgeMetadata.versioning.versions;
+
+      // Buscar la versión más reciente compatible con la versión de Minecraft
+      for (let i = versions.length - 1; i >= 0; i--) {
+        const v = versions[i];
+        if (v.startsWith(`${version}-`)) {
+          forgeVersion = v;
+          break;
+        }
+      }
+
+      if (!forgeVersion) {
+        throw new Error(`No se encontró versión compatible de Forge para Minecraft ${version}`);
+      }
+
+      console.log(`Usando Forge ${forgeVersion} para Minecraft ${version}`);
+
+      // Descargar el cliente de Forge (no el instalador, sino el universal)
+      const forgeClientUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-client.jar`;
+      const forgeClientPath = path.join(instancePath, 'loader', `forge-${forgeVersion}-client.jar`);
+
+      // Asegurar que la carpeta loader exista
+      const loaderDir = path.join(instancePath, 'loader');
+      if (!fs.existsSync(loaderDir)) {
+        fs.mkdirSync(loaderDir, { recursive: true });
+      }
+
+      // Descargar el archivo
+      const responseClient = await fetch(forgeClientUrl);
+      if (!responseClient.ok) {
+        // Si el cliente no está disponible, usar un fallback
+        console.log(`Cliente de Forge no disponible, usando fallback...`);
+        await minecraftDownloadService.downloadClientJar(version, instancePath);
+        return;
+      }
+
+      // Guardar el archivo
+      const buffer = await responseClient.buffer();
+      fs.writeFileSync(forgeClientPath, buffer);
+
+      console.log(`Forge Client descargado en: ${forgeClientPath}`);
+    } catch (error) {
+      console.error(`Error al descargar Forge:`, error);
+      // De todas formas, descargar el client.jar base como fallback
+      await minecraftDownloadService.downloadClientJar(version, instancePath);
+      throw error;
+    }
   }
-  
+
   /**
    * Descarga el loader de Quilt
    */
   private async downloadQuiltLoader(version: string, instancePath: string): Promise<void> {
-    // TODO: Implementar lógica completa para descargar e instalar Quilt
-    
-    // Por ahora, solo descargamos el client.jar base
-    await minecraftDownloadService.downloadClientJar(version, instancePath);
-    
-    console.log(`Quilt loader para ${version} descarga pendiente de implementación completa`);
+    try {
+      console.log(`Descargando Quilt para Minecraft ${version}...`);
+
+      // Obtener la versión compatible de Quilt Loader
+      const quiltApiUrl = `https://meta.quiltmc.org/v3/versions/loader/${version}`;
+      const response = await fetch(quiltApiUrl);
+      const quiltVersions = await response.json();
+
+      // Tomar la primera versión (la más reciente o estable)
+      if (!quiltVersions || quiltVersions.length === 0) {
+        throw new Error(`No se encontró versión de Quilt para Minecraft ${version}`);
+      }
+
+      const quiltEntry = quiltVersions[0]; // La primera es la más reciente
+      const quiltLoaderVersion = quiltEntry.loader.version;
+      console.log(`Usando Quilt Loader ${quiltLoaderVersion} para Minecraft ${version}`);
+
+      // Descargar el JAR del loader de Quilt
+      const quiltLoaderUrl = `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/${quiltLoaderVersion}/quilt-loader-${quiltLoaderVersion}.jar`;
+      const quiltLoaderPath = path.join(instancePath, 'loader', `quilt-loader-${quiltLoaderVersion}.jar`);
+
+      // Asegurar que la carpeta loader exista
+      const loaderDir = path.join(instancePath, 'loader');
+      if (!fs.existsSync(loaderDir)) {
+        fs.mkdirSync(loaderDir, { recursive: true });
+      }
+
+      // Descargar el archivo
+      const responseLoader = await fetch(quiltLoaderUrl);
+      if (!responseLoader.ok) {
+        throw new Error(`Error al descargar Quilt Loader: ${responseLoader.status} ${responseLoader.statusText}`);
+      }
+
+      // Guardar el archivo
+      const buffer = await responseLoader.buffer();
+      fs.writeFileSync(quiltLoaderPath, buffer);
+
+      console.log(`Quilt Loader descargado en: ${quiltLoaderPath}`);
+    } catch (error) {
+      console.error(`Error al descargar Quilt:`, error);
+      // De todas formas, descargar el client.jar base como fallback
+      await minecraftDownloadService.downloadClientJar(version, instancePath);
+      throw error;
+    }
   }
   
   /**
@@ -220,18 +376,59 @@ export class InstanceCreationService {
     // Verificar que exista el archivo client.jar
     const clientJarPath = path.join(instancePath, 'client.jar');
     if (!fs.existsSync(clientJarPath)) {
+      console.log(`[Verificación] client.jar no encontrado en ${clientJarPath}`);
+      try {
+        const files = fs.readdirSync(instancePath);
+        console.log(`[Verificación] Archivos en la instancia:`, files.join(', '));
+      } catch (dirError) {
+        console.log(`[Verificación] No se pudo leer el directorio de la instancia:`, dirError);
+      }
       return false;
     }
-    
+
+    // Verificar si podemos acceder al archivo y obtener su tamaño
+    let clientJarStats;
+    try {
+      clientJarStats = fs.statSync(clientJarPath);
+    } catch (statError) {
+      console.log(`[Verificación] No se pudo acceder al archivo client.jar: ${statError}`);
+      return false;
+    }
+
+    // Verificar si el client.jar tiene un tamaño razonable (al menos 1MB para ser considerado válido)
+    if (clientJarStats.size < 1024 * 1024) { // 1MB en bytes
+      console.log(`[Verificación] client.jar es demasiado pequeño (${clientJarStats.size} bytes), probablemente no esté completamente descargado`);
+      return false;
+    }
+
+    console.log(`[Verificación] client.jar encontrado y válido: ${clientJarPath} (${clientJarStats.size} bytes)`);
+
+    // Verificar que exista la carpeta de assets o que exista en la ubicación compartida
+    const launcherPath = getLauncherDataPath();
+    const launcherAssetsPath = path.join(launcherPath, 'assets');
+
+    // Solo verificamos que exista la carpeta compartida donde están los assets
+    if (!fs.existsSync(launcherAssetsPath)) {
+      console.log(`[Verificación] No se encontró la carpeta de assets compartida en (${launcherAssetsPath})`);
+      return false;
+    }
+
     // Verificar que exista la estructura de carpetas básica
     const requiredFolders = ['mods', 'config', 'saves', 'logs'];
     for (const folder of requiredFolders) {
       const folderPath = path.join(instancePath, folder);
       if (!fs.existsSync(folderPath)) {
-        return false;
+        // Creamos la carpeta si no existe
+        try {
+          fs.mkdirSync(folderPath, { recursive: true });
+          console.log(`[Verificación] Carpeta creada: ${folderPath}`);
+        } catch (mkdirErr) {
+          console.log(`[Verificación] No se pudo crear carpeta ${folder}:`, mkdirErr);
+          return false;
+        }
       }
     }
-    
+
     return true;
   }
 }

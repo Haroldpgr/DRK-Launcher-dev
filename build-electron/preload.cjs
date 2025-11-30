@@ -12,9 +12,18 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   // Métodos de descarga
   download: {
     start: (data) => import_electron.ipcRenderer.send("download:start", data),
-    onProgress: (callback) => import_electron.ipcRenderer.on("download:progress", callback),
-    onComplete: (callback) => import_electron.ipcRenderer.on("download:complete", callback),
-    onError: (callback) => import_electron.ipcRenderer.on("download:error", callback)
+    onProgress: (callback) => {
+      import_electron.ipcRenderer.on("download:progress", callback);
+      return () => import_electron.ipcRenderer.removeListener("download:progress", callback);
+    },
+    onComplete: (callback) => {
+      import_electron.ipcRenderer.on("download:complete", callback);
+      return () => import_electron.ipcRenderer.removeListener("download:complete", callback);
+    },
+    onError: (callback) => {
+      import_electron.ipcRenderer.on("download:error", callback);
+      return () => import_electron.ipcRenderer.removeListener("download:error", callback);
+    }
   },
   // Otros métodos necesarios (mantén solo los que necesites)
   settings: {
@@ -29,6 +38,10 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     delete: (id) => import_electron.ipcRenderer.invoke("instances:delete", id),
     openFolder: (id) => import_electron.ipcRenderer.invoke("instances:openFolder", id),
     installContent: (payload) => import_electron.ipcRenderer.invoke("instance:install-content", payload)
+  },
+  // API para creación completa de instancias
+  instance: {
+    createFull: (payload) => import_electron.ipcRenderer.invoke("instance:create-full", payload)
   },
   // Otros APIs
   versions: {
