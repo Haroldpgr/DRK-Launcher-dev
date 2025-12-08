@@ -23,7 +23,10 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     onError: (callback) => {
       import_electron.ipcRenderer.on("download:error", callback);
       return () => import_electron.ipcRenderer.removeListener("download:error", callback);
-    }
+    },
+    // Método para cancelar descargas
+    cancel: (downloadId) => import_electron.ipcRenderer.invoke("download:cancel", downloadId),
+    cancelAll: () => import_electron.ipcRenderer.invoke("download:cancelAll")
   },
   // Otros métodos necesarios (mantén solo los que necesites)
   settings: {
@@ -47,6 +50,16 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   versions: {
     list: () => import_electron.ipcRenderer.invoke("versions:list")
   },
+  logs: {
+    getRecent: (count) => import_electron.ipcRenderer.invoke("logs:get-recent", count),
+    getByType: (payload) => import_electron.ipcRenderer.invoke("logs:get-by-type", payload),
+    getStats: () => import_electron.ipcRenderer.invoke("logs:get-stats")
+  },
+  progress: {
+    getAllStatuses: () => import_electron.ipcRenderer.invoke("progress:get-all-statuses"),
+    getOverall: () => import_electron.ipcRenderer.invoke("progress:get-overall"),
+    getDownloadStatuses: () => import_electron.ipcRenderer.invoke("progress:get-download-statuses")
+  },
   crash: {
     analyze: (p) => import_electron.ipcRenderer.invoke("crash:analyze", p),
     list: () => import_electron.ipcRenderer.invoke("crash:list")
@@ -58,6 +71,10 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   },
   game: {
     launch: (p) => import_electron.ipcRenderer.invoke("game:launch", p)
+  },
+  java: {
+    getAll: () => import_electron.ipcRenderer.invoke("java:get-all"),
+    detect: () => import_electron.ipcRenderer.invoke("java:detect")
   },
   // API de diálogo del sistema
   dialog: {

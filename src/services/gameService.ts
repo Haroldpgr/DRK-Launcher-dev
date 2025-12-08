@@ -24,12 +24,19 @@ export type LaunchOptions = {
 
 // Verificar si una instancia está completamente descargada y lista para jugar
 export function isInstanceReady(instancePath: string): boolean {
+  console.log(`Verificando si la instancia en ${instancePath} está lista para jugar...`);
+
   try {
     // Verificar que exista el archivo client.jar principal (archivo esencial)
     const clientJarPath = path.join(instancePath, 'client.jar');
     if (!fs.existsSync(clientJarPath)) {
-      console.log(`client.jar no encontrado en ${clientJarPath}`);
-      console.log(`Archivos en la ruta de la instancia ${instancePath}:`, fs.readdirSync(instancePath || '.').join(', '));
+      console.log(`[VERIFICACIÓN] client.jar no encontrado en ${clientJarPath}`);
+      try {
+        const files = fs.readdirSync(instancePath);
+        console.log(`[VERIFICACIÓN] Archivos en la instancia ${instancePath}:`, files.join(', '));
+      } catch (dirError) {
+        console.log(`[VERIFICACIÓN] No se pudo leer el directorio de la instancia:`, dirError);
+      }
       return false;
     }
 
@@ -38,27 +45,63 @@ export function isInstanceReady(instancePath: string): boolean {
     try {
       clientJarStats = fs.statSync(clientJarPath);
     } catch (statError) {
-      console.log(`No se pudo acceder al archivo client.jar: ${statError}`);
+      console.log(`[VERIFICACIÓN] No se pudo acceder al archivo client.jar: ${statError}`);
       return false;
     }
 
     // Verificar si el client.jar tiene un tamaño razonable (al menos 1MB para ser considerado válido)
     if (clientJarStats.size < 1024 * 1024) { // 1MB en bytes
-      console.log(`client.jar es demasiado pequeño (${clientJarStats.size} bytes), probablemente no esté completamente descargado`);
+      console.log(`[VERIFICACIÓN] client.jar es demasiado pequeño (${clientJarStats.size} bytes), probablemente no esté completamente descargado`);
       return false;
     }
 
-    console.log(`client.jar encontrado y válido: ${clientJarPath} (${clientJarStats.size} bytes)`);
+    console.log(`[VERIFICACIÓN] client.jar encontrado y válido: ${clientJarPath} (${clientJarStats.size} bytes)`);
 
-    // Verificar que exista la carpeta de assets o que exista en la ubicación compartida
-    const assetsPath = path.join(instancePath, 'assets');
+    // Verificar que exista la carpeta de assets en la ubicación compartida con estructura completa
     const launcherPath = getLauncherDataPath();
     const launcherAssetsPath = path.join(launcherPath, 'assets');
 
-    // La carpeta de assets en la instancia puede no existir si se usa la carpeta compartida
-    // Solo verificamos que exista la carpeta compartida donde están los assets
+    // La carpeta compartida de assets DEBE existir y tener la estructura completa
     if (!fs.existsSync(launcherAssetsPath)) {
-      console.log(`No se encontró la carpeta de assets compartida en (${launcherAssetsPath})`);
+      console.log(`[VERIFICACIÓN] Carpeta de assets compartida no existe: ${launcherAssetsPath}`);
+      return false;
+    }
+
+    // Verificar que existan las subcarpetas esenciales de assets
+    const indexesPath = path.join(launcherAssetsPath, 'indexes');
+    const objectsPath = path.join(launcherAssetsPath, 'objects');
+
+    if (!fs.existsSync(indexesPath)) {
+      console.log(`[VERIFICACIÓN] Carpeta de índices de assets no existe: ${indexesPath}`);
+      return false;
+    }
+
+    if (!fs.existsSync(objectsPath)) {
+      console.log(`[VERIFICACIÓN] Carpeta de objetos de assets no existe: ${objectsPath}`);
+      return false;
+    }
+
+    // Verificar que haya al menos algunos archivos de índice (no necesariamente completos, pero al menos algunos)
+    try {
+      const indexFiles = fs.readdirSync(indexesPath);
+      if (indexFiles.length === 0) {
+        console.log(`[VERIFICACIÓN] Carpeta de índices de assets está vacía: ${indexesPath}`);
+        return false; // No hay ningún archivo de índice
+      }
+    } catch (indexError) {
+      console.log(`[VERIFICACIÓN] Error al leer carpeta de índices de assets:`, indexError);
+      return false;
+    }
+
+    // Verificar que haya al menos algunos directorios de objetos (no necesariamente completos, pero al menos algunos)
+    try {
+      const objectFolders = fs.readdirSync(objectsPath);
+      if (objectFolders.length === 0) {
+        console.log(`[VERIFICACIÓN] Carpeta de objetos de assets está vacía: ${objectsPath}`);
+        return false; // No hay ninguno directorio de objetos
+      }
+    } catch (objectsError) {
+      console.log(`[VERIFICACIÓN] Error al leer carpeta de objetos de assets:`, objectsError);
       return false;
     }
 
@@ -70,19 +113,19 @@ export function isInstanceReady(instancePath: string): boolean {
         // Creamos la carpeta si no existe (esto es común en instancias nuevas)
         try {
           fs.mkdirSync(folderPath, { recursive: true });
-          console.log(`Carpeta creada: ${folderPath}`);
+          console.log(`[VERIFICACIÓN] Carpeta creada: ${folderPath}`);
         } catch (mkdirErr) {
-          console.log(`No se pudo crear carpeta ${folder}:`, mkdirErr);
+          console.log(`[VERIFICACIÓN] No se pudo crear carpeta ${folder}:`, mkdirErr);
         }
       }
     }
 
-    // Si llega aquí, se considera que hay los archivos básicos necesarios
-    console.log(`Instancia en ${instancePath} está lista para jugar`);
+    // Si llega aquí, se considera que hay los archivos y estructura necesarios
+    console.log(`[VERIFICACIÓN] Instancia en ${instancePath} está lista para jugar`);
     return true;
   } catch (error) {
-    console.error('Error al verificar si la instancia está lista:', error);
-    console.error('Error en detalle:', (error as Error).message);
+    console.error('[VERIFICACIÓN] Error al verificar si la instancia está lista:', error);
+    console.error('[VERIFICACIÓN] Error en detalle:', (error as Error).message);
     return false;
   }
 }
@@ -98,13 +141,24 @@ export function areAssetsReadyForVersion(instancePath: string, mcVersion: string
       // en la carpeta compartida (el juego puede funcionar sin el metadata local)
       console.log(`Metadata de versión ${mcVersion} no encontrada, verificando carpeta de assets compartida...`);
       const launcherAssetsPath = path.join(getLauncherDataPath(), 'assets');
-      // Verificar si la carpeta de assets existe y NO está vacía
+      // Verificar si la carpeta de assets existe y hay subdirectorios con contenido
       if (fs.existsSync(launcherAssetsPath)) {
-        const files = fs.readdirSync(launcherAssetsPath);
-        // Si hay archivos (no está vacía), asumir que está bien
-        return files.length > 0;
+        // Verificar que existan al menos las carpetas básicas de assets
+        const indexesPath = path.join(launcherAssetsPath, 'indexes');
+        const objectsPath = path.join(launcherAssetsPath, 'objects');
+
+        if (fs.existsSync(indexesPath) && fs.existsSync(objectsPath)) {
+          // Contar si hay algún archivo en las carpetas relevantes
+          const indexesCount = fs.readdirSync(indexesPath).length;
+          const objectsSubdirs = fs.readdirSync(objectsPath).filter(dir =>
+            fs.statSync(path.join(objectsPath, dir)).isDirectory()
+          );
+
+          // Si tienen contenido, considerar que los assets están disponibles
+          return indexesCount > 0 && objectsSubdirs.length > 0;
+        }
       }
-      return false; // Si no existe o está vacía, retornar falso
+      return false; // Si no existen las carpetas básicas, retornar falso
     }
 
     // Si tenemos el archivo de metadata, podemos verificar que los assets estén disponibles

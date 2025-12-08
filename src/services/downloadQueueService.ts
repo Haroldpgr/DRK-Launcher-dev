@@ -14,12 +14,13 @@ export interface DownloadInfo {
   url: string;
   outputPath: string;
   progress: number;
-  status: 'pending' | 'downloading' | 'completed' | 'error';
+  status: 'pending' | 'downloading' | 'completed' | 'error' | 'cancelled';
   error?: string;
   totalBytes?: number;
   downloadedBytes?: number;
   expectedHash?: string; // Hash esperado para verificación de integridad
   hashAlgorithm?: string; // Algoritmo de hash (por ejemplo, 'sha1', 'sha256')
+  abortController?: AbortController; // Controller para cancelar la descarga
 }
 
 /**
@@ -28,8 +29,8 @@ export interface DownloadInfo {
 export class DownloadQueueService {
   private downloads: Map<string, DownloadInfo> = new Map();
   private activeDownloads: Set<string> = new Set();
-  private maxConcurrentDownloads: number = 5; // Aumentar el número de descargas concurrentes
-  private timeoutMs: number = 60000; // Aumentar timeout a 60 segundos
+  private maxConcurrentDownloads: number = 3; // Reducir a 3 para evitar sobrecarga
+  private timeoutMs: number = 300000; // Aumentar timeout a 5 minutos para descargas lentas
 
   /**
    * Añade una descarga a la cola
@@ -64,6 +65,7 @@ export class DownloadQueueService {
     this.activeDownloads.add(downloadId);
     download.status = 'downloading';
 
+    let controller: AbortController;
     try {
       // Crear directorio si no existe
       const dir = path.dirname(download.outputPath);
@@ -71,12 +73,21 @@ export class DownloadQueueService {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Configurar timeout
-      const controller = new AbortController();
+      // Crear controller de aborto y guardarlo para posibilidad de cancelación
+      controller = new AbortController();
+      download.abortController = controller;
+
       const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
+      // Agregar headers para mejorar la estabilidad de la conexión
       const response = await fetch(download.url, {
-        signal: controller.signal
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'DRK-Launcher/1.0 (compatible; Fetch)',
+          'Accept': '*/*',
+          'Accept-Encoding': 'identity', // Evitar compresión para poder medir progreso
+          'Connection': 'keep-alive'
+        }
       });
 
       clearTimeout(timeoutId);
@@ -105,8 +116,24 @@ export class DownloadQueueService {
       // Conectar streams
       response.body
         .on('error', (err) => {
-          fileStream.destroy(err);
-          progressStream.destroy(err);
+          if (err.name === 'AbortError') {
+            // La descarga fue cancelada
+            download.status = 'cancelled';
+            download.error = 'Download cancelled';
+            fileStream.destroy();
+            progressStream.destroy();
+            // Eliminar archivo parcial
+            if (fs.existsSync(download.outputPath)) {
+              try {
+                fs.unlinkSync(download.outputPath);
+              } catch (unlinkError) {
+                console.error('Error removing cancelled download file:', unlinkError);
+              }
+            }
+          } else {
+            fileStream.destroy(err);
+            progressStream.destroy(err);
+          }
         })
         .pipe(progressStream)
         .pipe(fileStream);
@@ -117,44 +144,52 @@ export class DownloadQueueService {
         progressStream.on('error', reject);
       });
 
-      // Validar que el archivo se haya descargado completamente
-      const finalFileSize = fs.statSync(download.outputPath).size;
+      if (download.status !== 'cancelled') {
+        // Validar que el archivo se haya descargado completamente
+        const finalFileSize = fs.statSync(download.outputPath).size;
 
-      // Si conocemos el tamaño total, verificar que coincida
-      if (download.totalBytes && download.totalBytes > 0) {
-        if (finalFileSize !== download.totalBytes) {
-          console.warn(`Tamaño del archivo descargado (${finalFileSize}) no coincide con el tamaño esperado (${download.totalBytes})`);
-          // Considerar como error si hay una gran discrepancia
-          if (finalFileSize < download.totalBytes * 0.95) { // Permitir un 5% de diferencia por posibles redondeos
-            throw new Error(`Archivo descargado incompleto: tamaño esperado ${download.totalBytes}, tamaño real ${finalFileSize}`);
+        // Si conocemos el tamaño total, verificar que coincida
+        if (download.totalBytes && download.totalBytes > 0) {
+          if (finalFileSize !== download.totalBytes) {
+            console.warn(`Tamaño del archivo descargado (${finalFileSize}) no coincide con el tamaño esperado (${download.totalBytes})`);
+            // Considerar como error si hay una gran discrepancia
+            if (finalFileSize < download.totalBytes * 0.95) { // Permitir un 5% de diferencia por posibles redondeos
+              throw new Error(`Archivo descargado incompleto: tamaño esperado ${download.totalBytes}, tamaño real ${finalFileSize}`);
+            }
+          }
+        }
+
+        // Si se proporcionó un hash esperado, verificar la integridad del archivo
+        if (download.expectedHash) {
+          const calculatedHash = await this.calculateFileHash(download.outputPath, download.hashAlgorithm || 'sha1');
+          if (calculatedHash.toLowerCase() !== download.expectedHash.toLowerCase()) {
+            throw new Error(`Hash del archivo no coincide: esperado ${download.expectedHash}, obtenido ${calculatedHash}`);
+          }
+        }
+
+        download.status = 'completed';
+        download.progress = 1;
+      }
+    } catch (error: any) {
+      if (download.status === 'cancelled') {
+        // Ya manejamos la cancelación en el evento on('error')
+      } else {
+        download.status = 'error';
+        download.error = error.message || 'Unknown error';
+        download.progress = 0;
+
+        // Limpiar archivo si hubo error
+        if (fs.existsSync(download.outputPath)) {
+          try {
+            fs.unlinkSync(download.outputPath);
+          } catch (unlinkError) {
+            console.error('Error removing failed download file:', unlinkError);
           }
         }
       }
-
-      // Si se proporcionó un hash esperado, verificar la integridad del archivo
-      if (download.expectedHash) {
-        const calculatedHash = await this.calculateFileHash(download.outputPath, download.hashAlgorithm || 'sha1');
-        if (calculatedHash.toLowerCase() !== download.expectedHash.toLowerCase()) {
-          throw new Error(`Hash del archivo no coincide: esperado ${download.expectedHash}, obtenido ${calculatedHash}`);
-        }
-      }
-
-      download.status = 'completed';
-      download.progress = 1;
-    } catch (error: any) {
-      download.status = 'error';
-      download.error = error.message || 'Unknown error';
-      download.progress = 0;
-
-      // Limpiar archivo si hubo error
-      if (fs.existsSync(download.outputPath)) {
-        try {
-          fs.unlinkSync(download.outputPath);
-        } catch (unlinkError) {
-          console.error('Error removing failed download file:', unlinkError);
-        }
-      }
     } finally {
+      // Limpiar el controller de la descarga
+      delete download.abortController;
       this.activeDownloads.delete(downloadId);
       this.processQueue(); // Procesar siguiente descarga en la cola
     }
@@ -284,6 +319,61 @@ export class DownloadQueueService {
   }
 
   /**
+   * Cancela una descarga activa
+   */
+  cancelDownloadById(downloadId: string): boolean {
+    const download = this.downloads.get(downloadId);
+    if (!download) {
+      return false;
+    }
+
+    if (download.status === 'downloading' && download.abortController) {
+      // Abortar la descarga actual
+      download.abortController.abort();
+      download.status = 'cancelled';
+      download.error = 'Download cancelled by user';
+      download.progress = 0;
+
+      // Eliminar de las descargas activas
+      this.activeDownloads.delete(downloadId);
+
+      // Procesar la cola para iniciar otras descargas
+      this.processQueue();
+
+      return true;
+    } else if (download.status === 'pending') {
+      // Si la descarga aún está pendiente, simplemente cambiar el estado
+      download.status = 'cancelled';
+      download.error = 'Download cancelled before start';
+
+      // Procesar la cola para iniciar otras descargas
+      this.processQueue();
+
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Cancela todas las descargas activas
+   */
+  cancelAllDownloads(): number {
+    let cancelledCount = 0;
+
+    for (const [downloadId, download] of this.downloads.entries()) {
+      if (download.status === 'downloading' || download.status === 'pending') {
+        const wasCancelled = this.cancelDownloadById(downloadId);
+        if (wasCancelled) {
+          cancelledCount++;
+        }
+      }
+    }
+
+    return cancelledCount;
+  }
+
+  /**
    * Obtiene el número total de descargas en cola
    */
   getTotalDownloadCount(): number {
@@ -292,3 +382,6 @@ export class DownloadQueueService {
 }
 
 export const downloadQueueService = new DownloadQueueService();
+
+// Exportar también los métodos necesarios para acceso externo
+export { DownloadInfo };

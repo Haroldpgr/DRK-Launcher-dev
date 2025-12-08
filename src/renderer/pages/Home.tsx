@@ -33,11 +33,87 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
     ])
   }, [])
 
-  useEffect(() => {
-    // Cargar instancias
-    if (window.api?.instances?.list) {
-      window.api.instances.list().then((l: any) => setInstances(l));
+  // Función para cargar instancias
+  const loadInstances = async () => {
+    try {
+      // Cargar instancias
+      if (window.api?.instances?.list) {
+        const allInstances = await window.api.instances.list();
+
+        // Importar y usar el servicio de perfil para filtrar instancias
+        // Filtrar instancias que pertenecen al perfil actual del usuario
+        // Usamos una lógica similar a la de Instances.tsx
+        if (currentUser) {
+          // Si hay un perfil actual, filtrar instancias asociadas a ese perfil
+          // (esto requiere usar el servicio de perfil que se usa en la página de instancias)
+          import('../services/instanceProfileService').then(({ instanceProfileService }) => {
+            const profileInstanceIds = instanceProfileService.getInstancesForProfile(currentUser);
+            const profileInstances = allInstances.filter(instance =>
+              profileInstanceIds.includes(instance.id)
+            );
+            setInstances(profileInstances);
+          }).catch(() => {
+            // Si no se puede importar el servicio de perfil, usar todas las instancias como fallback
+            setInstances(allInstances);
+          });
+        } else {
+          // Si no hay perfil actual, usar todas las instancias como fallback
+          setInstances(allInstances);
+        }
+      }
+    } catch (error) {
+      console.error("Error al cargar instancias:", error);
     }
+  };
+
+  // Función para auto-detectar y validar instancias
+  const autoDetectAndLoadInstances = async () => {
+    try {
+      // Cargar instancias
+      if (window.api?.instances?.list) {
+        const allInstances = await window.api.instances.list();
+
+        // Si hay un perfil actual, filtrar instancias asociadas a ese perfil
+        if (currentUser) {
+          // Importar y usar el servicio de perfil para filtrar instancias
+          import('../services/instanceProfileService').then(({ instanceProfileService }) => {
+            // Verificar si hay instancias en el directorio de instancias que no están registradas
+            // para el perfil actual
+            for (const instance of allInstances) {
+              const profileInstanceIds = instanceProfileService.getInstancesForProfile(currentUser);
+              if (!profileInstanceIds.includes(instance.id)) {
+                // La instancia no está asociada al perfil actual
+                const otherProfile = instanceProfileService.getProfileForInstance(instance.id);
+                if (!otherProfile) {
+                  // La instancia no está asociada a ningún perfil, asociarla al perfil actual
+                  instanceProfileService.linkInstanceToProfile(instance.id, currentUser);
+                }
+              }
+            }
+
+            // Ahora cargar instancias filtradas para este perfil
+            const profileInstanceIds = instanceProfileService.getInstancesForProfile(currentUser);
+            const profileInstances = allInstances.filter(instance =>
+              profileInstanceIds.includes(instance.id)
+            );
+            setInstances(profileInstances);
+          }).catch(() => {
+            // Si no se puede importar el servicio de perfil, usar todas las instancias como fallback
+            setInstances(allInstances);
+          });
+        } else {
+          // Si no hay perfil actual, usar todas las instancias como fallback
+          setInstances(allInstances);
+        }
+      }
+    } catch (error) {
+      console.error("Error al cargar instancias:", error);
+    }
+  };
+
+  useEffect(() => {
+    // Cargar instancias con validación
+    autoDetectAndLoadInstances();
 
     // Cargar modpacks recomendados
     if (window.api?.modrinth?.search) {
@@ -86,7 +162,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
       { id: 'server2', name: 'Mineplex', ip: 'us.mineplex.com' },
       { id: 'server3', name: 'CubeCraft', ip: 'play.cubecraft.net' }
     ]);
-  }, [])
+  }, [currentUser]) // Agregar currentUser como dependencia para refrescar cuando cambie el perfil
 
   const play = async () => { if (!last) return; onPlay(last.id); }
 

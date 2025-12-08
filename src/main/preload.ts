@@ -27,7 +27,10 @@ contextBridge.exposeInMainWorld('api', {
     onError: (callback: (event: any, error: any) => void) => {
       ipcRenderer.on('download:error', callback);
       return () => ipcRenderer.removeListener('download:error', callback);
-    }
+    },
+    // Método para cancelar descargas
+    cancel: (downloadId: string) => ipcRenderer.invoke('download:cancel', downloadId),
+    cancelAll: () => ipcRenderer.invoke('download:cancelAll')
   },
 
   // Otros métodos necesarios (mantén solo los que necesites)
@@ -56,6 +59,18 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('versions:list')
   },
 
+  logs: {
+    getRecent: (count: number) => ipcRenderer.invoke('logs:get-recent', count),
+    getByType: (payload: { type: string, count: number }) => ipcRenderer.invoke('logs:get-by-type', payload),
+    getStats: () => ipcRenderer.invoke('logs:get-stats')
+  },
+
+  progress: {
+    getAllStatuses: () => ipcRenderer.invoke('progress:get-all-statuses'),
+    getOverall: () => ipcRenderer.invoke('progress:get-overall'),
+    getDownloadStatuses: () => ipcRenderer.invoke('progress:get-download-statuses')
+  },
+
   crash: {
     analyze: (p: unknown) => ipcRenderer.invoke('crash:analyze', p),
     list: () => ipcRenderer.invoke('crash:list')
@@ -69,6 +84,11 @@ contextBridge.exposeInMainWorld('api', {
 
   game: {
     launch: (p: { instanceId: string, userProfile?: any }) => ipcRenderer.invoke('game:launch', p)
+  },
+
+  java: {
+    getAll: () => ipcRenderer.invoke('java:get-all'),
+    detect: () => ipcRenderer.invoke('java:detect')
   },
 
   // API de diálogo del sistema
@@ -109,6 +129,16 @@ declare global {
       versions: {
         list: () => Promise<any>;
       };
+      logs: {
+        getRecent: (count: number) => Promise<any[]>;
+        getByType: (payload: { type: string, count: number }) => Promise<any[]>;
+        getStats: () => Promise<any>;
+      };
+      progress: {
+        getAllStatuses: () => Promise<any[]>;
+        getOverall: () => Promise<any>;
+        getDownloadStatuses: () => Promise<any[]>;
+      };
       crash: {
         analyze: (p: unknown) => Promise<any>;
         list: () => Promise<any>;
@@ -120,6 +150,10 @@ declare global {
       };
       game: {
         launch: (p: { instanceId: string, userProfile?: any }) => Promise<any>;
+      };
+      java: {
+        getAll: () => Promise<any[]>;
+        detect: () => Promise<any[]>;
       };
       dialog: {
         showOpenDialog: (options: any) => Promise<any>;

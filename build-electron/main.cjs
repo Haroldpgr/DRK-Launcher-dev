@@ -4,8 +4,15 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -756,14 +763,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path11 = url.path;
-      if (path11.length === 0) {
+      const path15 = url.path;
+      if (path15.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path11.length === 1 && isNormalizedWindowsDriveLetter(path11[0])) {
+      if (url.scheme === "file" && path15.length === 1 && isNormalizedWindowsDriveLetter(path15[0])) {
         return;
       }
-      path11.pop();
+      path15.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -2787,12 +2794,12 @@ var require_lib2 = __commonJS({
       const dest = new URL$1(destination).protocol;
       return orig === dest;
     };
-    function fetch8(url, opts) {
-      if (!fetch8.Promise) {
+    function fetch9(url, opts) {
+      if (!fetch9.Promise) {
         throw new Error("native promise missing, set fetch.Promise to your favorite alternative");
       }
-      Body.Promise = fetch8.Promise;
-      return new fetch8.Promise(function(resolve, reject) {
+      Body.Promise = fetch9.Promise;
+      return new fetch9.Promise(function(resolve, reject) {
         const request = new Request(url, opts);
         const options = getNodeRequestOptions(request);
         const send = (options.protocol === "https:" ? https : http).request;
@@ -2863,7 +2870,7 @@ var require_lib2 = __commonJS({
         req.on("response", function(res) {
           clearTimeout(reqTimeout);
           const headers = createHeadersLenient(res.headers);
-          if (fetch8.isRedirect(res.statusCode)) {
+          if (fetch9.isRedirect(res.statusCode)) {
             const location = headers.get("Location");
             let locationURL = null;
             try {
@@ -2925,7 +2932,7 @@ var require_lib2 = __commonJS({
                   requestOpts.body = void 0;
                   requestOpts.headers.delete("content-length");
                 }
-                resolve(fetch8(new Request(locationURL, requestOpts)));
+                resolve(fetch9(new Request(locationURL, requestOpts)));
                 finalize();
                 return;
             }
@@ -3017,11 +3024,11 @@ var require_lib2 = __commonJS({
         stream.end();
       }
     }
-    fetch8.isRedirect = function(code) {
+    fetch9.isRedirect = function(code) {
       return code === 301 || code === 302 || code === 303 || code === 307 || code === 308;
     };
-    fetch8.Promise = global.Promise;
-    module2.exports = exports2 = fetch8;
+    fetch9.Promise = global.Promise;
+    module2.exports = exports2 = fetch9;
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.default = exports2;
     exports2.Headers = Headers;
@@ -3032,12 +3039,305 @@ var require_lib2 = __commonJS({
   }
 });
 
+// src/services/downloadQueueService.ts
+var downloadQueueService_exports = {};
+__export(downloadQueueService_exports, {
+  DownloadQueueService: () => DownloadQueueService,
+  downloadQueueService: () => downloadQueueService
+});
+var import_node_path3, import_node_fs2, import_node_stream, import_node_util, import_node_fetch, pipelineAsync, DownloadQueueService, downloadQueueService;
+var init_downloadQueueService = __esm({
+  "src/services/downloadQueueService.ts"() {
+    import_node_path3 = __toESM(require("node:path"), 1);
+    import_node_fs2 = __toESM(require("node:fs"), 1);
+    import_node_stream = require("node:stream");
+    import_node_util = require("node:util");
+    import_node_fetch = __toESM(require_lib2(), 1);
+    pipelineAsync = (0, import_node_util.promisify)(import_node_stream.pipeline);
+    DownloadQueueService = class {
+      downloads = /* @__PURE__ */ new Map();
+      activeDownloads = /* @__PURE__ */ new Set();
+      maxConcurrentDownloads = 3;
+      // Reducir a 3 para evitar sobrecarga
+      timeoutMs = 3e5;
+      // Aumentar timeout a 5 minutos para descargas lentas
+      /**
+       * Añade una descarga a la cola
+       */
+      async addDownload(url, outputPath, expectedHash, hashAlgorithm = "sha1") {
+        const downloadId = this.generateId();
+        const downloadInfo = {
+          id: downloadId,
+          url,
+          outputPath,
+          progress: 0,
+          status: "pending",
+          expectedHash,
+          hashAlgorithm
+        };
+        this.downloads.set(downloadId, downloadInfo);
+        this.processQueue();
+        return downloadId;
+      }
+      /**
+       * Inicia una descarga individual con manejo de errores y timeouts
+       */
+      async startDownload(downloadId) {
+        const download = this.downloads.get(downloadId);
+        if (!download || download.status !== "pending") {
+          return;
+        }
+        this.activeDownloads.add(downloadId);
+        download.status = "downloading";
+        let controller;
+        try {
+          const dir = import_node_path3.default.dirname(download.outputPath);
+          if (!import_node_fs2.default.existsSync(dir)) {
+            import_node_fs2.default.mkdirSync(dir, { recursive: true });
+          }
+          controller = new AbortController();
+          download.abortController = controller;
+          const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+          const response = await (0, import_node_fetch.default)(download.url, {
+            signal: controller.signal,
+            headers: {
+              "User-Agent": "DRK-Launcher/1.0 (compatible; Fetch)",
+              "Accept": "*/*",
+              "Accept-Encoding": "identity",
+              // Evitar compresión para poder medir progreso
+              "Connection": "keep-alive"
+            }
+          });
+          clearTimeout(timeoutId);
+          if (!response.ok || !response.body) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const totalBytes = parseInt(response.headers.get("content-length") || "0", 10);
+          download.totalBytes = totalBytes;
+          download.downloadedBytes = 0;
+          const fileStream = import_node_fs2.default.createWriteStream(download.outputPath);
+          const progressStream = new (require("stream")).Transform({
+            transform(chunk, encoding, callback) {
+              download.downloadedBytes = (download.downloadedBytes || 0) + chunk.length;
+              download.progress = totalBytes > 0 ? download.downloadedBytes / totalBytes : 0;
+              callback(null, chunk);
+            }
+          });
+          response.body.on("error", (err) => {
+            if (err.name === "AbortError") {
+              download.status = "cancelled";
+              download.error = "Download cancelled";
+              fileStream.destroy();
+              progressStream.destroy();
+              if (import_node_fs2.default.existsSync(download.outputPath)) {
+                try {
+                  import_node_fs2.default.unlinkSync(download.outputPath);
+                } catch (unlinkError) {
+                  console.error("Error removing cancelled download file:", unlinkError);
+                }
+              }
+            } else {
+              fileStream.destroy(err);
+              progressStream.destroy(err);
+            }
+          }).pipe(progressStream).pipe(fileStream);
+          await new Promise((resolve, reject) => {
+            fileStream.on("finish", resolve);
+            fileStream.on("error", reject);
+            progressStream.on("error", reject);
+          });
+          if (download.status !== "cancelled") {
+            const finalFileSize = import_node_fs2.default.statSync(download.outputPath).size;
+            if (download.totalBytes && download.totalBytes > 0) {
+              if (finalFileSize !== download.totalBytes) {
+                console.warn(`Tama\xF1o del archivo descargado (${finalFileSize}) no coincide con el tama\xF1o esperado (${download.totalBytes})`);
+                if (finalFileSize < download.totalBytes * 0.95) {
+                  throw new Error(`Archivo descargado incompleto: tama\xF1o esperado ${download.totalBytes}, tama\xF1o real ${finalFileSize}`);
+                }
+              }
+            }
+            if (download.expectedHash) {
+              const calculatedHash = await this.calculateFileHash(download.outputPath, download.hashAlgorithm || "sha1");
+              if (calculatedHash.toLowerCase() !== download.expectedHash.toLowerCase()) {
+                throw new Error(`Hash del archivo no coincide: esperado ${download.expectedHash}, obtenido ${calculatedHash}`);
+              }
+            }
+            download.status = "completed";
+            download.progress = 1;
+          }
+        } catch (error) {
+          if (download.status === "cancelled") {
+          } else {
+            download.status = "error";
+            download.error = error.message || "Unknown error";
+            download.progress = 0;
+            if (import_node_fs2.default.existsSync(download.outputPath)) {
+              try {
+                import_node_fs2.default.unlinkSync(download.outputPath);
+              } catch (unlinkError) {
+                console.error("Error removing failed download file:", unlinkError);
+              }
+            }
+          }
+        } finally {
+          delete download.abortController;
+          this.activeDownloads.delete(downloadId);
+          this.processQueue();
+        }
+      }
+      /**
+       * Procesa la cola de descargas
+       */
+      processQueue() {
+        const pendingDownloads = Array.from(this.downloads.entries()).filter(([_, info]) => info.status === "pending" && !this.activeDownloads.has(info.id)).slice(0, this.maxConcurrentDownloads - this.activeDownloads.size);
+        for (const [_, download] of pendingDownloads) {
+          if (this.activeDownloads.size < this.maxConcurrentDownloads) {
+            this.startDownload(download.id).catch((error) => {
+              console.error(`Error in download ${download.id}:`, error);
+              const downloadInfo = this.downloads.get(download.id);
+              if (downloadInfo) {
+                downloadInfo.status = "error";
+                downloadInfo.error = error.message;
+              }
+              this.activeDownloads.delete(download.id);
+            });
+          }
+        }
+      }
+      /**
+       * Obtiene el estado de una descarga
+       */
+      getDownloadStatus(downloadId) {
+        return this.downloads.get(downloadId);
+      }
+      /**
+       * Cancela una descarga en progreso
+       */
+      cancelDownload(downloadId) {
+        const download = this.downloads.get(downloadId);
+        if (!download) {
+          return false;
+        }
+        if (download.status === "pending") {
+          download.status = "error";
+          download.error = "Download cancelled";
+          return true;
+        }
+        if (download.status === "downloading") {
+          return true;
+        }
+        return false;
+      }
+      /**
+       * Reinicia una descarga fallida
+       */
+      async restartDownload(downloadId) {
+        const download = this.downloads.get(downloadId);
+        if (!download || download.status !== "error") {
+          return null;
+        }
+        download.status = "pending";
+        download.progress = 0;
+        download.error = void 0;
+        this.processQueue();
+        return downloadId;
+      }
+      /**
+       * Obtiene todas las descargas
+       */
+      getAllDownloads() {
+        return Array.from(this.downloads.values());
+      }
+      /**
+       * Calcula el hash de un archivo
+       */
+      async calculateFileHash(filePath, algorithm) {
+        const crypto = await import("node:crypto");
+        const fs14 = await import("node:fs");
+        const stream = await import("node:stream");
+        return new Promise((resolve, reject) => {
+          const hash = crypto.createHash(algorithm);
+          const input = fs14.createReadStream(filePath);
+          input.on("error", reject);
+          input.on("data", (chunk) => hash.update(chunk));
+          input.on("close", () => resolve(hash.digest("hex")));
+        });
+      }
+      /**
+       * Genera un ID único para la descarga
+       */
+      generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+      }
+      /**
+       * Obtiene el número de descargas activas
+       */
+      getActiveDownloadCount() {
+        return this.activeDownloads.size;
+      }
+      /**
+       * Establece el número máximo de descargas concurrentes
+       */
+      setMaxConcurrentDownloads(max) {
+        this.maxConcurrentDownloads = max;
+        this.processQueue();
+      }
+      /**
+       * Cancela una descarga activa
+       */
+      cancelDownloadById(downloadId) {
+        const download = this.downloads.get(downloadId);
+        if (!download) {
+          return false;
+        }
+        if (download.status === "downloading" && download.abortController) {
+          download.abortController.abort();
+          download.status = "cancelled";
+          download.error = "Download cancelled by user";
+          download.progress = 0;
+          this.activeDownloads.delete(downloadId);
+          this.processQueue();
+          return true;
+        } else if (download.status === "pending") {
+          download.status = "cancelled";
+          download.error = "Download cancelled before start";
+          this.processQueue();
+          return true;
+        }
+        return false;
+      }
+      /**
+       * Cancela todas las descargas activas
+       */
+      cancelAllDownloads() {
+        let cancelledCount = 0;
+        for (const [downloadId, download] of this.downloads.entries()) {
+          if (download.status === "downloading" || download.status === "pending") {
+            const wasCancelled = this.cancelDownloadById(downloadId);
+            if (wasCancelled) {
+              cancelledCount++;
+            }
+          }
+        }
+        return cancelledCount;
+      }
+      /**
+       * Obtiene el número total de descargas en cola
+       */
+      getTotalDownloadCount() {
+        return this.downloads.size;
+      }
+    };
+    downloadQueueService = new DownloadQueueService();
+  }
+});
+
 // node_modules/node-stream-zip/node_stream_zip.js
 var require_node_stream_zip = __commonJS({
   "node_modules/node-stream-zip/node_stream_zip.js"(exports2, module2) {
-    var fs10 = require("fs");
+    var fs14 = require("fs");
     var util = require("util");
-    var path11 = require("path");
+    var path15 = require("path");
     var events = require("events");
     var zlib = require("zlib");
     var stream = require("stream");
@@ -3233,7 +3533,7 @@ var require_node_stream_zip = __commonJS({
           fd = config.fd;
           readFile();
         } else {
-          fs10.open(fileName, "r", (err, f) => {
+          fs14.open(fileName, "r", (err, f) => {
             if (err) {
               return that.emit("error", err);
             }
@@ -3243,7 +3543,7 @@ var require_node_stream_zip = __commonJS({
         }
       }
       function readFile() {
-        fs10.fstat(fd, (err, stat) => {
+        fs14.fstat(fd, (err, stat) => {
           if (err) {
             return that.emit("error", err);
           }
@@ -3558,17 +3858,17 @@ var require_node_stream_zip = __commonJS({
                 });
               }
             });
-            fs10.open(outPath, "w", (err2, fdFile) => {
+            fs14.open(outPath, "w", (err2, fdFile) => {
               if (err2) {
                 return callback(err2);
               }
               if (errThrown) {
-                fs10.close(fd, () => {
+                fs14.close(fd, () => {
                   callback(errThrown);
                 });
                 return;
               }
-              fsStm = fs10.createWriteStream(outPath, { fd: fdFile });
+              fsStm = fs14.createWriteStream(outPath, { fd: fdFile });
               fsStm.on("finish", () => {
                 that.emit("extract", entry, outPath);
                 if (!errThrown) {
@@ -3585,8 +3885,8 @@ var require_node_stream_zip = __commonJS({
           return callback();
         }
         let dir = dirs.shift();
-        dir = path11.join(baseDir, path11.join(...dir));
-        fs10.mkdir(dir, { recursive: true }, (err) => {
+        dir = path15.join(baseDir, path15.join(...dir));
+        fs14.mkdir(dir, { recursive: true }, (err) => {
           if (err && err.code !== "EEXIST") {
             return callback(err);
           }
@@ -3598,7 +3898,7 @@ var require_node_stream_zip = __commonJS({
           return callback(null, extractedCount);
         }
         const file = files.shift();
-        const targetPath = path11.join(baseDir, file.name.replace(baseRelPath, ""));
+        const targetPath = path15.join(baseDir, file.name.replace(baseRelPath, ""));
         extract(file, targetPath, (err) => {
           if (err) {
             return callback(err, extractedCount);
@@ -3626,7 +3926,7 @@ var require_node_stream_zip = __commonJS({
               const childEntry = entries[e];
               if (childEntry.isFile) {
                 files.push(childEntry);
-                relPath = path11.dirname(relPath);
+                relPath = path15.dirname(relPath);
               }
               if (relPath && !allDirs[relPath] && relPath !== ".") {
                 allDirs[relPath] = true;
@@ -3663,9 +3963,9 @@ var require_node_stream_zip = __commonJS({
             extractFiles(outPath, entryName, files, callback, 0);
           }
         } else {
-          fs10.stat(outPath, (err, stat) => {
+          fs14.stat(outPath, (err, stat) => {
             if (stat && stat.isDirectory()) {
-              extract(entry, path11.join(outPath, path11.basename(entry.name)), callback);
+              extract(entry, path15.join(outPath, path15.basename(entry.name)), callback);
             } else {
               extract(entry, outPath, callback);
             }
@@ -3680,7 +3980,7 @@ var require_node_stream_zip = __commonJS({
           }
         } else {
           closed = true;
-          fs10.close(fd, (err) => {
+          fs14.close(fd, (err) => {
             fd = null;
             if (callback) {
               callback(err);
@@ -3696,7 +3996,7 @@ var require_node_stream_zip = __commonJS({
       };
     };
     StreamZip.setFs = function(customFs) {
-      fs10 = customFs;
+      fs14 = customFs;
     };
     StreamZip.debugLog = (...args) => {
       if (StreamZip.debug) {
@@ -3935,7 +4235,7 @@ var require_node_stream_zip = __commonJS({
         if (sync) {
           let bytesRead = 0;
           try {
-            bytesRead = fs10.readSync(
+            bytesRead = fs14.readSync(
               this.fd,
               this.buffer,
               this.offset + this.bytesRead,
@@ -3947,7 +4247,7 @@ var require_node_stream_zip = __commonJS({
           }
           this.readCallback(sync, err, err ? bytesRead : null);
         } else {
-          fs10.read(
+          fs14.read(
             this.fd,
             this.buffer,
             this.offset + this.bytesRead,
@@ -4041,7 +4341,7 @@ var require_node_stream_zip = __commonJS({
       _read(n) {
         const buffer = Buffer.alloc(Math.min(n, this.length - this.pos));
         if (buffer.length) {
-          fs10.read(this.fd, buffer, 0, buffer.length, this.offset + this.pos, this.readCallback);
+          fs14.read(this.fd, buffer, 0, buffer.length, this.offset + this.pos, this.readCallback);
         } else {
           this.push(null);
         }
@@ -4164,7 +4464,8 @@ var require_node_stream_zip = __commonJS({
 
 // src/main/main.ts
 var import_electron2 = require("electron");
-var import_node_path10 = __toESM(require("node:path"), 1);
+var import_node_path14 = __toESM(require("node:path"), 1);
+var import_node_fs13 = __toESM(require("node:fs"), 1);
 
 // src/services/db.ts
 var import_node_path2 = __toESM(require("node:path"), 1);
@@ -4277,7 +4578,6 @@ async function queryStatus(ip) {
 }
 
 // src/services/gameService.ts
-var import_node_child_process = require("node:child_process");
 var import_node_path5 = __toESM(require("node:path"), 1);
 var import_node_fs4 = __toESM(require("node:fs"), 1);
 
@@ -4287,236 +4587,26 @@ var import_node_fs3 = __toESM(require("node:fs"), 1);
 var import_node_stream2 = require("node:stream");
 var import_node_util2 = require("node:util");
 var import_node_fetch2 = __toESM(require_lib2(), 1);
-
-// src/services/downloadQueueService.ts
-var import_node_path3 = __toESM(require("node:path"), 1);
-var import_node_fs2 = __toESM(require("node:fs"), 1);
-var import_node_stream = require("node:stream");
-var import_node_util = require("node:util");
-var import_node_fetch = __toESM(require_lib2(), 1);
-var pipelineAsync = (0, import_node_util.promisify)(import_node_stream.pipeline);
-var DownloadQueueService = class {
-  downloads = /* @__PURE__ */ new Map();
-  activeDownloads = /* @__PURE__ */ new Set();
-  maxConcurrentDownloads = 5;
-  // Aumentar el número de descargas concurrentes
-  timeoutMs = 6e4;
-  // Aumentar timeout a 60 segundos
-  /**
-   * Añade una descarga a la cola
-   */
-  async addDownload(url, outputPath, expectedHash, hashAlgorithm = "sha1") {
-    const downloadId = this.generateId();
-    const downloadInfo = {
-      id: downloadId,
-      url,
-      outputPath,
-      progress: 0,
-      status: "pending",
-      expectedHash,
-      hashAlgorithm
-    };
-    this.downloads.set(downloadId, downloadInfo);
-    this.processQueue();
-    return downloadId;
-  }
-  /**
-   * Inicia una descarga individual con manejo de errores y timeouts
-   */
-  async startDownload(downloadId) {
-    const download = this.downloads.get(downloadId);
-    if (!download || download.status !== "pending") {
-      return;
-    }
-    this.activeDownloads.add(downloadId);
-    download.status = "downloading";
-    try {
-      const dir = import_node_path3.default.dirname(download.outputPath);
-      if (!import_node_fs2.default.existsSync(dir)) {
-        import_node_fs2.default.mkdirSync(dir, { recursive: true });
-      }
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-      const response = await (0, import_node_fetch.default)(download.url, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const totalBytes = parseInt(response.headers.get("content-length") || "0", 10);
-      download.totalBytes = totalBytes;
-      download.downloadedBytes = 0;
-      const fileStream = import_node_fs2.default.createWriteStream(download.outputPath);
-      const progressStream = new (require("stream")).Transform({
-        transform(chunk, encoding, callback) {
-          download.downloadedBytes = (download.downloadedBytes || 0) + chunk.length;
-          download.progress = totalBytes > 0 ? download.downloadedBytes / totalBytes : 0;
-          callback(null, chunk);
-        }
-      });
-      response.body.on("error", (err) => {
-        fileStream.destroy(err);
-        progressStream.destroy(err);
-      }).pipe(progressStream).pipe(fileStream);
-      await new Promise((resolve, reject) => {
-        fileStream.on("finish", resolve);
-        fileStream.on("error", reject);
-        progressStream.on("error", reject);
-      });
-      const finalFileSize = import_node_fs2.default.statSync(download.outputPath).size;
-      if (download.totalBytes && download.totalBytes > 0) {
-        if (finalFileSize !== download.totalBytes) {
-          console.warn(`Tama\xF1o del archivo descargado (${finalFileSize}) no coincide con el tama\xF1o esperado (${download.totalBytes})`);
-          if (finalFileSize < download.totalBytes * 0.95) {
-            throw new Error(`Archivo descargado incompleto: tama\xF1o esperado ${download.totalBytes}, tama\xF1o real ${finalFileSize}`);
-          }
-        }
-      }
-      if (download.expectedHash) {
-        const calculatedHash = await this.calculateFileHash(download.outputPath, download.hashAlgorithm || "sha1");
-        if (calculatedHash.toLowerCase() !== download.expectedHash.toLowerCase()) {
-          throw new Error(`Hash del archivo no coincide: esperado ${download.expectedHash}, obtenido ${calculatedHash}`);
-        }
-      }
-      download.status = "completed";
-      download.progress = 1;
-    } catch (error) {
-      download.status = "error";
-      download.error = error.message || "Unknown error";
-      download.progress = 0;
-      if (import_node_fs2.default.existsSync(download.outputPath)) {
-        try {
-          import_node_fs2.default.unlinkSync(download.outputPath);
-        } catch (unlinkError) {
-          console.error("Error removing failed download file:", unlinkError);
-        }
-      }
-    } finally {
-      this.activeDownloads.delete(downloadId);
-      this.processQueue();
-    }
-  }
-  /**
-   * Procesa la cola de descargas
-   */
-  processQueue() {
-    const pendingDownloads = Array.from(this.downloads.entries()).filter(([_, info]) => info.status === "pending" && !this.activeDownloads.has(info.id)).slice(0, this.maxConcurrentDownloads - this.activeDownloads.size);
-    for (const [_, download] of pendingDownloads) {
-      if (this.activeDownloads.size < this.maxConcurrentDownloads) {
-        this.startDownload(download.id).catch((error) => {
-          console.error(`Error in download ${download.id}:`, error);
-          const downloadInfo = this.downloads.get(download.id);
-          if (downloadInfo) {
-            downloadInfo.status = "error";
-            downloadInfo.error = error.message;
-          }
-          this.activeDownloads.delete(download.id);
-        });
-      }
-    }
-  }
-  /**
-   * Obtiene el estado de una descarga
-   */
-  getDownloadStatus(downloadId) {
-    return this.downloads.get(downloadId);
-  }
-  /**
-   * Cancela una descarga en progreso
-   */
-  cancelDownload(downloadId) {
-    const download = this.downloads.get(downloadId);
-    if (!download) {
-      return false;
-    }
-    if (download.status === "pending") {
-      download.status = "error";
-      download.error = "Download cancelled";
-      return true;
-    }
-    if (download.status === "downloading") {
-      return true;
-    }
-    return false;
-  }
-  /**
-   * Reinicia una descarga fallida
-   */
-  async restartDownload(downloadId) {
-    const download = this.downloads.get(downloadId);
-    if (!download || download.status !== "error") {
-      return null;
-    }
-    download.status = "pending";
-    download.progress = 0;
-    download.error = void 0;
-    this.processQueue();
-    return downloadId;
-  }
-  /**
-   * Obtiene todas las descargas
-   */
-  getAllDownloads() {
-    return Array.from(this.downloads.values());
-  }
-  /**
-   * Calcula el hash de un archivo
-   */
-  async calculateFileHash(filePath, algorithm) {
-    const crypto = await import("node:crypto");
-    const fs10 = await import("node:fs");
-    const stream = await import("node:stream");
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash(algorithm);
-      const input = fs10.createReadStream(filePath);
-      input.on("error", reject);
-      input.on("data", (chunk) => hash.update(chunk));
-      input.on("close", () => resolve(hash.digest("hex")));
-    });
-  }
-  /**
-   * Genera un ID único para la descarga
-   */
-  generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  }
-  /**
-   * Obtiene el número de descargas activas
-   */
-  getActiveDownloadCount() {
-    return this.activeDownloads.size;
-  }
-  /**
-   * Establece el número máximo de descargas concurrentes
-   */
-  setMaxConcurrentDownloads(max) {
-    this.maxConcurrentDownloads = max;
-    this.processQueue();
-  }
-  /**
-   * Obtiene el número total de descargas en cola
-   */
-  getTotalDownloadCount() {
-    return this.downloads.size;
-  }
-};
-var downloadQueueService2 = new DownloadQueueService();
-
-// src/services/minecraftDownloadService.ts
+init_downloadQueueService();
 var pipelineAsync2 = (0, import_node_util2.promisify)(import_node_stream2.pipeline);
 var MinecraftDownloadService = class {
   versionsPath;
   librariesPath;
   assetsPath;
+  indexesPath;
+  objectsPath;
   constructor() {
     const launcherPath = getLauncherDataPath();
     this.versionsPath = import_node_path4.default.join(launcherPath, "versions");
     this.librariesPath = import_node_path4.default.join(launcherPath, "libraries");
     this.assetsPath = import_node_path4.default.join(launcherPath, "assets");
+    this.indexesPath = import_node_path4.default.join(this.assetsPath, "indexes");
+    this.objectsPath = import_node_path4.default.join(this.assetsPath, "objects");
     this.ensureDir(this.versionsPath);
     this.ensureDir(this.librariesPath);
     this.ensureDir(this.assetsPath);
+    this.ensureDir(this.indexesPath);
+    this.ensureDir(this.objectsPath);
   }
   /**
    * Asegura que un directorio exista, creándolo si es necesario
@@ -4655,10 +4745,10 @@ var MinecraftDownloadService = class {
    * Descarga un archivo
    */
   async downloadFile(url, outputPath, expectedHash, hashAlgorithm) {
-    const downloadId = await downloadQueueService2.addDownload(url, outputPath, expectedHash, hashAlgorithm);
+    const downloadId = await downloadQueueService.addDownload(url, outputPath, expectedHash, hashAlgorithm);
     return new Promise((resolve, reject) => {
       const checkStatus = () => {
-        const status = downloadQueueService2.getDownloadStatus(downloadId);
+        const status = downloadQueueService.getDownloadStatus(downloadId);
         if (!status) {
           reject(new Error(`Download ${downloadId} not found`));
           return;
@@ -4726,9 +4816,52 @@ var MinecraftDownloadService = class {
     const versionJsonPath = await this.downloadVersionMetadata(version);
     await this.downloadVersionLibraries(version);
     await this.downloadClientJar(version, instancePath);
+    console.log(`Iniciando descarga de assets para la versi\xF3n ${version}...`);
     await this.downloadVersionAssets(version);
+    console.log(`Descarga de assets completada para la versi\xF3n ${version}`);
     await this.ensureCriticalFiles(version, instancePath, versionJsonPath);
+    await this.ensureAssetsForInstance(version, instancePath);
+    await this.verifyCompleteDownload(version, instancePath, versionJsonPath);
     console.log(`Versi\xF3n completa de Minecraft ${version} descargada`);
+  }
+  /**
+   * Verifica que todos los archivos necesarios estén completamente descargados
+   */
+  async verifyCompleteDownload(version, instancePath, versionJsonPath) {
+    console.log(`Verificando completitud de la descarga para la versi\xF3n ${version}...`);
+    const clientJarPath = import_node_path4.default.join(instancePath, "client.jar");
+    if (!import_node_fs3.default.existsSync(clientJarPath)) {
+      throw new Error(`client.jar no encontrado en ${clientJarPath}`);
+    }
+    const clientStats = import_node_fs3.default.statSync(clientJarPath);
+    if (clientStats.size < 1024 * 1024) {
+      throw new Error(`client.jar tiene tama\xF1o inusualmente peque\xF1o: ${clientStats.size} bytes`);
+    }
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const assetIndexId = versionMetadata.assetIndex?.id;
+    if (assetIndexId) {
+      const assetIndexPath = import_node_path4.default.join(this.assetsPath, "indexes", `${assetIndexId}.json`);
+      if (!import_node_fs3.default.existsSync(assetIndexPath)) {
+        throw new Error(`\xCDndice de assets no encontrado: ${assetIndexPath}`);
+      }
+      const assetIndexData = JSON.parse(import_node_fs3.default.readFileSync(assetIndexPath, "utf-8"));
+      const objects = assetIndexData.objects || {};
+      if (Object.keys(objects).length === 0) {
+        console.warn(`advertencia: No se encontraron objetos en el \xEDndice de assets para ${version}`);
+      } else {
+        console.log(`Verificados ${Object.keys(objects).length} assets en el \xEDndice para la versi\xF3n ${version}`);
+      }
+    }
+    if (versionMetadata.libraries && versionMetadata.libraries.length > 0) {
+      const librariesPath = import_node_path4.default.join(this.librariesPath, "..");
+      if (!import_node_fs3.default.existsSync(librariesPath)) {
+        console.warn(`Carpeta de librer\xEDas no encontrada: ${librariesPath}`);
+      } else {
+        const libraryFiles = import_node_fs3.default.readdirSync(librariesPath).filter((f) => f.includes(version));
+        console.log(`Encontradas ${libraryFiles.length} librer\xEDas relacionadas con la versi\xF3n ${version}`);
+      }
+    }
+    console.log(`Verificaci\xF3n completada para la versi\xF3n ${version}: todos los archivos cr\xEDticos est\xE1n presentes`);
   }
   /**
    * Asegura que todos los archivos críticos necesarios estén presentes en la instancia
@@ -4764,7 +4897,7 @@ var MinecraftDownloadService = class {
     console.log(`Archivos cr\xEDticos asegurados para la versi\xF3n ${version}`);
   }
   /**
-   * Descarga los assets para una versión específica
+   * Descarga los assets para una versión específica con verificación de integridad
    * @param version Versión de Minecraft
    */
   async downloadVersionAssets(version) {
@@ -4776,39 +4909,239 @@ var MinecraftDownloadService = class {
       return;
     }
     const assetIndexUrl = assetIndex.url;
-    const assetIndexPath = import_node_path4.default.join(this.assetsPath, "indexes", `${assetIndex.id}.json`);
+    const assetIndexPath = import_node_path4.default.join(this.indexesPath, `${assetIndex.id}.json`);
     this.ensureDir(import_node_path4.default.dirname(assetIndexPath));
     if (!import_node_fs3.default.existsSync(assetIndexPath)) {
-      await this.downloadFile(assetIndexUrl, assetIndexPath);
-      console.log(`Asset index descargado para la versi\xF3n ${version}`);
+      try {
+        await this.downloadFile(assetIndexUrl, assetIndexPath);
+        console.log(`Asset index descargado para la versi\xF3n ${version}: ${assetIndexPath}`);
+      } catch (error) {
+        console.error(`Error al descargar asset index para la versi\xF3n ${version}:`, error);
+        throw error;
+      }
+    } else {
+      console.log(`Asset index ya existe para la versi\xF3n ${version}: ${assetIndexPath}`);
     }
     const assetIndexData = JSON.parse(import_node_fs3.default.readFileSync(assetIndexPath, "utf-8"));
-    console.log(`Descargando ${Object.keys(assetIndexData.objects).length} assets para la versi\xF3n ${version}...`);
+    console.log(`Procesando ${Object.keys(assetIndexData.objects).length} assets para la versi\xF3n ${version}...`);
     const assetsObjects = assetIndexData.objects;
-    let downloadedCount = 0;
     const totalAssets = Object.keys(assetsObjects).length;
-    for (const [assetName, assetInfo] of Object.entries(assetsObjects)) {
-      const hash = assetInfo.hash;
-      const size = assetInfo.size;
-      const assetDir = import_node_path4.default.join(this.assetsPath, "objects", hash.substring(0, 2));
-      const assetPath = import_node_path4.default.join(assetDir, hash);
-      this.ensureDir(assetDir);
-      if (!import_node_fs3.default.existsSync(assetPath)) {
-        const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+    if (totalAssets === 0) {
+      console.log(`No hay assets para descargar para la versi\xF3n ${version}`);
+      return;
+    }
+    console.log(`Iniciando descarga de ${totalAssets} assets para la versi\xF3n ${version}...`);
+    const batchSize = 5;
+    let downloadedCount = 0;
+    let verifiedCount = 0;
+    const assetsEntries = Object.entries(assetsObjects);
+    for (let i = 0; i < assetsEntries.length; i += batchSize) {
+      const batch = assetsEntries.slice(i, i + batchSize);
+      const batchPromises = batch.map(async ([assetName, assetInfo]) => {
+        const hash = assetInfo.hash;
+        const size = assetInfo.size;
+        const assetDir = import_node_path4.default.join(this.objectsPath, hash.substring(0, 2));
+        const assetPath = import_node_path4.default.join(assetDir, hash);
+        this.ensureDir(assetDir);
         try {
-          const expectedHash = assetInfo.hash;
-          await this.downloadFile(assetUrl, assetPath, expectedHash, "sha1");
-          downloadedCount++;
-          console.log(`Asset descargado [${downloadedCount}/${totalAssets}]: ${assetName}`);
+          if (import_node_fs3.default.existsSync(assetPath)) {
+            const stats = import_node_fs3.default.statSync(assetPath);
+            if (stats.size === size) {
+              verifiedCount++;
+              downloadedCount++;
+              console.log(`Asset verificado [${verifiedCount}/${totalAssets}]: ${assetName}`);
+              return true;
+            } else {
+              console.log(`Asset tiene tama\xF1o incorrecto, se volver\xE1 a descargar: ${assetName}`);
+              import_node_fs3.default.unlinkSync(assetPath);
+            }
+          }
+          const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+          try {
+            await this.downloadFile(assetUrl, assetPath, hash, "sha1");
+            const finalStats = import_node_fs3.default.statSync(assetPath);
+            if (finalStats.size !== size) {
+              console.warn(`Advertencia: Asset descargado tiene tama\xF1o incorrecto: ${assetName} (${finalStats.size} vs ${size})`);
+            }
+            downloadedCount++;
+            verifiedCount++;
+            console.log(`Asset descargado y verificado [${downloadedCount}/${totalAssets}]: ${assetName}`);
+            return true;
+          } catch (downloadError) {
+            console.error(`Error al descargar o verificar asset ${assetName}:`, downloadError);
+            if (import_node_fs3.default.existsSync(assetPath)) {
+              try {
+                import_node_fs3.default.unlinkSync(assetPath);
+              } catch (unlinkError) {
+                console.error(`Error al eliminar asset parcial ${assetName}:`, unlinkError);
+              }
+            }
+            return false;
+          }
         } catch (error) {
-          console.error(`Error al descargar asset ${assetName}:`, error);
+          console.error(`Error al procesar asset ${assetName}:`, error);
+          return false;
         }
-      } else {
-        downloadedCount++;
-        console.log(`Asset ya existe [${downloadedCount}/${totalAssets}]: ${assetName}`);
-      }
+      });
+      await Promise.all(batchPromises);
     }
     console.log(`Descarga de assets completada para la versi\xF3n ${version}: ${downloadedCount}/${totalAssets} assets`);
+    console.log(`Verificaci\xF3n de assets completada para la versi\xF3n ${version}: ${verifiedCount}/${totalAssets} assets`);
+    if (downloadedCount < totalAssets) {
+      console.warn(`Advertencia: Solo ${downloadedCount} de ${totalAssets} assets descargados. Algunos assets pueden faltar.`);
+    } else {
+      console.log(`Todos los assets descargados exitosamente para la versi\xF3n ${version}`);
+    }
+  }
+  /**
+   * Verifica la integridad de un archivo usando su hash
+   */
+  async verifyFileIntegrity(filePath, expectedHash, algorithm = "sha1") {
+    if (!import_node_fs3.default.existsSync(filePath)) {
+      console.log(`Archivo no existe para verificaci\xF3n: ${filePath}`);
+      return false;
+    }
+    try {
+      const crypto = await import("node:crypto");
+      const hash = crypto.createHash(algorithm);
+      const stream = import_node_fs3.default.createReadStream(filePath);
+      return new Promise((resolve, reject) => {
+        stream.on("data", (data) => hash.update(data));
+        stream.on("end", () => {
+          const calculatedHash = hash.digest("hex");
+          const isValid = calculatedHash.toLowerCase() === expectedHash.toLowerCase();
+          resolve(isValid);
+        });
+        stream.on("error", reject);
+      });
+    } catch (error) {
+      console.error(`Error al verificar integridad del archivo ${filePath}:`, error);
+      return false;
+    }
+  }
+  /**
+   * Obtiene el progreso de descarga de assets para una versión
+   */
+  getAssetsDownloadProgress(version) {
+    try {
+      const versionJsonPath = import_node_path4.default.join(this.versionsPath, version, `${version}.json`);
+      if (!import_node_fs3.default.existsSync(versionJsonPath)) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+      const assetIndexPath = import_node_path4.default.join(this.indexesPath, `${assetIndex.id}.json`);
+      if (!import_node_fs3.default.existsSync(assetIndexPath)) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+      const assetIndexData = JSON.parse(import_node_fs3.default.readFileSync(assetIndexPath, "utf-8"));
+      const totalAssets = Object.keys(assetIndexData.objects).length;
+      let downloadedAssets = 0;
+      for (const [assetName, assetInfo] of Object.entries(assetIndexData.objects)) {
+        const hash = assetInfo.hash;
+        const assetPath = import_node_path4.default.join(this.objectsPath, hash.substring(0, 2), hash);
+        if (import_node_fs3.default.existsSync(assetPath)) {
+          downloadedAssets++;
+        }
+      }
+      const percentage = totalAssets > 0 ? downloadedAssets / totalAssets * 100 : 0;
+      return {
+        downloaded: downloadedAssets,
+        total: totalAssets,
+        percentage: parseFloat(percentage.toFixed(2))
+      };
+    } catch (error) {
+      console.error(`Error al obtener progreso de descarga de assets para la versi\xF3n ${version}:`, error);
+      return { downloaded: 0, total: 0, percentage: 0 };
+    }
+  }
+  /**
+   * Obtiene el progreso de descarga de bibliotecas para una versión
+   */
+  getLibrariesDownloadProgress(version) {
+    try {
+      const versionJsonPath = import_node_path4.default.join(this.versionsPath, version, `${version}.json`);
+      if (!import_node_fs3.default.existsSync(versionJsonPath)) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+      const libraries = versionMetadata.libraries || [];
+      const totalLibraries = libraries.length;
+      let downloadedLibraries = 0;
+      for (const library of libraries) {
+        if (this.isLibraryDownloaded(library)) {
+          downloadedLibraries++;
+        }
+      }
+      const percentage = totalLibraries > 0 ? downloadedLibraries / totalLibraries * 100 : 0;
+      return {
+        downloaded: downloadedLibraries,
+        total: totalLibraries,
+        percentage: parseFloat(percentage.toFixed(2))
+      };
+    } catch (error) {
+      console.error(`Error al obtener progreso de descarga de bibliotecas para la versi\xF3n ${version}:`, error);
+      return { downloaded: 0, total: 0, percentage: 0 };
+    }
+  }
+  /**
+   * Verifica si una biblioteca ya ha sido descargada
+   */
+  isLibraryDownloaded(library) {
+    if (!library.downloads?.artifact) {
+      return false;
+    }
+    const libraryPath = this.getLibraryPath(library.name);
+    return import_node_fs3.default.existsSync(libraryPath);
+  }
+  /**
+   * Asegura que los assets estén disponibles para una instancia específica
+   * @param version Versión de Minecraft
+   * @param instancePath Ruta de la instancia
+   */
+  async ensureAssetsForInstance(version, instancePath) {
+    console.log(`Asegurando assets para la instancia de ${version} en ${instancePath}`);
+    const versionJsonPath = await this.downloadVersionMetadata(version);
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const assetIndexId = versionMetadata.assetIndex?.id;
+    if (!assetIndexId) {
+      console.log(`No se encontr\xF3 ID del asset index para la versi\xF3n ${version}`);
+      return;
+    }
+    const instanceAssetsPath = import_node_path4.default.join(instancePath, "assets");
+    const sharedAssetsPath = import_node_path4.default.join(this.assetsPath, "..");
+    if (import_node_fs3.default.existsSync(sharedAssetsPath) && !import_node_fs3.default.existsSync(instanceAssetsPath)) {
+      try {
+        import_node_fs3.default.mkdirSync(instanceAssetsPath, { recursive: true });
+        const sharedIndexesPath = import_node_path4.default.join(sharedAssetsPath, "indexes");
+        const instanceIndexesPath = import_node_path4.default.join(instanceAssetsPath, "indexes");
+        if (import_node_fs3.default.existsSync(sharedIndexesPath)) {
+          this.copyAssetsIndex(assetIndexId, sharedIndexesPath, instanceIndexesPath);
+        }
+        const virtualAssetsPath = import_node_path4.default.join(instanceAssetsPath, "virtual");
+        if (!import_node_fs3.default.existsSync(virtualAssetsPath)) {
+          import_node_fs3.default.mkdirSync(virtualAssetsPath, { recursive: true });
+        }
+        console.log(`Estructura de assets configurada para la instancia ${instancePath}`);
+      } catch (error) {
+        console.error(`Error al configurar assets para la instancia ${instancePath}:`, error);
+      }
+    }
+  }
+  /**
+   * Copia el archivo de índice de assets a la instancia
+   */
+  copyAssetsIndex(assetIndexId, sharedIndexesPath, instanceIndexesPath) {
+    const sourceIndexPath = import_node_path4.default.join(sharedIndexesPath, `${assetIndexId}.json`);
+    const destIndexPath = import_node_path4.default.join(instanceIndexesPath, `${assetIndexId}.json`);
+    if (import_node_fs3.default.existsSync(sourceIndexPath) && !import_node_fs3.default.existsSync(destIndexPath)) {
+      import_node_fs3.default.mkdirSync(import_node_path4.default.dirname(destIndexPath), { recursive: true });
+      import_node_fs3.default.copyFileSync(sourceIndexPath, destIndexPath);
+      console.log(`\xCDndice de assets copiado para instancia: ${destIndexPath}`);
+    }
   }
 };
 var minecraftDownloadService = new MinecraftDownloadService();
@@ -4816,30 +5149,65 @@ var minecraftDownloadService = new MinecraftDownloadService();
 // src/services/gameService.ts
 var import_node_fetch3 = __toESM(require_lib2(), 1);
 function isInstanceReady(instancePath) {
+  console.log(`Verificando si la instancia en ${instancePath} est\xE1 lista para jugar...`);
   try {
     const clientJarPath = import_node_path5.default.join(instancePath, "client.jar");
     if (!import_node_fs4.default.existsSync(clientJarPath)) {
-      console.log(`client.jar no encontrado en ${clientJarPath}`);
-      console.log(`Archivos en la ruta de la instancia ${instancePath}:`, import_node_fs4.default.readdirSync(instancePath || ".").join(", "));
+      console.log(`[VERIFICACI\xD3N] client.jar no encontrado en ${clientJarPath}`);
+      try {
+        const files = import_node_fs4.default.readdirSync(instancePath);
+        console.log(`[VERIFICACI\xD3N] Archivos en la instancia ${instancePath}:`, files.join(", "));
+      } catch (dirError) {
+        console.log(`[VERIFICACI\xD3N] No se pudo leer el directorio de la instancia:`, dirError);
+      }
       return false;
     }
     let clientJarStats;
     try {
       clientJarStats = import_node_fs4.default.statSync(clientJarPath);
     } catch (statError) {
-      console.log(`No se pudo acceder al archivo client.jar: ${statError}`);
+      console.log(`[VERIFICACI\xD3N] No se pudo acceder al archivo client.jar: ${statError}`);
       return false;
     }
     if (clientJarStats.size < 1024 * 1024) {
-      console.log(`client.jar es demasiado peque\xF1o (${clientJarStats.size} bytes), probablemente no est\xE9 completamente descargado`);
+      console.log(`[VERIFICACI\xD3N] client.jar es demasiado peque\xF1o (${clientJarStats.size} bytes), probablemente no est\xE9 completamente descargado`);
       return false;
     }
-    console.log(`client.jar encontrado y v\xE1lido: ${clientJarPath} (${clientJarStats.size} bytes)`);
-    const assetsPath = import_node_path5.default.join(instancePath, "assets");
+    console.log(`[VERIFICACI\xD3N] client.jar encontrado y v\xE1lido: ${clientJarPath} (${clientJarStats.size} bytes)`);
     const launcherPath = getLauncherDataPath2();
     const launcherAssetsPath = import_node_path5.default.join(launcherPath, "assets");
     if (!import_node_fs4.default.existsSync(launcherAssetsPath)) {
-      console.log(`No se encontr\xF3 la carpeta de assets compartida en (${launcherAssetsPath})`);
+      console.log(`[VERIFICACI\xD3N] Carpeta de assets compartida no existe: ${launcherAssetsPath}`);
+      return false;
+    }
+    const indexesPath = import_node_path5.default.join(launcherAssetsPath, "indexes");
+    const objectsPath = import_node_path5.default.join(launcherAssetsPath, "objects");
+    if (!import_node_fs4.default.existsSync(indexesPath)) {
+      console.log(`[VERIFICACI\xD3N] Carpeta de \xEDndices de assets no existe: ${indexesPath}`);
+      return false;
+    }
+    if (!import_node_fs4.default.existsSync(objectsPath)) {
+      console.log(`[VERIFICACI\xD3N] Carpeta de objetos de assets no existe: ${objectsPath}`);
+      return false;
+    }
+    try {
+      const indexFiles = import_node_fs4.default.readdirSync(indexesPath);
+      if (indexFiles.length === 0) {
+        console.log(`[VERIFICACI\xD3N] Carpeta de \xEDndices de assets est\xE1 vac\xEDa: ${indexesPath}`);
+        return false;
+      }
+    } catch (indexError) {
+      console.log(`[VERIFICACI\xD3N] Error al leer carpeta de \xEDndices de assets:`, indexError);
+      return false;
+    }
+    try {
+      const objectFolders = import_node_fs4.default.readdirSync(objectsPath);
+      if (objectFolders.length === 0) {
+        console.log(`[VERIFICACI\xD3N] Carpeta de objetos de assets est\xE1 vac\xEDa: ${objectsPath}`);
+        return false;
+      }
+    } catch (objectsError) {
+      console.log(`[VERIFICACI\xD3N] Error al leer carpeta de objetos de assets:`, objectsError);
       return false;
     }
     const requiredFolders = ["mods", "config", "saves", "logs"];
@@ -4848,17 +5216,17 @@ function isInstanceReady(instancePath) {
       if (!import_node_fs4.default.existsSync(folderPath)) {
         try {
           import_node_fs4.default.mkdirSync(folderPath, { recursive: true });
-          console.log(`Carpeta creada: ${folderPath}`);
+          console.log(`[VERIFICACI\xD3N] Carpeta creada: ${folderPath}`);
         } catch (mkdirErr) {
-          console.log(`No se pudo crear carpeta ${folder}:`, mkdirErr);
+          console.log(`[VERIFICACI\xD3N] No se pudo crear carpeta ${folder}:`, mkdirErr);
         }
       }
     }
-    console.log(`Instancia en ${instancePath} est\xE1 lista para jugar`);
+    console.log(`[VERIFICACI\xD3N] Instancia en ${instancePath} est\xE1 lista para jugar`);
     return true;
   } catch (error) {
-    console.error("Error al verificar si la instancia est\xE1 lista:", error);
-    console.error("Error en detalle:", error.message);
+    console.error("[VERIFICACI\xD3N] Error al verificar si la instancia est\xE1 lista:", error);
+    console.error("[VERIFICACI\xD3N] Error en detalle:", error.message);
     return false;
   }
 }
@@ -4869,8 +5237,15 @@ function areAssetsReadyForVersion(instancePath, mcVersion) {
       console.log(`Metadata de versi\xF3n ${mcVersion} no encontrada, verificando carpeta de assets compartida...`);
       const launcherAssetsPath = import_node_path5.default.join(getLauncherDataPath2(), "assets");
       if (import_node_fs4.default.existsSync(launcherAssetsPath)) {
-        const files = import_node_fs4.default.readdirSync(launcherAssetsPath);
-        return files.length > 0;
+        const indexesPath = import_node_path5.default.join(launcherAssetsPath, "indexes");
+        const objectsPath = import_node_path5.default.join(launcherAssetsPath, "objects");
+        if (import_node_fs4.default.existsSync(indexesPath) && import_node_fs4.default.existsSync(objectsPath)) {
+          const indexesCount = import_node_fs4.default.readdirSync(indexesPath).length;
+          const objectsSubdirs = import_node_fs4.default.readdirSync(objectsPath).filter(
+            (dir) => import_node_fs4.default.statSync(import_node_path5.default.join(objectsPath, dir)).isDirectory()
+          );
+          return indexesCount > 0 && objectsSubdirs.length > 0;
+        }
       }
       return false;
     }
@@ -4938,271 +5313,6 @@ async function ensureClientJar(instancePath, mcVersion) {
     return false;
   }
 }
-async function buildArgs(opts) {
-  const mem = Math.max(512, opts.ramMb || 2048);
-  const minMem = Math.min(512, mem / 4);
-  const launcherPath = getLauncherDataPath2();
-  let jvmArgs = [
-    `-Xms${minMem}m`,
-    // Memoria inicial
-    `-Xmx${mem}m`,
-    // Memoria máxima
-    // Opciones recomendadas para rendimiento
-    "-XX:+UseG1GC",
-    "-XX:+UnlockExperimentalVMOptions",
-    "-XX:+UseG1GC",
-    "-XX:MaxGCPauseMillis=100",
-    "-XX:+DisableExplicitGC",
-    "-XX:TargetSurvivorRatio=90",
-    "-XX:G1NewSizePercent=50",
-    "-XX:G1MaxNewSizePercent=80",
-    "-XX:G1MixedGCLiveThresholdPercent=35",
-    "-XX:+AlwaysPreTouch",
-    "-XX:+ParallelRefProcEnabled",
-    "-XX:MaxInlineLevel=9",
-    "-XX:MaxTrivialSize=12",
-    "-XX:-DontCompileHugeMethods",
-    // Args adicionales si se proporcionaron
-    ...opts.jvmArgs || []
-  ];
-  const loader = opts.loader || "vanilla";
-  if (loader === "vanilla") {
-    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
-    let classpath = import_node_path5.default.join(opts.instancePath, "client.jar");
-    let mainClass = "net.minecraft.client.main.Main";
-    if (import_node_fs4.default.existsSync(versionJsonPath)) {
-      try {
-        const versionData = JSON.parse(import_node_fs4.default.readFileSync(versionJsonPath, "utf-8"));
-        if (versionData.mainClass) {
-          mainClass = versionData.mainClass;
-        }
-        const libraryJars = [];
-        if (versionData.libraries && Array.isArray(versionData.libraries)) {
-          for (const lib of versionData.libraries) {
-            if (lib.rules) {
-              let allowed2 = false;
-              let appliesToOS = true;
-              for (const rule of lib.rules) {
-                if (rule.os && rule.os.name) {
-                  const osName = getOSName();
-                  if (rule.os.name !== osName) {
-                    appliesToOS = false;
-                    if (rule.action === "allow") continue;
-                    if (rule.action === "disallow") {
-                      allowed2 = false;
-                      break;
-                    }
-                  } else {
-                    allowed2 = rule.action === "allow";
-                  }
-                } else if (rule.action === "allow") {
-                  allowed2 = true;
-                } else if (rule.action === "disallow") {
-                  allowed2 = false;
-                }
-              }
-              if (!appliesToOS && lib.rules.some((r) => r.os?.name)) continue;
-              if (!allowed2 && lib.rules.some((r) => r.action === "disallow")) continue;
-            } else {
-              allowed = true;
-            }
-            if (lib.downloads && lib.downloads.artifact) {
-              let libPath;
-              if (lib.downloads.artifact.path) {
-                libPath = import_node_path5.default.join(launcherPath, "libraries", lib.downloads.artifact.path);
-              } else {
-                libPath = import_node_path5.default.join(launcherPath, "libraries", getLibraryPath(lib.name));
-              }
-              const possiblePaths = [
-                libPath,
-                // Ruta estándar en .DRK Launcher/libraries
-                import_node_path5.default.join(opts.instancePath, "libraries", getLibraryPath(lib.name)),
-                // En la instancia
-                import_node_path5.default.join(process.env.APPDATA || "", ".minecraft", "libraries", getLibraryPath(lib.name))
-                // .minecraft estándar
-              ];
-              let found = false;
-              for (const possiblePath of possiblePaths) {
-                if (import_node_fs4.default.existsSync(possiblePath)) {
-                  libraryJars.push(possiblePath);
-                  found = true;
-                  break;
-                }
-              }
-              if (!found) {
-                console.warn(`Librer\xEDa no encontrada: ${lib.name}. Intentando descargar...`);
-                try {
-                  if (lib.downloads.artifact.url) {
-                    const libDir = import_node_path5.default.dirname(libPath);
-                    import_node_fs4.default.mkdirSync(libDir, { recursive: true });
-                    const downloadResult = await downloadLibrary(lib.downloads.artifact.url, libPath);
-                    if (downloadResult && import_node_fs4.default.existsSync(libPath)) {
-                      libraryJars.push(libPath);
-                      console.log(`Librer\xEDa descargada: ${lib.name}`);
-                      found = true;
-                    }
-                  }
-                } catch (downloadError) {
-                  console.error(`Error al descargar la librer\xEDa ${lib.name}:`, downloadError);
-                }
-                if (!found) {
-                  console.warn(`No se pudo descargar la librer\xEDa: ${lib.name}`);
-                }
-              }
-            } else if (lib.url) {
-              const libPath = import_node_path5.default.join(launcherPath, "libraries", getLibraryPath(lib.name));
-              const possiblePaths = [
-                libPath,
-                import_node_path5.default.join(opts.instancePath, "libraries", getLibraryPath(lib.name)),
-                import_node_path5.default.join(process.env.APPDATA || "", ".minecraft", "libraries", getLibraryPath(lib.name))
-              ];
-              let found = false;
-              for (const possiblePath of possiblePaths) {
-                if (import_node_fs4.default.existsSync(possiblePath)) {
-                  libraryJars.push(possiblePath);
-                  found = true;
-                  break;
-                }
-              }
-              if (!found) {
-                console.warn(`Librer\xEDa no encontrada (formato viejo): ${lib.name}. Intentando descargar...`);
-                try {
-                  const libDir = import_node_path5.default.dirname(libPath);
-                  import_node_fs4.default.mkdirSync(libDir, { recursive: true });
-                  const downloadResult = await downloadLibrary(lib.url, libPath);
-                  if (downloadResult && import_node_fs4.default.existsSync(libPath)) {
-                    libraryJars.push(libPath);
-                    console.log(`Librer\xEDa (formato viejo) descargada: ${lib.name}`);
-                    found = true;
-                  }
-                } catch (downloadError) {
-                  console.error(`Error al descargar la librer\xEDa (formato viejo) ${lib.name}:`, downloadError);
-                }
-                if (!found) {
-                  console.warn(`No se pudo descargar la librer\xEDa (formato viejo): ${lib.name}`);
-                }
-              }
-            }
-          }
-        }
-        const clientJar = import_node_path5.default.join(opts.instancePath, "client.jar");
-        if (import_node_fs4.default.existsSync(clientJar)) {
-          libraryJars.push(clientJar);
-        }
-        if (libraryJars.length > 0) {
-          classpath = libraryJars.join(import_node_path5.default.delimiter);
-        } else {
-          console.warn(`No se encontraron librer\xEDas para la versi\xF3n ${opts.mcVersion}, usando client.jar como fallback`);
-        }
-      } catch (error) {
-        console.error("Error al leer archivo de versi\xF3n para construir classpath:", error);
-        classpath = import_node_path5.default.join(opts.instancePath, "client.jar");
-        mainClass = "net.minecraft.client.main.Main";
-      }
-    } else {
-      console.warn(`No se encontr\xF3 el archivo de versi\xF3n ${versionJsonPath}, usando configuraci\xF3n m\xEDnima`);
-      const commonLibs = [
-        "net.sf.jopt-simple:jopt-simple:5.0.4",
-        "com.google.code.gson:gson:2.8.9",
-        "com.google.guava:guava:31.0.1-jre",
-        "org.apache.commons:commons-lang3:3.12.0",
-        "commons-io:commons-io:2.11.0"
-      ];
-      const libraryJars = [];
-      for (const libName of commonLibs) {
-        const libPath = import_node_path5.default.join(launcherPath, "libraries", getLibraryPath(libName));
-        const possiblePaths = [
-          libPath,
-          import_node_path5.default.join(opts.instancePath, "libraries", getLibraryPath(libName)),
-          import_node_path5.default.join(process.env.APPDATA || "", ".minecraft", "libraries", getLibraryPath(libName))
-        ];
-        let found = false;
-        for (const possiblePath of possiblePaths) {
-          if (import_node_fs4.default.existsSync(possiblePath)) {
-            libraryJars.push(possiblePath);
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          console.warn(`Librer\xEDa com\xFAn no encontrada: ${libName}`);
-        }
-      }
-      if (libraryJars.length > 0) {
-        classpath = [import_node_path5.default.join(opts.instancePath, "client.jar"), ...libraryJars].join(import_node_path5.default.delimiter);
-      }
-    }
-    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
-    const gameArgs = [
-      "--username",
-      opts.userProfile?.username || "Player",
-      "--version",
-      opts.mcVersion,
-      "--gameDir",
-      opts.instancePath,
-      "--assetsDir",
-      import_node_path5.default.join(opts.instancePath, "assets"),
-      "--assetIndex",
-      `${opts.mcVersion}`,
-      // Esto podría necesitar ser más específico
-      "--uuid",
-      fakeUUID,
-      "--accessToken",
-      "0",
-      // Placeholder para no premium
-      "--userType",
-      "mojang",
-      // Para perfiles no premium
-      "--versionType",
-      "DRK Launcher"
-    ];
-    if (opts.windowSize) {
-      gameArgs.push("--width", opts.windowSize.width.toString(), "--height", opts.windowSize.height.toString());
-    }
-    return [
-      ...jvmArgs,
-      "-cp",
-      classpath,
-      // Usar classpath en lugar de -jar
-      mainClass,
-      // Usar la clase principal específica de la versión de Minecraft
-      ...gameArgs
-    ];
-  } else {
-    return await buildArgsForModded(opts, loader);
-  }
-}
-function getOSName() {
-  switch (process.platform) {
-    case "win32":
-      return "windows";
-    case "darwin":
-      return "osx";
-    case "linux":
-      return "linux";
-    default:
-      return "linux";
-  }
-}
-function getLibraryPath(libraryName) {
-  const [group, artifact, version] = libraryName.split(":");
-  const parts = group.split(".");
-  return import_node_path5.default.join(...parts, artifact, version, `${artifact}-${version}.jar`);
-}
-async function downloadLibrary(url, outputPath) {
-  try {
-    const response = await (0, import_node_fetch3.default)(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const buffer = await response.buffer();
-    import_node_fs4.default.writeFileSync(outputPath, buffer);
-    return true;
-  } catch (error) {
-    console.error(`Error downloading library from ${url} to ${outputPath}:`, error);
-    return false;
-  }
-}
 function getLauncherDataPath2() {
   if (process.env.APPDATA) {
     return import_node_path5.default.join(process.env.APPDATA, ".DRK Launcher");
@@ -5211,226 +5321,6 @@ function getLauncherDataPath2() {
   } else {
     return import_node_path5.default.join(process.env.HOME, ".DRK Launcher");
   }
-}
-async function buildArgsForModded(opts, loader) {
-  const mem = Math.max(512, opts.ramMb || 2048);
-  const minMem = Math.min(512, mem / 4);
-  let jvmArgs = [
-    `-Xms${minMem}m`,
-    // Memoria inicial
-    `-Xmx${mem}m`,
-    // Memoria máxima
-    // Opciones recomendadas para rendimiento
-    "-XX:+UseG1GC",
-    "-XX:+UnlockExperimentalVMOptions",
-    "-XX:+UseG1GC",
-    "-XX:MaxGCPauseMillis=100",
-    "-XX:+DisableExplicitGC",
-    "-XX:TargetSurvivorRatio=90",
-    "-XX:G1NewSizePercent=50",
-    "-XX:G1MaxNewSizePercent=80",
-    "-XX:G1MixedGCLiveThresholdPercent=35",
-    "-XX:+AlwaysPreTouch",
-    "-XX:+ParallelRefProcEnabled",
-    "-XX:MaxInlineLevel=9",
-    "-XX:MaxTrivialSize=12",
-    "-XX:-DontCompileHugeMethods",
-    // Args adicionales si se proporcionaron
-    ...opts.jvmArgs || []
-  ];
-  const launcherPath = getLauncherDataPath2();
-  const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
-  let mainClass = "";
-  let additionalJvmArgs = [];
-  let additionalGameArgs = [];
-  switch (loader) {
-    case "forge":
-    case "neoforge":
-      mainClass = "cpw.mods.bootstraplauncher.BootstrapLauncher";
-      additionalJvmArgs = [
-        `-Dforge.logging.console.level=info`,
-        `-Dfml.earlyprogresswindow=false`,
-        "--add-opens",
-        "java.base/java.util.jar=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.lang.invoke=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.lang.reflect=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.text=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.util=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.util.concurrent=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.util.concurrent.atomic=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.util.jar=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.util.regex=cpw.mods.securejarhandler",
-        "--add-opens",
-        "java.base/java.util.zip=cpw.mods.securejarhandler"
-      ];
-      additionalGameArgs = [
-        "--launchTarget",
-        "forgeclient",
-        "--fml.forgeVersion",
-        opts.loaderVersion || "",
-        "--fml.mcVersion",
-        opts.mcVersion,
-        "--fml.forgeGroup",
-        "net.minecraftforge",
-        "--fml.mcpVersion",
-        ""
-        // Esto puede requerir información adicional
-      ];
-      break;
-    case "fabric":
-    case "quilt":
-      mainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient";
-      additionalGameArgs = [
-        // No se requieren argumentos específicos del juego en Fabric/Quilt
-      ];
-      break;
-    default:
-      mainClass = "net.minecraft.client.main.Main";
-      break;
-  }
-  const libraryJars = [];
-  const loaderJarPath = findLoaderJar(opts.instancePath, loader, opts.loaderVersion);
-  if (loaderJarPath && import_node_fs4.default.existsSync(loaderJarPath)) {
-    libraryJars.push(loaderJarPath);
-  }
-  const clientJar = import_node_path5.default.join(opts.instancePath, "client.jar");
-  if (import_node_fs4.default.existsSync(clientJar)) {
-    libraryJars.push(clientJar);
-  }
-  if (import_node_fs4.default.existsSync(versionJsonPath)) {
-    try {
-      const versionData = JSON.parse(import_node_fs4.default.readFileSync(versionJsonPath, "utf-8"));
-      if (versionData.libraries && Array.isArray(versionData.libraries)) {
-        for (const lib of versionData.libraries) {
-          if (lib.downloads && lib.downloads.artifact) {
-            let libPath;
-            if (lib.downloads.artifact.path) {
-              libPath = import_node_path5.default.join(launcherPath, "libraries", lib.downloads.artifact.path);
-            } else {
-              libPath = import_node_path5.default.join(launcherPath, "libraries", getLibraryPath(lib.name));
-            }
-            const possiblePaths = [
-              libPath,
-              // Ruta estándar en .DRK Launcher/libraries
-              import_node_path5.default.join(opts.instancePath, "libraries", getLibraryPath(lib.name)),
-              // En la instancia
-              import_node_path5.default.join(process.env.APPDATA || "", ".minecraft", "libraries", getLibraryPath(lib.name))
-              // .minecraft estándar
-            ];
-            let found = false;
-            for (const possiblePath of possiblePaths) {
-              if (import_node_fs4.default.existsSync(possiblePath)) {
-                if (!libraryJars.includes(possiblePath)) {
-                  libraryJars.push(possiblePath);
-                }
-                found = true;
-                break;
-              }
-            }
-            if (!found) {
-              console.warn(`Librer\xEDa no encontrada para loader: ${lib.name} en ninguna ubicaci\xF3n:`, possiblePaths);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error al leer archivo de versi\xF3n para construir classpath para loader:", error);
-    }
-  }
-  const classpath = libraryJars.join(import_node_path5.default.delimiter);
-  const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
-  const baseGameArgs = [
-    "--username",
-    opts.userProfile?.username || "Player",
-    "--version",
-    opts.mcVersion,
-    "--gameDir",
-    opts.instancePath,
-    "--assetsDir",
-    import_node_path5.default.join(opts.instancePath, "assets"),
-    "--assetIndex",
-    `${opts.mcVersion}`,
-    // Esto podría necesitar ser más específico
-    "--uuid",
-    fakeUUID,
-    "--accessToken",
-    "0",
-    // Placeholder para no premium
-    "--userType",
-    "mojang",
-    // Para perfiles no premium
-    "--versionType",
-    `DRK Launcher ${loader}`
-  ];
-  if (opts.windowSize) {
-    baseGameArgs.push("--width", opts.windowSize.width.toString(), "--height", opts.windowSize.height.toString());
-  }
-  return [
-    ...jvmArgs,
-    ...additionalJvmArgs,
-    "-cp",
-    classpath,
-    // Usar classpath en lugar de -jar
-    mainClass,
-    // Usar la clase principal específica del loader
-    ...baseGameArgs,
-    ...additionalGameArgs,
-    ...opts.gameArgs || []
-  ];
-}
-function findLoaderJar(instancePath, loader, version) {
-  const loaderDir = import_node_path5.default.join(instancePath, "loader");
-  if (import_node_fs4.default.existsSync(loaderDir)) {
-    const files = import_node_fs4.default.readdirSync(loaderDir);
-    for (const file of files) {
-      if (file.endsWith(".jar")) {
-        if (file.toLowerCase().includes(loader)) {
-          return import_node_path5.default.join(loaderDir, file);
-        }
-      }
-    }
-  }
-  const instanceFiles = import_node_fs4.default.readdirSync(instancePath);
-  for (const file of instanceFiles) {
-    if (file.endsWith(".jar")) {
-      if (file.toLowerCase().includes(loader)) {
-        return import_node_path5.default.join(instancePath, file);
-      }
-    }
-  }
-  const standardMinecraftPath = import_node_path5.default.join(process.env.APPDATA || "", ".minecraft", "versions");
-  const loaderVersionPath = import_node_path5.default.join(standardMinecraftPath, `${loader}-${version || ""}`);
-  if (import_node_fs4.default.existsSync(loaderVersionPath)) {
-    const versionFiles = import_node_fs4.default.readdirSync(loaderVersionPath);
-    for (const file of versionFiles) {
-      if (file.endsWith(".jar") && file.includes(loader)) {
-        return import_node_path5.default.join(loaderVersionPath, file);
-      }
-    }
-  }
-  return null;
-}
-async function launchJava(opts, onData, onExit) {
-  const args = await buildArgs(opts);
-  const child = (0, import_node_child_process.spawn)(opts.javaPath || "java", args, {
-    cwd: opts.instancePath,
-    env: {
-      ...process.env
-      // Añadir variables de entorno específicas si son necesarias
-    }
-  });
-  child.stdout.on("data", (d) => onData(d.toString()));
-  child.stderr.on("data", (d) => onData(d.toString()));
-  child.on("close", (c) => onExit(c));
-  return child;
 }
 
 // src/main/javaDetector.ts
@@ -5887,9 +5777,9 @@ var JavaService = class {
     }
     return { recommended: "8", latest: "8" };
   }
-  async testJava(path11) {
+  async testJava(path15) {
     try {
-      await this.detector.getJavaVersion(path11);
+      await this.detector.getJavaVersion(path15);
       return true;
     } catch {
       return false;
@@ -5898,6 +5788,9 @@ var JavaService = class {
 };
 var javaService = new JavaService();
 var javaService_default = javaService;
+
+// src/main/main.ts
+var import_node_fetch7 = __toESM(require_lib2(), 1);
 
 // src/services/instanceService.ts
 var import_node_path6 = __toESM(require("node:path"), 1);
@@ -6115,12 +6008,26 @@ var import_node_fs6 = __toESM(require("node:fs"), 1);
 var import_node_stream3 = require("node:stream");
 var import_node_util3 = require("node:util");
 var import_node_fetch4 = __toESM(require_lib2(), 1);
+init_downloadQueueService();
 var pipelineAsync3 = (0, import_node_util3.promisify)(import_node_stream3.pipeline);
+var MINECRAFT_JAVA_REQUIREMENTS = {
+  "1.20": "17",
+  "1.19": "17",
+  "1.18": "17",
+  "1.17": "17",
+  "1.16": "8",
+  "1.15": "8",
+  "1.14": "8",
+  "1.13": "8"
+  // Versiones anteriores también pueden usar Java 8
+};
 var JavaDownloadService = class {
   runtimePath;
+  javaInstallations = /* @__PURE__ */ new Map();
   constructor() {
     this.runtimePath = import_node_path7.default.join(getLauncherDataPath(), "runtime");
     this.ensureDir(this.runtimePath);
+    this.loadJavaInstallations();
   }
   /**
    * Asegura que un directorio exista, creándolo si es necesario
@@ -6168,62 +6075,383 @@ var JavaDownloadService = class {
     return { os: os2, arch: javaArch };
   }
   /**
-   * Descarga e instala una versión específica de Java
+   * Obtiene la versión de Java recomendada para una versión específica de Minecraft
+   */
+  getRecommendedJavaVersion(mcVersion) {
+    const mainVersion = mcVersion.split(".").slice(0, 2).join(".");
+    for (const [mc, java] of Object.entries(MINECRAFT_JAVA_REQUIREMENTS)) {
+      if (mainVersion.startsWith(mc)) {
+        return java;
+      }
+    }
+    return "17";
+  }
+  /**
+   * Verifica si una instalación de Java ya existe y es funcional
+   */
+  async isJavaWorking(javaPath) {
+    try {
+      const { spawn: spawn3 } = await import("node:child_process");
+      return new Promise((resolve) => {
+        const process2 = spawn3(javaPath, ["-version"]);
+        let output = "";
+        let errorOutput = "";
+        process2.stdout.on("data", (data) => {
+          output += data.toString();
+        });
+        process2.stderr.on("data", (data) => {
+          errorOutput += data.toString();
+        });
+        process2.on("close", (code) => {
+          const isWorking = code !== null && errorOutput.toLowerCase().includes("version");
+          resolve(isWorking);
+        });
+        setTimeout(() => {
+          process2.kill();
+          resolve(false);
+        }, 1e4);
+      });
+    } catch (error) {
+      console.error(`Error al verificar si Java funciona en ${javaPath}:`, error);
+      return false;
+    }
+  }
+  /**
+   * Busca instalaciones de Java existentes en el sistema
+   */
+  async scanForJavaInstallations() {
+    const installations = [];
+    if (process.platform === "win32") {
+      const commonPaths = [
+        "C:/Program Files/Java/",
+        "C:/Program Files/Eclipse Adoptium/",
+        "C:/Program Files/Amazon Corretto/",
+        "C:/Program Files/Red Hat/",
+        "C:/Program Files/AdoptOpenJDK/",
+        process.env.JAVA_HOME || "",
+        process.env.JRE_HOME || ""
+      ].filter((path15) => path15 !== "");
+      for (const basePath of commonPaths) {
+        if (import_node_fs6.default.existsSync(basePath)) {
+          const folders = import_node_fs6.default.readdirSync(basePath);
+          for (const folder of folders) {
+            const javaPath = import_node_path7.default.join(basePath, folder);
+            const exePath = import_node_path7.default.join(javaPath, "bin", "java.exe");
+            if (import_node_fs6.default.existsSync(exePath)) {
+              try {
+                const isWorking = await this.isJavaWorking(exePath);
+                const version = await this.getJavaVersion(exePath);
+                installations.push({
+                  id: `system-${folder}`,
+                  version: version || folder,
+                  path: javaPath,
+                  executable: exePath,
+                  isWorking
+                });
+              } catch (error) {
+                console.error(`Error al verificar Java en ${exePath}:`, error);
+              }
+            }
+          }
+        }
+      }
+    }
+    const runtimeFolders = import_node_fs6.default.readdirSync(this.runtimePath);
+    for (const folder of runtimeFolders) {
+      const javaPath = import_node_path7.default.join(this.runtimePath, folder);
+      const isWindows = process.platform === "win32";
+      const exePath = import_node_path7.default.join(javaPath, "bin", isWindows ? "java.exe" : "java");
+      if (import_node_fs6.default.existsSync(exePath)) {
+        try {
+          const isWorking = await this.isJavaWorking(exePath);
+          const version = folder.replace("java", "").replace(/[^0-9.]/g, "") || "unknown";
+          installations.push({
+            id: `downloaded-${folder}`,
+            version,
+            path: javaPath,
+            executable: exePath,
+            isWorking,
+            vendor: "Adoptium"
+            // Porque lo descargamos de Adoptium
+          });
+        } catch (error) {
+          console.error(`Error al verificar Java descargado en ${exePath}:`, error);
+        }
+      }
+    }
+    return installations;
+  }
+  /**
+   * Obtiene la versión de Java desde su ejecutable
+   */
+  async getJavaVersion(javaPath) {
+    try {
+      const { spawn: spawn3 } = await import("node:child_process");
+      return new Promise((resolve) => {
+        const process2 = spawn3(javaPath, ["-version"]);
+        let errorOutput = "";
+        process2.stderr.on("data", (data) => {
+          errorOutput += data.toString();
+        });
+        process2.on("close", (code) => {
+          const match = errorOutput.match(/version "([^"]+)"/);
+          if (match && match[1]) {
+            resolve(match[1]);
+          } else {
+            resolve(null);
+          }
+        });
+        setTimeout(() => {
+          process2.kill();
+          resolve(null);
+        }, 1e4);
+      });
+    } catch (error) {
+      console.error(`Error al obtener versi\xF3n de Java desde ${javaPath}:`, error);
+      return null;
+    }
+  }
+  /**
+   * Carga las instalaciones de Java guardadas
+   */
+  loadJavaInstallations() {
+    try {
+      if (import_node_fs6.default.existsSync(this.runtimePath)) {
+        const folders = import_node_fs6.default.readdirSync(this.runtimePath);
+        for (const folder of folders) {
+          const version = folder.replace("java", "").replace(/[^0-9.]/g, "");
+          if (version) {
+            const exePath = this.getJavaExecutable(version);
+            if (exePath) {
+              const javaPath = import_node_path7.default.dirname(import_node_path7.default.dirname(exePath));
+              const installation = {
+                id: folder,
+                version,
+                path: javaPath,
+                executable: exePath
+              };
+              this.javaInstallations.set(folder, installation);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error al cargar instalaciones de Java:", error);
+    }
+  }
+  /**
+   * Verifica si una versión específica de Java ya está instalada
+   */
+  isJavaInstalled(javaVersion) {
+    return this.getJavaExecutable(javaVersion) !== null;
+  }
+  /**
+   * Obtiene la ruta de ejecución de una versión específica de Java
+   */
+  getJavaExecutable(javaVersion) {
+    const javaDir = import_node_path7.default.join(this.runtimePath, `java${javaVersion}`);
+    console.log(`Buscando Java ejecutable para versi\xF3n ${javaVersion} en: ${javaDir}`);
+    const isWindows = process.platform === "win32";
+    const javaExecutableName = isWindows ? "java.exe" : "java";
+    const possibleLocations = [
+      // Ubicación estándar después de reorganización
+      import_node_path7.default.join(javaDir, "bin", javaExecutableName),
+      // Posible ubicación si la reorganización no funcionó completamente
+      import_node_path7.default.join(javaDir, "bin"),
+      // Directorio bin en raíz
+      // Posibles ubicaciones en subdirectorios comunes
+      import_node_path7.default.join(javaDir, "jdk-17.0.17+10", "bin", javaExecutableName),
+      import_node_path7.default.join(javaDir, "jdk-17.0.17+10", "bin"),
+      import_node_path7.default.join(javaDir, "jdk-17.*", "bin", javaExecutableName),
+      // Patrón general
+      import_node_path7.default.join(javaDir, "openjdk-17*", "bin", javaExecutableName),
+      import_node_path7.default.join(javaDir, "temurin-17*", "bin", javaExecutableName)
+    ];
+    for (const location of possibleLocations) {
+      if (location.includes("*")) {
+        continue;
+      }
+      console.log(`Verificando ubicaci\xF3n: ${location}`);
+      if (import_node_fs6.default.existsSync(location)) {
+        if (import_node_fs6.default.statSync(location).isFile()) {
+          if (location.endsWith(javaExecutableName)) {
+            console.log(`Java encontrado en ubicaci\xF3n espec\xEDfica: ${location}`);
+            return location;
+          }
+        } else if (import_node_fs6.default.statSync(location).isDirectory()) {
+          const exeInDir = import_node_path7.default.join(location, javaExecutableName);
+          if (import_node_fs6.default.existsSync(exeInDir)) {
+            console.log(`Java encontrado en directorio: ${exeInDir}`);
+            return exeInDir;
+          }
+        }
+      }
+    }
+    try {
+      if (import_node_fs6.default.existsSync(javaDir)) {
+        const result = this.findJavaExecutableRecursive(javaDir, javaExecutableName);
+        if (result) {
+          console.log(`Java encontrado en b\xFAsqueda recursiva: ${result}`);
+          return result;
+        }
+      }
+    } catch (error) {
+      console.error("Error en la b\xFAsqueda recursiva de Java:", error);
+    }
+    console.log(`No se encontr\xF3 Java ejecutable para la versi\xF3n ${javaVersion}`);
+    return null;
+  }
+  /**
+   * Método auxiliar para buscar el ejecutable de Java recursivamente
+   */
+  findJavaExecutableRecursive(dirPath, executableName, depth = 0) {
+    if (depth > 3) {
+      return null;
+    }
+    try {
+      const items = import_node_fs6.default.readdirSync(dirPath);
+      for (const item of items) {
+        const itemPath = import_node_path7.default.join(dirPath, item);
+        const stat = import_node_fs6.default.statSync(itemPath);
+        if (stat.isFile() && item === executableName) {
+          return itemPath;
+        } else if (stat.isDirectory()) {
+          const result = this.findJavaExecutableRecursive(itemPath, executableName, depth + 1);
+          if (result) {
+            return result;
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error al buscar recursivamente en ${dirPath}:`, error);
+    }
+    return null;
+  }
+  /**
+   * Descarga e instala una versión específica de Java desde Adoptium
    * @param javaVersion Versión de Java (por ejemplo, '17', '11', '8')
    * @returns Ruta al ejecutable java
    */
   async downloadJava(javaVersion = "17") {
     const { os: os2, arch } = this.getSystemInfo();
-    const javaDir = import_node_path7.default.join(this.runtimePath, `java${javaVersion}`);
-    this.ensureDir(javaDir);
-    const javaExePath = import_node_path7.default.join(javaDir, "bin", os2 === "windows" ? "java.exe" : "java");
-    if (import_node_fs6.default.existsSync(javaExePath)) {
-      console.log(`Java ${javaVersion} ya est\xE1 instalado en ${javaDir}`);
-      return javaExePath;
+    if (this.isJavaInstalled(javaVersion)) {
+      const javaExe = this.getJavaExecutable(javaVersion);
+      if (javaExe) {
+        console.log(`Java ${javaVersion} ya est\xE1 instalado en ${import_node_path7.default.dirname(javaExe)}`);
+        return javaExe;
+      }
     }
-    console.log(`Descargando Java ${javaVersion} para ${os2}-${arch}...`);
+    const javaDir = import_node_path7.default.join(this.runtimePath, `java${javaVersion}`);
+    if (import_node_fs6.default.existsSync(javaDir)) {
+      console.log(`Limpiando directorio existente de Java ${javaVersion}...`);
+      import_node_fs6.default.rmSync(javaDir, { recursive: true, force: true });
+    }
+    this.ensureDir(javaDir);
+    console.log(`Descargando Java ${javaVersion} para ${os2}-${arch} desde Adoptium...`);
     const apiURL = `https://api.adoptium.net/v3/assets/latest/${javaVersion}/hotspot?os=${os2}&architecture=${arch}&image_type=jdk&vendor=eclipse`;
     try {
-      const response = await (0, import_node_fetch4.default)(apiURL);
+      const response = await (0, import_node_fetch4.default)(apiURL, {
+        headers: {
+          "User-Agent": "DRK-Launcher/1.0 (compatible; Fetch)"
+        }
+      });
       if (!response.ok) {
-        throw new Error(`Error al obtener informaci\xF3n de Java ${javaVersion}: ${response.statusText}`);
+        throw new Error(`Error al obtener informaci\xF3n de Java ${javaVersion} desde Adoptium: ${response.statusText}`);
       }
       const data = await response.json();
       if (!data || data.length === 0) {
-        throw new Error(`No se encontr\xF3 Java ${javaVersion} disponible para ${os2}-${arch}`);
+        throw new Error(`No se encontr\xF3 Java ${javaVersion} disponible para ${os2}-${arch} en Adoptium`);
       }
       const binary = data[0];
       const downloadUrl = binary.binary.package.link;
-      const checksum = binary.binary.package.checksum;
-      const tempZipPath = import_node_path7.default.join(this.runtimePath, `java${javaVersion}_temp.zip`);
-      await this.downloadFile(downloadUrl, tempZipPath, checksum);
+      const expectedChecksum = binary.binary.package.checksum;
+      const fileName = import_node_path7.default.basename(downloadUrl);
+      console.log(`Iniciando descarga de Java ${javaVersion} desde: ${downloadUrl}`);
+      const tempZipPath = import_node_path7.default.join(this.runtimePath, fileName);
+      const downloadId = await downloadQueueService.addDownload(
+        downloadUrl,
+        tempZipPath,
+        expectedChecksum,
+        "sha256"
+        // Adoptium proporciona checksums SHA-256
+      );
+      await this.waitForDownload(downloadId);
+      const downloadInfo = downloadQueueService.getDownloadStatus(downloadId);
+      if (!downloadInfo || downloadInfo.status !== "completed") {
+        throw new Error(`La descarga de Java ${javaVersion} fall\xF3: ${downloadInfo?.error || "Error desconocido"}`);
+      }
+      console.log(`Extrayendo Java ${javaVersion}...`);
       await this.extractJavaArchive(tempZipPath, javaDir);
       if (import_node_fs6.default.existsSync(tempZipPath)) {
         import_node_fs6.default.unlinkSync(tempZipPath);
       }
-      console.log(`Java ${javaVersion} instalado correctamente en ${javaDir}`);
-      return javaExePath;
+      const javaExe = this.getJavaExecutable(javaVersion);
+      if (!javaExe) {
+        try {
+          const dirContents = import_node_fs6.default.readdirSync(javaDir, { withFileTypes: true });
+          console.log(`Contenido del directorio de Java (${javaDir}):`, dirContents.map(
+            (item) => item.isDirectory() ? `[DIR] ${item.name}` : item.name
+          ));
+          for (const item of dirContents) {
+            if (item.isDirectory()) {
+              const subDirPath = import_node_path7.default.join(javaDir, item.name);
+              try {
+                const subDirContents = import_node_fs6.default.readdirSync(subDirPath, { withFileTypes: true });
+                console.log(`Contenido del subdirectorio ${subDirPath}:`, subDirContents.map(
+                  (subItem) => subItem.isDirectory() ? `[DIR] ${subItem.name}` : subItem.name
+                ));
+                if (subDirContents.some((subItem) => subItem.name === "bin" && subItem.isDirectory())) {
+                  const binPath = import_node_path7.default.join(subDirPath, "bin");
+                  const binContents = import_node_fs6.default.readdirSync(binPath);
+                  console.log(`Contenido de bin en ${binPath}:`, binContents);
+                }
+              } catch (subDirError) {
+                console.error(`Error al leer subdirectorio ${item.name}:`, subDirError);
+              }
+            }
+          }
+        } catch (dirError) {
+          console.error("Error al leer directorio de Java:", dirError);
+        }
+        throw new Error(`No se encontr\xF3 el ejecutable de Java despu\xE9s de la instalaci\xF3n en ${javaDir}`);
+      }
+      const isWorking = await this.isJavaWorking(javaExe);
+      if (!isWorking) {
+        throw new Error(`La instalaci\xF3n de Java ${javaVersion} no es funcional: no se pudo ejecutar java -version`);
+      }
+      console.log(`Java ${javaVersion} instalado y verificado correctamente en ${javaDir} (ejecutable: ${javaExe})`);
+      const installation = {
+        id: `java${javaVersion}`,
+        version: javaVersion,
+        path: javaDir,
+        executable: javaExe,
+        vendor: "Adoptium",
+        architecture: arch,
+        os: os2,
+        isWorking: true
+      };
+      this.javaInstallations.set(`java${javaVersion}`, installation);
+      return javaExe;
     } catch (error) {
-      console.error(`Error al descargar Java ${javaVersion}:`, error);
+      console.error(`Error al descargar o instalar Java ${javaVersion}:`, error);
       throw error;
     }
   }
   /**
-   * Descarga un archivo con verificación de checksum
+   * Espera a que una descarga se complete
    */
-  async downloadFile(url, outputPath, expectedChecksum) {
-    const downloadId = await downloadQueueService2.addDownload(url, outputPath);
+  async waitForDownload(downloadId) {
     return new Promise((resolve, reject) => {
       const checkStatus = () => {
-        const status = downloadQueueService2.getDownloadStatus(downloadId);
+        const status = downloadQueueService.getDownloadStatus(downloadId);
         if (!status) {
           reject(new Error(`Download ${downloadId} not found`));
           return;
         }
         if (status.status === "completed") {
           resolve();
-        } else if (status.status === "error") {
-          reject(new Error(status.error || "Download failed"));
+        } else if (status.status === "error" || status.status === "cancelled") {
+          reject(new Error(status.error || "Download failed or cancelled"));
         } else {
           setTimeout(checkStatus, 500);
         }
@@ -6251,9 +6479,10 @@ var JavaDownloadService = class {
               zip.close();
               if (err) {
                 reject(err);
-              } else {
-                resolve();
+                return;
               }
+              this.reorganizeJavaStructure(extractTo);
+              resolve();
             });
           } catch (error) {
             zip.close();
@@ -6268,6 +6497,96 @@ var JavaDownloadService = class {
       }
     });
   }
+  /**
+   * Reorganiza la estructura de directorios de Java después de la extracción
+   * Maneja el caso donde los archivos se extraen en una subcarpeta con el nombre del JDK
+   */
+  reorganizeJavaStructure(extractTo) {
+    try {
+      const items = import_node_fs6.default.readdirSync(extractTo);
+      let javaDirFound = false;
+      for (const item of items) {
+        const itemPath = import_node_path7.default.join(extractTo, item);
+        const isDir = import_node_fs6.default.statSync(itemPath).isDirectory();
+        if (isDir) {
+          const binPath = import_node_path7.default.join(itemPath, "bin");
+          const javaExePath = import_node_path7.default.join(binPath, process.platform === "win32" ? "java.exe" : "java");
+          if (import_node_fs6.default.existsSync(binPath) && import_node_fs6.default.existsSync(javaExePath)) {
+            console.log(`Estructura de Java encontrada en subdirectorio: ${itemPath}`);
+            const nestedItems = import_node_fs6.default.readdirSync(itemPath);
+            for (const nestedItem of nestedItems) {
+              const sourcePath = import_node_path7.default.join(itemPath, nestedItem);
+              const destPath = import_node_path7.default.join(extractTo, nestedItem);
+              if (import_node_fs6.default.existsSync(destPath)) {
+                const destStat = import_node_fs6.default.statSync(destPath);
+                if (destStat.isDirectory()) {
+                  import_node_fs6.default.rmSync(destPath, { recursive: true, force: true });
+                } else {
+                  import_node_fs6.default.unlinkSync(destPath);
+                }
+              }
+              import_node_fs6.default.renameSync(sourcePath, destPath);
+            }
+            import_node_fs6.default.rmdirSync(itemPath);
+            console.log(`Reorganizada estructura de Java: contenido movido desde subdirectorio ${item} a ra\xEDz`);
+            javaDirFound = true;
+            break;
+          }
+        }
+      }
+      if (!javaDirFound) {
+        console.log(`No se encontr\xF3 estructura de Java t\xEDpica en: ${extractTo}`);
+        console.log(`Contenido de ${extractTo}:`, items);
+      }
+    } catch (error) {
+      console.error(`Error al reorganizar la estructura de Java en ${extractTo}:`, error);
+    }
+  }
+  /**
+   * Obtiene todas las instalaciones de Java disponibles
+   */
+  getAllJavaInstallations() {
+    return Array.from(this.javaInstallations.values());
+  }
+  /**
+   * Obtiene la instalación de Java específica por ID
+   */
+  getJavaInstallation(javaId) {
+    return this.javaInstallations.get(javaId);
+  }
+  /**
+   * Quita una instalación de Java
+   */
+  async removeJavaInstallation(javaId) {
+    const installation = this.javaInstallations.get(javaId);
+    if (!installation) {
+      return false;
+    }
+    try {
+      import_node_fs6.default.rmSync(installation.path, { recursive: true, force: true });
+      this.javaInstallations.delete(javaId);
+      return true;
+    } catch (error) {
+      console.error(`Error al eliminar la instalaci\xF3n de Java ${javaId}:`, error);
+      return false;
+    }
+  }
+  /**
+   * Obtiene o descarga la versión de Java recomendada para una versión de Minecraft
+   */
+  async getJavaForMinecraftVersion(mcVersion) {
+    const recommendedVersion = this.getRecommendedJavaVersion(mcVersion);
+    console.log(`Versi\xF3n de Java recomendada para Minecraft ${mcVersion}: ${recommendedVersion}`);
+    if (this.isJavaInstalled(recommendedVersion)) {
+      const javaExe = this.getJavaExecutable(recommendedVersion);
+      if (javaExe) {
+        console.log(`Java ${recommendedVersion} ya est\xE1 instalado, usando: ${javaExe}`);
+        return javaExe;
+      }
+    }
+    console.log(`Java ${recommendedVersion} no est\xE1 instalada, descargando...`);
+    return await this.downloadJava(recommendedVersion);
+  }
 };
 var javaDownloadService = new JavaDownloadService();
 
@@ -6277,6 +6596,7 @@ var import_node_fs7 = __toESM(require("node:fs"), 1);
 var import_node_stream4 = require("node:stream");
 var import_node_util4 = require("node:util");
 var import_node_fetch5 = __toESM(require_lib2(), 1);
+init_downloadQueueService();
 var pipelineAsync4 = (0, import_node_util4.promisify)(import_node_stream4.pipeline);
 var ModrinthDownloadService = class {
   /**
@@ -6572,10 +6892,10 @@ var ModrinthDownloadService = class {
    * Descarga un archivo
    */
   async downloadFile(url, outputPath) {
-    const downloadId = await downloadQueueService2.addDownload(url, outputPath);
+    const downloadId = await downloadQueueService.addDownload(url, outputPath);
     return new Promise((resolve, reject) => {
       const checkStatus = () => {
-        const status = downloadQueueService2.getDownloadStatus(downloadId);
+        const status = downloadQueueService.getDownloadStatus(downloadId);
         if (!status) {
           reject(new Error(`Download ${downloadId} not found`));
           return;
@@ -6617,14 +6937,97 @@ var InstanceCreationService = class {
       loader,
       maxMemory,
       javaPath,
-      jvmArgs
+      jvmArgs,
+      id: void 0
+      // The service will generate an ID if not provided
     });
     console.log("PASO 2.2: Descargando metadata y librer\xEDas de Minecraft...");
     await this.downloadMinecraftBase(version);
     console.log("PASO 2.3: Descargando cliente de Minecraft...");
     await this.downloadClientForInstance(version, loader, instance.path);
+    console.log("PASO 2.4: Asegurando la disponibilidad de assets...");
+    await this.ensureAssetsAvailability(version);
+    console.log("PASO 2.5: Verificando configuraci\xF3n de carpeta de assets...");
+    await this.validateAssetsConfiguration(instance.path, version);
     console.log(`Instancia ${name} (ID: ${instance.id}) creada exitosamente en ${instance.path}`);
     return instance;
+  }
+  /**
+   * Asegura la disponibilidad de todos los assets necesarios para una versión
+   */
+  async ensureAssetsAvailability(version) {
+    console.log(`Asegurando disponibilidad de assets para Minecraft ${version}...`);
+    try {
+      const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(import_node_fs8.default.readFileSync(versionJsonPath, "utf-8"));
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        console.log(`No se encontr\xF3 informaci\xF3n de asset index para la versi\xF3n ${version}, omitiendo assets...`);
+        return;
+      }
+      console.log(`Descargando asset index ${assetIndex.id} para la versi\xF3n ${version}...`);
+      await minecraftDownloadService.downloadVersionAssets(version);
+      const launcherPath = getLauncherDataPath();
+      const assetsPath = import_node_path9.default.join(launcherPath, "assets");
+      const indexesPath = import_node_path9.default.join(assetsPath, "indexes");
+      const objectsPath = import_node_path9.default.join(assetsPath, "objects");
+      if (!import_node_fs8.default.existsSync(assetsPath)) {
+        import_node_fs8.default.mkdirSync(assetsPath, { recursive: true });
+        console.log(`Carpeta de assets creada: ${assetsPath}`);
+      }
+      if (!import_node_fs8.default.existsSync(indexesPath)) {
+        import_node_fs8.default.mkdirSync(indexesPath, { recursive: true });
+        console.log(`Carpeta de \xEDndices de assets creada: ${indexesPath}`);
+      }
+      if (!import_node_fs8.default.existsSync(objectsPath)) {
+        import_node_fs8.default.mkdirSync(objectsPath, { recursive: true });
+        console.log(`Carpeta de objetos de assets creada: ${objectsPath}`);
+      }
+      console.log(`Disponibilidad de assets asegurada para Minecraft ${version}`);
+    } catch (error) {
+      console.error(`Error al asegurar la disponibilidad de assets para ${version}:`, error);
+      console.log(`CONTINUANDO CREACI\xD3N DE INSTANCIA A\xDAN CON PROBLEMAS EN LA DESCARGA DE ASSETS`);
+    }
+  }
+  /**
+   * Valida la configuración de assets para una instancia específica
+   */
+  async validateAssetsConfiguration(instancePath, version) {
+    console.log(`Validando configuraci\xF3n de assets para instancia en ${instancePath}...`);
+    try {
+      const versionJsonPath = import_node_path9.default.join(getLauncherDataPath(), "versions", version, `${version}.json`);
+      if (!import_node_fs8.default.existsSync(versionJsonPath)) {
+        throw new Error(`Metadata de la versi\xF3n ${version} no encontrado`);
+      }
+      const launcherAssetsPath = import_node_path9.default.join(getLauncherDataPath(), "assets");
+      if (!import_node_fs8.default.existsSync(launcherAssetsPath)) {
+        throw new Error(`Carpeta de assets compartida no existe: ${launcherAssetsPath}`);
+      }
+      const indexesPath = import_node_path9.default.join(launcherAssetsPath, "indexes");
+      const objectsPath = import_node_path9.default.join(launcherAssetsPath, "objects");
+      if (!import_node_fs8.default.existsSync(indexesPath)) {
+        throw new Error(`Carpeta de \xEDndices de assets no existe: ${indexesPath}`);
+      }
+      if (!import_node_fs8.default.existsSync(objectsPath)) {
+        throw new Error(`Carpeta de objetos de assets no existe: ${objectsPath}`);
+      }
+      const indexFiles = import_node_fs8.default.readdirSync(indexesPath);
+      if (indexFiles.length === 0) {
+        console.warn(`Advertencia: No se encontraron archivos de \xEDndice de assets`);
+      } else {
+        console.log(`Se encontraron ${indexFiles.length} archivos de \xEDndice de assets`);
+      }
+      const objectFolders = import_node_fs8.default.readdirSync(objectsPath);
+      if (objectFolders.length === 0) {
+        console.warn(`Advertencia: No se encontraron directorios de objetos de assets`);
+      } else {
+        console.log(`Se encontraron ${objectFolders.length} directorios de objetos de assets`);
+      }
+      console.log(`Configuraci\xF3n de assets validada para instancia en ${instancePath}`);
+    } catch (error) {
+      console.error(`Error al validar configuraci\xF3n de assets:`, error);
+      throw error;
+    }
   }
   /**
    * FASE 1: Preparación del entorno - Descarga de Java
@@ -6730,7 +7133,7 @@ var InstanceCreationService = class {
       if (!responseLoader.ok) {
         throw new Error(`Error al descargar Fabric Loader: ${responseLoader.status} ${responseLoader.statusText}`);
       }
-      const buffer = await responseLoader.buffer();
+      const buffer = Buffer.from(await responseLoader.arrayBuffer());
       import_node_fs8.default.writeFileSync(fabricLoaderPath, buffer);
       console.log(`Fabric Loader descargado en: ${fabricLoaderPath}`);
     } catch (error) {
@@ -6773,7 +7176,7 @@ var InstanceCreationService = class {
         await minecraftDownloadService.downloadClientJar(version, instancePath);
         return;
       }
-      const buffer = await responseClient.buffer();
+      const buffer = Buffer.from(await responseClient.arrayBuffer());
       import_node_fs8.default.writeFileSync(forgeClientPath, buffer);
       console.log(`Forge Client descargado en: ${forgeClientPath}`);
     } catch (error) {
@@ -6807,7 +7210,7 @@ var InstanceCreationService = class {
       if (!responseLoader.ok) {
         throw new Error(`Error al descargar Quilt Loader: ${responseLoader.status} ${responseLoader.statusText}`);
       }
-      const buffer = await responseLoader.buffer();
+      const buffer = Buffer.from(await responseLoader.arrayBuffer());
       import_node_fs8.default.writeFileSync(quiltLoaderPath, buffer);
       console.log(`Quilt Loader descargado en: ${quiltLoaderPath}`);
     } catch (error) {
@@ -6887,10 +7290,1414 @@ var InstanceCreationService = class {
 var instanceCreationService = new InstanceCreationService();
 
 // src/main/main.ts
+init_downloadQueueService();
+
+// src/services/enhancedInstanceCreationService.ts
+var import_node_path11 = __toESM(require("node:path"), 1);
+var import_node_fs10 = __toESM(require("node:fs"), 1);
+
+// src/services/versionService.ts
+var import_node_path10 = __toESM(require("node:path"), 1);
 var import_node_fs9 = __toESM(require("node:fs"), 1);
+var import_node_fetch6 = __toESM(require_lib2(), 1);
+var VersionService = class {
+  versionsCachePath;
+  cacheTimeout = 1e3 * 60 * 60;
+  // 1 hora de caché
+  constructor() {
+    const launcherPath = getLauncherDataPath();
+    this.versionsCachePath = import_node_path10.default.join(launcherPath, "versions_cache.json");
+  }
+  /**
+   * Obtiene las versiones de Minecraft desde Mojang con caché
+   * @param forceRefresh Obliga a refrescar la caché
+   * @returns Lista de versiones de Minecraft
+   */
+  async getMinecraftVersions(forceRefresh = false) {
+    if (!forceRefresh && await this.isCacheValid()) {
+      try {
+        const cachedData = JSON.parse(import_node_fs9.default.readFileSync(this.versionsCachePath, "utf-8"));
+        console.log(`Cach\xE9 de versiones v\xE1lida, usando datos cacheados (${cachedData.versions.length} versiones)`);
+        const releaseVersions2 = cachedData.versions.filter((v) => v.type === "release");
+        return releaseVersions2;
+      } catch (error) {
+        console.error("Error al leer la cach\xE9 de versiones:", error);
+      }
+    }
+    console.log("Obteniendo versiones de Minecraft desde Mojang...");
+    const versions = await this.downloadMinecraftVersions();
+    const releaseVersions = versions.filter((v) => v.type === "release");
+    console.log(`Encontradas ${versions.length} versiones totales, ${releaseVersions.length} son releases`);
+    await this.saveToCache(versions);
+    return releaseVersions;
+  }
+  /**
+   * Verifica si el archivo de caché es válido (menos de 1 hora de antigüedad)
+   */
+  async isCacheValid() {
+    if (!import_node_fs9.default.existsSync(this.versionsCachePath)) {
+      return false;
+    }
+    const stats = import_node_fs9.default.statSync(this.versionsCachePath);
+    const now = Date.now();
+    const fileTime = stats.mtime.getTime();
+    return now - fileTime < this.cacheTimeout;
+  }
+  /**
+   * Descarga la lista de versiones desde la API de Mojang
+   */
+  async downloadMinecraftVersions() {
+    try {
+      const response = await (0, import_node_fetch6.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json", {
+        headers: {
+          "User-Agent": "DRK-Launcher/1.0 (compatible; Fetch)"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const manifest = await response.json();
+      const releaseVersions = manifest.versions.filter((v) => v.type === "release");
+      const sortedVersions = releaseVersions.sort((a, b) => {
+        const dateA = new Date(a.releaseTime).getTime();
+        const dateB = new Date(b.releaseTime).getTime();
+        return dateA - dateB;
+      });
+      return sortedVersions;
+    } catch (error) {
+      console.error("Error al descargar versiones de Minecraft:", error);
+      if (import_node_fs9.default.existsSync(this.versionsCachePath)) {
+        try {
+          const cachedData = JSON.parse(import_node_fs9.default.readFileSync(this.versionsCachePath, "utf-8"));
+          console.log("Usando datos cacheados como fallback");
+          return cachedData.versions.filter((v) => v.type === "release");
+        } catch (cacheError) {
+          console.error("Error al usar cach\xE9 como fallback:", cacheError);
+        }
+      }
+      throw error;
+    }
+  }
+  /**
+   * Guarda las versiones en el archivo de caché
+   */
+  async saveToCache(versions) {
+    try {
+      const cacheData = {
+        timestamp: Date.now(),
+        versions
+      };
+      import_node_fs9.default.writeFileSync(this.versionsCachePath, JSON.stringify(cacheData, null, 2));
+      console.log(`Cach\xE9 de versiones guardada con ${versions.length} entradas`);
+    } catch (error) {
+      console.error("Error al guardar cach\xE9 de versiones:", error);
+    }
+  }
+  /**
+   * Obtiene una versión específica por ID
+   */
+  async getVersionById(versionId) {
+    const versions = await this.getMinecraftVersions();
+    return versions.find((v) => v.id === versionId) || null;
+  }
+  /**
+   * Fuerza la actualización del archivo de caché
+   */
+  async refreshCache() {
+    await this.getMinecraftVersions(true);
+  }
+  /**
+   * Obtiene información detallada de una versión específica desde su URL
+   */
+  async getVersionDetails(version) {
+    try {
+      const response = await (0, import_node_fetch6.default)(version.url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`Error al obtener detalles de la versi\xF3n ${version.id}:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Verifica si una versión específica es compatible con Forge/Fabric
+   */
+  async isVersionCompatibleWithLoader(versionId, loader) {
+    return true;
+  }
+};
+var versionService = new VersionService();
+
+// src/services/enhancedInstanceCreationService.ts
+var EnhancedInstanceCreationService = class {
+  basePath;
+  progressCallbacks = /* @__PURE__ */ new Map();
+  cancellationTokens = /* @__PURE__ */ new Map();
+  constructor() {
+    this.basePath = import_node_path11.default.join(getLauncherDataPath(), "instances");
+    this.ensureDir(this.basePath);
+  }
+  /**
+   * Asegura que un directorio exista, creándolo si es necesario
+   * @param dir Directorio a asegurar
+   */
+  ensureDir(dir) {
+    if (!import_node_fs10.default.existsSync(dir)) {
+      import_node_fs10.default.mkdirSync(dir, { recursive: true });
+    }
+  }
+  /**
+   * Genera un ID único para la instancia basado en el nombre
+   */
+  generateInstanceId(name) {
+    return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+  }
+  /**
+   * Registra un callback para recibir actualizaciones de progreso
+   */
+  onProgress(instanceId, callback) {
+    this.progressCallbacks.set(instanceId, callback);
+  }
+  /**
+   * Cancela la creación de una instancia
+   */
+  cancelInstanceCreation(instanceId) {
+    this.cancellationTokens.set(instanceId, true);
+  }
+  /**
+   * Verifica si la creación de la instancia ha sido cancelada
+   */
+  isCancelled(instanceId) {
+    return this.cancellationTokens.get(instanceId) === true;
+  }
+  /**
+   * Actualiza el progreso de la creación de la instancia
+   */
+  updateProgress(instanceId, status, currentStep, totalSteps, details) {
+    const progress = {
+      status,
+      progress: totalSteps > 0 ? currentStep / totalSteps : 0,
+      step: this.getStatusDescription(status),
+      totalSteps,
+      currentStep,
+      details
+    };
+    const callback = this.progressCallbacks.get(instanceId);
+    if (callback) {
+      callback(progress);
+    }
+    return progress;
+  }
+  /**
+   * Obtiene la descripción del estado
+   */
+  getStatusDescription(status) {
+    switch (status) {
+      case "downloading_jre" /* DOWNLOADING_JRE */:
+        return "Verificando/Descargando JRE";
+      case "creating_structure" /* CREATING_STRUCTURE */:
+        return "Creando estructura de instancia";
+      case "downloading_version_metadata" /* DOWNLOADING_VERSION_METADATA */:
+        return "Descargando metadatos de la versi\xF3n";
+      case "downloading_libraries" /* DOWNLOADING_LIBRARIES */:
+        return "Descargando bibliotecas";
+      case "downloading_client" /* DOWNLOADING_CLIENT */:
+        return "Descargando cliente";
+      case "downloading_assets" /* DOWNLOADING_ASSETS */:
+        return "Descargando assets";
+      case "installing_loader" /* INSTALLING_LOADER */:
+        return "Instalando mod loader";
+      case "verifying_integrity" /* VERIFYING_INTEGRITY */:
+        return "Verificando integridad";
+      case "completed" /* COMPLETED */:
+        return "Completado";
+      case "pending" /* PENDING */:
+        return "Pendiente";
+      case "error" /* ERROR */:
+        return "Error";
+      case "cancelled" /* CANCELLED */:
+        return "Cancelado";
+      default:
+        return "Procesando";
+    }
+  }
+  /**
+   * Crea una instancia completa con todas las validaciones
+   */
+  async createInstance(config, instanceId) {
+    const id = instanceId || this.generateInstanceId(config.name);
+    const progressId = id;
+    if (this.isCancelled(progressId)) {
+      throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+    }
+    this.updateProgress(progressId, "pending" /* PENDING */, 0, 10, "Iniciando creaci\xF3n de instancia");
+    try {
+      console.log(`Iniciando creaci\xF3n de instancia: ${config.name} (${config.version}) con ${config.loader || "vanilla"}`);
+      this.updateProgress(progressId, "downloading_jre" /* DOWNLOADING_JRE */, 1, 10, "Verificando Java Runtime Environment");
+      const javaPath = await javaDownloadService.getJavaForMinecraftVersion(config.version);
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "creating_structure" /* CREATING_STRUCTURE */, 2, 10, "Creando estructura de archivos");
+      const instancePath = config.instancePath || import_node_path11.default.join(this.basePath, id);
+      const instanceConfig = await this.createInstanceStructure(config, instancePath, id, javaPath);
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "downloading_version_metadata" /* DOWNLOADING_VERSION_METADATA */, 3, 10, "Descargando metadatos de la versi\xF3n");
+      await versionService.getVersionDetails(await versionService.getVersionById(config.version));
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "downloading_libraries" /* DOWNLOADING_LIBRARIES */, 4, 10, "Descargando bibliotecas del juego");
+      await minecraftDownloadService.downloadVersionLibraries(config.version);
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "downloading_client" /* DOWNLOADING_CLIENT */, 5, 10, "Descargando cliente de Minecraft");
+      await minecraftDownloadService.downloadClientJar(config.version, instancePath);
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "downloading_assets" /* DOWNLOADING_ASSETS */, 6, 10, "Descargando assets del juego");
+      await minecraftDownloadService.downloadVersionAssets(config.version);
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      if (config.loader && config.loader !== "vanilla") {
+        this.updateProgress(progressId, "installing_loader" /* INSTALLING_LOADER */, 7, 10, `Instalando ${config.loader}`);
+        await this.installLoader(config.loader, config.version, config.loaderVersion, instancePath);
+      }
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "verifying_integrity" /* VERIFYING_INTEGRITY */, 8, 10, "Verificando integridad de archivos");
+      await this.verifyInstanceIntegrity(instancePath, config.version);
+      if (this.isCancelled(progressId)) {
+        throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
+      }
+      this.updateProgress(progressId, "completed" /* COMPLETED */, 10, 10, "Instancia creada exitosamente");
+      instanceConfig.ready = true;
+      this.saveInstanceConfig(instancePath, instanceConfig);
+      console.log(`Instancia ${config.name} (ID: ${id}) creada exitosamente en ${instancePath}`);
+      return instanceConfig;
+    } catch (error) {
+      this.updateProgress(progressId, "error" /* ERROR */, 0, 10, `Error: ${error.message}`);
+      console.error(`Error al crear instancia ${config.name}:`, error);
+      throw error;
+    } finally {
+      this.cancellationTokens.delete(progressId);
+    }
+  }
+  /**
+   * Crea la estructura básica de la instancia
+   */
+  async createInstanceStructure(config, instancePath, id, javaPath) {
+    this.ensureDir(instancePath);
+    const requiredFolders = [
+      "mods",
+      // Mods de juego
+      "resourcepacks",
+      // Paquetes de recursos
+      "shaderpacks",
+      // Shaders (para OptiFine/Iris)
+      "config",
+      // Configuración de mods y loader
+      "saves",
+      // Mundos guardados
+      "logs",
+      // Registros del cliente
+      "natives"
+      // Bibliotecas nativas
+    ];
+    requiredFolders.forEach((folder) => {
+      const folderPath = import_node_path11.default.join(instancePath, folder);
+      this.ensureDir(folderPath);
+    });
+    const instanceConfig = {
+      id,
+      name: config.name,
+      version: config.version,
+      loader: config.loader,
+      loaderVersion: config.loaderVersion,
+      javaPath,
+      maxMemory: config.maxMemory,
+      jvmArgs: config.jvmArgs,
+      createdAt: Date.now(),
+      path: instancePath,
+      ready: false
+    };
+    this.saveInstanceConfig(instancePath, instanceConfig);
+    return instanceConfig;
+  }
+  /**
+   * Guarda la configuración de la instancia
+   */
+  saveInstanceConfig(instancePath, config) {
+    const configPath = import_node_path11.default.join(instancePath, "instance.json");
+    import_node_fs10.default.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  }
+  /**
+   * Instala un loader (Forge, Fabric, etc.) en la instancia
+   */
+  async installLoader(loader, mcVersion, loaderVersion, instancePath) {
+    console.log(`Instalando ${loader} para Minecraft ${mcVersion} en ${instancePath}`);
+    switch (loader) {
+      case "fabric":
+        await this.installFabric(mcVersion, loaderVersion, instancePath);
+        break;
+      case "forge":
+        await this.installForge(mcVersion, loaderVersion, instancePath);
+        break;
+      case "quilt":
+        await this.installQuilt(mcVersion, loaderVersion, instancePath);
+        break;
+      case "neoforge":
+        await this.installNeoForge(mcVersion, loaderVersion, instancePath);
+        break;
+      default:
+        throw new Error(`Loader no soportado: ${loader}`);
+    }
+  }
+  /**
+   * Instala Fabric
+   */
+  async installFabric(mcVersion, loaderVersion, instancePath) {
+    try {
+      const fabricApiUrl = `https://meta.fabricmc.net/v2/versions/loader/${mcVersion}`;
+      const response = await fetch(fabricApiUrl);
+      const fabricVersions = await response.json();
+      const fabricEntry = fabricVersions.find((v) => v.loader.stable) || fabricVersions[0];
+      if (!fabricEntry) {
+        throw new Error(`No se encontr\xF3 versi\xF3n compatible de Fabric para Minecraft ${mcVersion}`);
+      }
+      const finalLoaderVersion = loaderVersion || fabricEntry.loader.version;
+      console.log(`Usando Fabric Loader ${finalLoaderVersion} para Minecraft ${mcVersion}`);
+      const loaderDir = import_node_path11.default.join(instancePath, "loader");
+      this.ensureDir(loaderDir);
+      const fabricLoaderUrl = `https://maven.fabricmc.net/net/fabricmc/fabric-loader/${finalLoaderVersion}/fabric-loader-${finalLoaderVersion}.jar`;
+      const fabricLoaderPath = import_node_path11.default.join(loaderDir, `fabric-loader-${finalLoaderVersion}.jar`);
+      const responseLoader = await fetch(fabricLoaderUrl);
+      if (!responseLoader.ok) {
+        throw new Error(`Error al descargar Fabric Loader: ${responseLoader.status} ${responseLoader.statusText}`);
+      }
+      const buffer = Buffer.from(await responseLoader.arrayBuffer());
+      import_node_fs10.default.writeFileSync(fabricLoaderPath, buffer);
+      console.log(`Fabric Loader ${finalLoaderVersion} descargado en: ${fabricLoaderPath}`);
+    } catch (error) {
+      console.error(`Error al instalar Fabric:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Instala Forge
+   */
+  async installForge(mcVersion, loaderVersion, instancePath) {
+    try {
+      console.log(`Descargando Forge para Minecraft ${mcVersion}...`);
+      const forgeApiUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json`;
+      const response = await fetch(forgeApiUrl);
+      const forgeMetadata = await response.json();
+      let forgeVersion = loaderVersion;
+      if (!forgeVersion) {
+        const versions = forgeMetadata.versioning.versions;
+        for (let i = versions.length - 1; i >= 0; i--) {
+          const v = versions[i];
+          if (v.startsWith(`${mcVersion}-`)) {
+            forgeVersion = v;
+            break;
+          }
+        }
+      }
+      if (!forgeVersion) {
+        throw new Error(`No se encontr\xF3 versi\xF3n compatible de Forge para Minecraft ${mcVersion}`);
+      }
+      console.log(`Usando Forge ${forgeVersion} para Minecraft ${mcVersion}`);
+      const loaderDir = import_node_path11.default.join(instancePath, "loader");
+      this.ensureDir(loaderDir);
+      const forgeUniversalUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-universal.jar`;
+      const forgeUniversalPath = import_node_path11.default.join(loaderDir, `forge-${forgeVersion}-universal.jar`);
+      const responseUniversal = await fetch(forgeUniversalUrl);
+      if (responseUniversal.ok) {
+        const buffer = Buffer.from(await responseUniversal.arrayBuffer());
+        import_node_fs10.default.writeFileSync(forgeUniversalPath, buffer);
+        console.log(`Forge Universal JAR descargado en: ${forgeUniversalPath}`);
+      } else {
+        console.log(`Forge Universal no disponible, descargando instalador...`);
+        const forgeInstallerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-installer.jar`;
+        const forgeInstallerPath = import_node_path11.default.join(loaderDir, `forge-${forgeVersion}-installer.jar`);
+        const responseInstaller = await fetch(forgeInstallerUrl);
+        if (!responseInstaller.ok) {
+          throw new Error(`No se pudo descargar Forge para ${mcVersion}`);
+        }
+        const buffer = Buffer.from(await responseInstaller.arrayBuffer());
+        import_node_fs10.default.writeFileSync(forgeInstallerPath, buffer);
+        console.log(`Forge Installer descargado en: ${forgeInstallerPath}`);
+      }
+    } catch (error) {
+      console.error(`Error al instalar Forge:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Instala Quilt
+   */
+  async installQuilt(mcVersion, loaderVersion, instancePath) {
+    try {
+      console.log(`Descargando Quilt para Minecraft ${mcVersion}...`);
+      const quiltApiUrl = `https://meta.quiltmc.org/v3/versions/loader/${mcVersion}`;
+      const response = await fetch(quiltApiUrl);
+      const quiltVersions = await response.json();
+      if (!quiltVersions || quiltVersions.length === 0) {
+        throw new Error(`No se encontr\xF3 versi\xF3n de Quilt para Minecraft ${mcVersion}`);
+      }
+      const quiltEntry = quiltVersions[0];
+      const finalLoaderVersion = loaderVersion || quiltEntry.loader.version;
+      console.log(`Usando Quilt Loader ${finalLoaderVersion} para Minecraft ${mcVersion}`);
+      const loaderDir = import_node_path11.default.join(instancePath, "loader");
+      this.ensureDir(loaderDir);
+      const quiltLoaderUrl = `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/${finalLoaderVersion}/quilt-loader-${finalLoaderVersion}.jar`;
+      const quiltLoaderPath = import_node_path11.default.join(loaderDir, `quilt-loader-${finalLoaderVersion}.jar`);
+      const responseLoader = await fetch(quiltLoaderUrl);
+      if (!responseLoader.ok) {
+        throw new Error(`Error al descargar Quilt Loader: ${responseLoader.status} ${responseLoader.statusText}`);
+      }
+      const buffer = Buffer.from(await responseLoader.arrayBuffer());
+      import_node_fs10.default.writeFileSync(quiltLoaderPath, buffer);
+      console.log(`Quilt Loader descargado en: ${quiltLoaderPath}`);
+    } catch (error) {
+      console.error(`Error al instalar Quilt:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Instala NeoForge
+   */
+  async installNeoForge(mcVersion, loaderVersion, instancePath) {
+    try {
+      console.log(`Descargando NeoForge para Minecraft ${mcVersion}...`);
+      let neoForgeVersion = loaderVersion;
+      if (!neoForgeVersion) {
+        const neoForgeApiUrl = `https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge`;
+        const response = await fetch(neoForgeApiUrl);
+        const versions = await response.json();
+        const compatibleVersions = versions.filter((v) => v.version.startsWith(`${mcVersion}-`));
+        if (compatibleVersions.length > 0) {
+          neoForgeVersion = compatibleVersions[0].version;
+        }
+      }
+      if (!neoForgeVersion) {
+        throw new Error(`No se encontr\xF3 versi\xF3n compatible de NeoForge para Minecraft ${mcVersion}`);
+      }
+      console.log(`Usando NeoForge ${neoForgeVersion} para Minecraft ${mcVersion}`);
+      const loaderDir = import_node_path11.default.join(instancePath, "loader");
+      this.ensureDir(loaderDir);
+      const neoForgeUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}.jar`;
+      const neoForgePath = import_node_path11.default.join(loaderDir, `neoforge-${neoForgeVersion}.jar`);
+      const responseNeo = await fetch(neoForgeUrl);
+      if (!responseNeo.ok) {
+        throw new Error(`Error al descargar NeoForge: ${responseNeo.status} ${responseNeo.statusText}`);
+      }
+      const buffer = Buffer.from(await responseNeo.arrayBuffer());
+      import_node_fs10.default.writeFileSync(neoForgePath, buffer);
+      console.log(`NeoForge descargado en: ${neoForgePath}`);
+    } catch (error) {
+      console.error(`Error al instalar NeoForge:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Verifica la integridad de los archivos de la instancia
+   */
+  async verifyInstanceIntegrity(instancePath, mcVersion) {
+    console.log(`Verificando integridad de la instancia en ${instancePath} para Minecraft ${mcVersion}`);
+    const clientJarPath = import_node_path11.default.join(instancePath, "client.jar");
+    if (!import_node_fs10.default.existsSync(clientJarPath)) {
+      throw new Error(`client.jar no encontrado en ${clientJarPath}`);
+    }
+    const stats = import_node_fs10.default.statSync(clientJarPath);
+    if (stats.size < 1024 * 1024) {
+      throw new Error(`client.jar tiene tama\xF1o inusualmente peque\xF1o: ${stats.size} bytes`);
+    }
+    const requiredFolders = ["mods", "config", "saves", "logs", "resourcepacks", "shaderpacks"];
+    for (const folder of requiredFolders) {
+      const folderPath = import_node_path11.default.join(instancePath, folder);
+      if (!import_node_fs10.default.existsSync(folderPath)) {
+        throw new Error(`Carpeta requerida no encontrada: ${folderPath}`);
+      }
+    }
+    const configPath = import_node_path11.default.join(instancePath, "instance.json");
+    if (!import_node_fs10.default.existsSync(configPath)) {
+      throw new Error(`Archivo de configuraci\xF3n no encontrado: ${configPath}`);
+    }
+    try {
+      const configContent = import_node_fs10.default.readFileSync(configPath, "utf-8");
+      const config = JSON.parse(configContent);
+      if (!config.version || config.version !== mcVersion) {
+        throw new Error(`Versi\xF3n de la instancia no coincide con la versi\xF3n esperada`);
+      }
+    } catch (error) {
+      throw new Error(`Archivo de configuraci\xF3n da\xF1ado o inv\xE1lido: ${error}`);
+    }
+    console.log(`Verificaci\xF3n de integridad completada para la instancia en ${instancePath}`);
+  }
+  /**
+   * Obtiene la configuración de una instancia existente
+   */
+  getInstanceConfig(instancePath) {
+    const configPath = import_node_path11.default.join(instancePath, "instance.json");
+    if (!import_node_fs10.default.existsSync(configPath)) {
+      return null;
+    }
+    try {
+      const configContent = import_node_fs10.default.readFileSync(configPath, "utf-8");
+      return JSON.parse(configContent);
+    } catch (error) {
+      console.error(`Error al leer la configuraci\xF3n de la instancia: ${error}`);
+      return null;
+    }
+  }
+  /**
+   * Actualiza la configuración de una instancia existente
+   */
+  updateInstanceConfig(instancePath, updates) {
+    const config = this.getInstanceConfig(instancePath);
+    if (!config) {
+      throw new Error(`No se encontr\xF3 la configuraci\xF3n de la instancia: ${instancePath}`);
+    }
+    const updatedConfig = { ...config, ...updates };
+    this.saveInstanceConfig(instancePath, updatedConfig);
+  }
+};
+var enhancedInstanceCreationService = new EnhancedInstanceCreationService();
+
+// src/services/logProgressService.ts
+var import_node_path12 = __toESM(require("node:path"), 1);
+var import_node_fs11 = __toESM(require("node:fs"), 1);
+init_downloadQueueService();
+var LogProgressService = class {
+  logsPath;
+  logEvents = [];
+  progressStatuses = /* @__PURE__ */ new Map();
+  maxLogEntries = 1e3;
+  // Limitar número de entradas para evitar consumir demasiada memoria
+  constructor() {
+    this.logsPath = import_node_path12.default.join(getLauncherDataPath(), "logs");
+    this.ensureDir(this.logsPath);
+  }
+  /**
+   * Asegura que un directorio exista, creándolo si es necesario
+   * @param dir Directorio a asegurar
+   */
+  ensureDir(dir) {
+    if (!import_node_fs11.default.existsSync(dir)) {
+      import_node_fs11.default.mkdirSync(dir, { recursive: true });
+    }
+  }
+  /**
+   * Registra un nuevo evento de log
+   */
+  log(type, message, details, target) {
+    const logEvent = {
+      id: this.generateId(),
+      timestamp: Date.now(),
+      type,
+      message,
+      details,
+      target
+    };
+    this.logEvents.push(logEvent);
+    if (this.logEvents.length > this.maxLogEntries) {
+      this.logEvents = this.logEvents.slice(-this.maxLogEntries);
+    }
+    if (type === "progress" && typeof details === "object" && details.progress !== void 0) {
+      this.updateProgressStatus(logEvent.id, {
+        id: logEvent.id,
+        operation: "generic",
+        target: target || "unknown",
+        progress: details.progress,
+        status: "in-progress",
+        current: details.current || 0,
+        total: details.total || 1
+      });
+    }
+    console.log(`[${type.toUpperCase()}] ${message}`, details || "");
+    return logEvent;
+  }
+  /**
+   * Registra un evento de progreso de descarga
+   */
+  logDownloadProgress(downloadInfo) {
+    const progress = downloadInfo.totalBytes && downloadInfo.totalBytes > 0 ? (downloadInfo.downloadedBytes || 0) / downloadInfo.totalBytes : 0;
+    this.log("progress", `Descargando: ${downloadInfo.url}`, {
+      progress,
+      downloadedBytes: downloadInfo.downloadedBytes,
+      totalBytes: downloadInfo.totalBytes,
+      speed: this.calculateDownloadSpeed(downloadInfo)
+    }, downloadInfo.outputPath);
+  }
+  /**
+   * Registra un evento de creación de instancia
+   */
+  logInstanceCreationProgress(instanceId, progress) {
+    this.log("progress", progress.step, {
+      progress: progress.progress,
+      status: progress.status,
+      currentStep: progress.currentStep,
+      totalSteps: progress.totalSteps,
+      details: progress.details
+    }, `instance-${instanceId}`);
+  }
+  /**
+   * Calcula la velocidad de descarga estimada
+   */
+  calculateDownloadSpeed(downloadInfo) {
+    return void 0;
+  }
+  /**
+   * Registra un evento de información
+   */
+  info(message, details, target) {
+    return this.log("info", message, details, target);
+  }
+  /**
+   * Registra un evento de éxito
+   */
+  success(message, details, target) {
+    return this.log("success", message, details, target);
+  }
+  /**
+   * Registra un evento de error
+   */
+  error(message, details, target) {
+    return this.log("error", message, details, target);
+  }
+  /**
+   * Registra un evento de advertencia
+   */
+  warning(message, details, target) {
+    return this.log("warning", message, details, target);
+  }
+  /**
+   * Registra un evento de descarga
+   */
+  download(message, details, target) {
+    return this.log("download", message, details, target);
+  }
+  /**
+   * Registra un evento de instalación
+   */
+  install(message, details, target) {
+    return this.log("install", message, details, target);
+  }
+  /**
+   * Registra un evento de lanzamiento del juego
+   */
+  launch(message, details, target) {
+    return this.log("launch", message, details, target);
+  }
+  /**
+   * Obtiene los últimos eventos de log
+   */
+  getRecentLogs(count = 50) {
+    return this.logEvents.slice(-count);
+  }
+  /**
+   * Obtiene los eventos de log filtrados por tipo
+   */
+  getLogsByType(type, count = 50) {
+    return this.logEvents.filter((log) => log.type === type).slice(-count);
+  }
+  /**
+   * Limpia los logs antiguos
+   */
+  clearOldLogs() {
+    const now = Date.now();
+    const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1e3;
+    this.logEvents = this.logEvents.filter((log) => log.timestamp > oneWeekAgo);
+  }
+  /**
+   * Guarda los logs a un archivo (útil para depuración)
+   */
+  saveLogsToFile(filename) {
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const logFilename = filename || `launcher-log-${timestamp}.json`;
+    const logFilePath = import_node_path12.default.join(this.logsPath, logFilename);
+    const logData = {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      logs: this.getRecentLogs(1e3)
+      // Guardar los últimos 1000 eventos
+    };
+    import_node_fs11.default.writeFileSync(logFilePath, JSON.stringify(logData, null, 2));
+    return logFilePath;
+  }
+  /**
+   * Actualiza el estado de progreso de una operación
+   */
+  updateProgressStatus(id, status) {
+    this.progressStatuses.set(id, status);
+  }
+  /**
+   * Obtiene el estado de progreso de una operación específica
+   */
+  getProgressStatus(id) {
+    return this.progressStatuses.get(id);
+  }
+  /**
+   * Obtiene todos los estados de progreso
+   */
+  getAllProgressStatuses() {
+    return Array.from(this.progressStatuses.values());
+  }
+  /**
+   * Elimina un estado de progreso
+   */
+  removeProgressStatus(id) {
+    this.progressStatuses.delete(id);
+  }
+  /**
+   * Obtiene estadísticas generales
+   */
+  getStats() {
+    return {
+      totalLogs: this.logEvents.length,
+      recentLogs: this.getRecentLogs(50).length,
+      activeDownloads: downloadQueueService.getActiveDownloadCount(),
+      totalProgressUpdates: this.progressStatuses.size
+    };
+  }
+  /**
+   * Genera un ID único
+   */
+  generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  }
+  /**
+   * Obtiene los estados de descarga actuales del servicio de descargas
+   */
+  getCurrentDownloadStatuses() {
+    const downloads = downloadQueueService.getAllDownloads();
+    return downloads.map((download) => ({
+      id: download.id,
+      operation: "download",
+      target: download.outputPath,
+      progress: download.progress,
+      status: download.status,
+      current: download.downloadedBytes || 0,
+      total: download.totalBytes || 0,
+      details: download.error
+    }));
+  }
+  /**
+   * Obtiene el progreso combinado de todas las operaciones
+   */
+  getOverallProgress() {
+    const allStatuses = this.getAllProgressStatuses();
+    const currentDownloads = this.getCurrentDownloadStatuses();
+    const allProgress = [...allStatuses, ...currentDownloads];
+    if (allProgress.length === 0) {
+      return { progress: 0, statusText: "Esperando operaciones...", activeOperations: 0 };
+    }
+    const totalProgress = allProgress.reduce((sum, status) => sum + status.progress, 0);
+    const overallProgress = totalProgress / allProgress.length;
+    const hasErrors = allProgress.some((status) => status.status === "error");
+    const hasPending = allProgress.some((status) => status.status === "pending");
+    const hasInProgress = allProgress.some((status) => status.status === "in-progress");
+    let statusText = "Procesando...";
+    if (hasErrors) {
+      statusText = "Algunas operaciones fallaron";
+    } else if (hasPending) {
+      statusText = "Esperando para comenzar...";
+    } else if (hasInProgress) {
+      statusText = "Procesando operaciones...";
+    } else if (overallProgress >= 1) {
+      statusText = "\xA1Completado!";
+    }
+    return {
+      progress: Math.min(overallProgress, 1),
+      statusText,
+      activeOperations: allProgress.filter(
+        (status) => status.status === "in-progress" || status.status === "pending"
+      ).length
+    };
+  }
+};
+var logProgressService = new LogProgressService();
+
+// src/services/gameLaunchService.ts
+var import_node_child_process = require("node:child_process");
+var import_node_path13 = __toESM(require("node:path"), 1);
+var import_node_fs12 = __toESM(require("node:fs"), 1);
+var GameLaunchService = class {
+  /**
+   * Lanza el juego Minecraft con todas las configuraciones apropiadas
+   */
+  async launchGame(opts) {
+    try {
+      logProgressService.info(`Iniciando lanzamiento de Minecraft ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        javaPath: opts.javaPath,
+        ram: opts.ramMb
+      });
+      const args = await this.buildLaunchArguments(opts);
+      logProgressService.info(`Argumentos de lanzamiento construidos (${args.length} argumentos)`, {
+        javaPath: opts.javaPath,
+        classpathLength: args.filter((arg) => arg.startsWith("-cp")).length > 0 ? "class" : "jar"
+      });
+      const child = (0, import_node_child_process.spawn)(opts.javaPath, args, {
+        cwd: opts.instancePath,
+        env: {
+          ...process.env
+          // Añadir variables de entorno específicas si son necesarias
+        }
+      });
+      child.stdout.on("data", (data) => {
+        const output = data.toString();
+        logProgressService.info(`[Minecraft-OUT] ${output}`, { instance: opts.instanceConfig.name });
+        opts.onData?.(output);
+      });
+      child.stderr.on("data", (data) => {
+        const output = data.toString();
+        logProgressService.error(`[Minecraft-ERR] ${output}`, { instance: opts.instanceConfig.name });
+        opts.onData?.(output);
+      });
+      child.on("close", (code) => {
+        logProgressService.info(`Minecraft cerrado con c\xF3digo: ${code}`, {
+          instance: opts.instanceConfig.name,
+          exitCode: code
+        });
+        opts.onExit?.(code);
+      });
+      child.on("error", (error) => {
+        logProgressService.error(`Error al lanzar Minecraft: ${error.message}`, {
+          instance: opts.instanceConfig.name,
+          error: error.message
+        });
+        opts.onExit?.(null);
+      });
+      logProgressService.success(`Minecraft lanzado exitosamente para la instancia ${opts.instanceConfig.name}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion,
+        pid: child.pid
+      });
+      return child;
+    } catch (error) {
+      logProgressService.error(`Error al lanzar Minecraft: ${error.message}`, {
+        instance: opts.instanceConfig.name,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+  /**
+   * Construye los argumentos de lanzamiento para Minecraft
+   */
+  async buildLaunchArguments(opts) {
+    const mem = Math.max(512, opts.ramMb || 2048);
+    const minMem = Math.min(512, mem / 4);
+    const launcherPath = getLauncherDataPath();
+    let jvmArgs = [
+      `-Xms${minMem}m`,
+      // Memoria inicial
+      `-Xmx${mem}m`,
+      // Memoria máxima
+      // Opciones recomendadas para rendimiento
+      "-XX:+UseG1GC",
+      "-XX:+UnlockExperimentalVMOptions",
+      "-XX:+UseG1GC",
+      "-XX:MaxGCPauseMillis=100",
+      "-XX:+DisableExplicitGC",
+      "-XX:TargetSurvivorRatio=90",
+      "-XX:G1NewSizePercent=50",
+      "-XX:G1MaxNewSizePercent=80",
+      "-XX:G1MixedGCLiveThresholdPercent=35",
+      "-XX:+AlwaysPreTouch",
+      "-XX:+ParallelRefProcEnabled",
+      "-XX:MaxInlineLevel=9",
+      "-XX:MaxTrivialSize=12",
+      "-XX:-DontCompileHugeMethods",
+      // Args adicionales si se proporcionaron
+      ...opts.jvmArgs || []
+    ];
+    const loader = opts.loader || "vanilla";
+    if (loader === "vanilla") {
+      return await this.buildArgumentsForVanilla(opts, jvmArgs);
+    } else {
+      return await this.buildArgumentsForModded(opts, loader, jvmArgs);
+    }
+  }
+  /**
+   * Construye argumentos para lanzar Minecraft vanilla
+   */
+  async buildArgumentsForVanilla(opts, jvmArgs) {
+    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    let classpath = import_node_path13.default.join(opts.instancePath, "client.jar");
+    let mainClass = "net.minecraft.client.main.Main";
+    if (import_node_fs12.default.existsSync(versionJsonPath)) {
+      try {
+        const versionData = JSON.parse(import_node_fs12.default.readFileSync(versionJsonPath, "utf-8"));
+        if (versionData.mainClass) {
+          mainClass = versionData.mainClass;
+        }
+        const libraryJars = [];
+        if (versionData.libraries && Array.isArray(versionData.libraries)) {
+          for (const lib of versionData.libraries) {
+            if (lib.rules) {
+              let allowed2 = false;
+              let appliesToOS = true;
+              for (const rule of lib.rules) {
+                if (rule.os && rule.os.name) {
+                  const osName = this.getOSName();
+                  if (rule.os.name !== osName) {
+                    appliesToOS = false;
+                    if (rule.action === "allow") continue;
+                    if (rule.action === "disallow") {
+                      allowed2 = false;
+                      break;
+                    }
+                  } else {
+                    allowed2 = rule.action === "allow";
+                  }
+                } else if (rule.action === "allow") {
+                  allowed2 = true;
+                } else if (rule.action === "disallow") {
+                  allowed2 = false;
+                }
+              }
+              if (!appliesToOS && lib.rules.some((r) => r.os?.name)) continue;
+              if (!allowed2 && lib.rules.some((r) => r.action === "disallow")) continue;
+            } else {
+              allowed = true;
+            }
+            if (lib.downloads && lib.downloads.artifact) {
+              let libPath;
+              if (lib.downloads.artifact.path) {
+                libPath = import_node_path13.default.join(getLauncherDataPath(), "libraries", lib.downloads.artifact.path);
+              } else {
+                libPath = import_node_path13.default.join(getLauncherDataPath(), "libraries", this.getLibraryPath(lib.name));
+              }
+              const possiblePaths = [
+                libPath,
+                // Ruta estándar en .DRK Launcher/libraries
+                import_node_path13.default.join(opts.instancePath, "libraries", this.getLibraryPath(lib.name)),
+                // En la instancia
+                import_node_path13.default.join(process.env.APPDATA || "", ".minecraft", "libraries", this.getLibraryPath(lib.name))
+                // .minecraft estándar
+              ];
+              let found = false;
+              for (const possiblePath of possiblePaths) {
+                if (import_node_fs12.default.existsSync(possiblePath)) {
+                  libraryJars.push(possiblePath);
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                logProgressService.warning(`Librer\xEDa no encontrada: ${lib.name}. Intentando descargar...`);
+                try {
+                  if (lib.downloads.artifact.url) {
+                    const libDir = import_node_path13.default.dirname(libPath);
+                    import_node_fs12.default.mkdirSync(libDir, { recursive: true });
+                    const downloadResult = await this.downloadLibrary(lib.downloads.artifact.url, libPath);
+                    if (downloadResult && import_node_fs12.default.existsSync(libPath)) {
+                      libraryJars.push(libPath);
+                      logProgressService.success(`Librer\xEDa descargada: ${lib.name}`);
+                      found = true;
+                    }
+                  }
+                } catch (downloadError) {
+                  logProgressService.error(`Error al descargar la librer\xEDa ${lib.name}: ${downloadError}`);
+                }
+                if (!found) {
+                  logProgressService.warning(`No se pudo descargar la librer\xEDa: ${lib.name}`);
+                }
+              }
+            } else if (lib.url) {
+              const libPath = import_node_path13.default.join(getLauncherDataPath(), "libraries", this.getLibraryPath(lib.name));
+              const possiblePaths = [
+                libPath,
+                import_node_path13.default.join(opts.instancePath, "libraries", this.getLibraryPath(lib.name)),
+                import_node_path13.default.join(process.env.APPDATA || "", ".minecraft", "libraries", this.getLibraryPath(lib.name))
+              ];
+              let found = false;
+              for (const possiblePath of possiblePaths) {
+                if (import_node_fs12.default.existsSync(possiblePath)) {
+                  libraryJars.push(possiblePath);
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                logProgressService.warning(`Librer\xEDa no encontrada (formato viejo): ${lib.name}. Intentando descargar...`);
+                try {
+                  const libDir = import_node_path13.default.dirname(libPath);
+                  import_node_fs12.default.mkdirSync(libDir, { recursive: true });
+                  const downloadResult = await this.downloadLibrary(lib.url, libPath);
+                  if (downloadResult && import_node_fs12.default.existsSync(libPath)) {
+                    libraryJars.push(libPath);
+                    logProgressService.success(`Librer\xEDa (formato viejo) descargada: ${lib.name}`);
+                    found = true;
+                  }
+                } catch (downloadError) {
+                  logProgressService.error(`Error al descargar la librer\xEDa (formato viejo) ${lib.name}: ${downloadError}`);
+                }
+                if (!found) {
+                  logProgressService.warning(`No se pudo descargar la librer\xEDa (formato viejo): ${lib.name}`);
+                }
+              }
+            }
+          }
+        }
+        const clientJar = import_node_path13.default.join(opts.instancePath, "client.jar");
+        if (import_node_fs12.default.existsSync(clientJar)) {
+          libraryJars.push(clientJar);
+        }
+        if (libraryJars.length > 0) {
+          classpath = libraryJars.join(import_node_path13.default.delimiter);
+        } else {
+          logProgressService.warning(`No se encontraron librer\xEDas para la versi\xF3n ${opts.mcVersion}, usando client.jar como fallback`);
+        }
+      } catch (error) {
+        logProgressService.error("Error al leer archivo de versi\xF3n para construir classpath:", error);
+        classpath = import_node_path13.default.join(opts.instancePath, "client.jar");
+        mainClass = "net.minecraft.client.main.Main";
+      }
+    } else {
+      logProgressService.warning(`No se encontr\xF3 el archivo de versi\xF3n ${versionJsonPath}, usando configuraci\xF3n m\xEDnima`);
+      const commonLibs = [
+        "net.sf.jopt-simple:jopt-simple:5.0.4",
+        "com.google.code.gson:gson:2.8.9",
+        "com.google.guava:guava:31.0.1-jre",
+        "org.apache.commons:commons-lang3:3.12.0",
+        "commons-io:commons-io:2.11.0"
+      ];
+      const libraryJars = [];
+      for (const libName of commonLibs) {
+        const libPath = import_node_path13.default.join(getLauncherDataPath(), "libraries", this.getLibraryPath(libName));
+        const possiblePaths = [
+          libPath,
+          import_node_path13.default.join(opts.instancePath, "libraries", this.getLibraryPath(libName)),
+          import_node_path13.default.join(process.env.APPDATA || "", ".minecraft", "libraries", this.getLibraryPath(libName))
+        ];
+        let found = false;
+        for (const possiblePath of possiblePaths) {
+          if (import_node_fs12.default.existsSync(possiblePath)) {
+            libraryJars.push(possiblePath);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          logProgressService.warning(`Librer\xEDa com\xFAn no encontrada: ${libName}`);
+        }
+      }
+      if (libraryJars.length > 0) {
+        classpath = [import_node_path13.default.join(opts.instancePath, "client.jar"), ...libraryJars].join(import_node_path13.default.delimiter);
+      }
+    }
+    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    const gameArgs = [
+      "--username",
+      opts.userProfile?.username || "Player",
+      "--version",
+      opts.mcVersion,
+      "--gameDir",
+      opts.instancePath,
+      "--assetsDir",
+      import_node_path13.default.join(getLauncherDataPath(), "assets"),
+      // Usar assets compartidos
+      "--assetIndex",
+      opts.mcVersion,
+      // Nombre del índice de assets
+      "--uuid",
+      fakeUUID,
+      "--accessToken",
+      "0",
+      // Placeholder para no premium
+      "--userType",
+      "mojang",
+      // Para perfiles no premium
+      "--versionType",
+      "DRK Launcher"
+    ];
+    if (opts.windowSize) {
+      gameArgs.push("--width", opts.windowSize.width.toString(), "--height", opts.windowSize.height.toString());
+    }
+    return [
+      ...jvmArgs,
+      "-cp",
+      classpath,
+      // Usar classpath en lugar de -jar
+      mainClass,
+      // Usar la clase principal específica de la versión de Minecraft
+      ...gameArgs
+    ];
+  }
+  /**
+   * Construye argumentos para lanzar Minecraft con mod loader
+   */
+  async buildArgumentsForModded(opts, loader, jvmArgs) {
+    const mem = Math.max(512, opts.ramMb || 2048);
+    const minMem = Math.min(512, mem / 4);
+    let updatedJvmArgs = [
+      `-Xms${minMem}m`,
+      // Memoria inicial
+      `-Xmx${mem}m`,
+      // Memoria máxima
+      // Opciones recomendadas para rendimiento
+      "-XX:+UseG1GC",
+      "-XX:+UnlockExperimentalVMOptions",
+      "-XX:+UseG1GC",
+      "-XX:MaxGCPauseMillis=100",
+      "-XX:+DisableExplicitGC",
+      "-XX:TargetSurvivorRatio=90",
+      "-XX:G1NewSizePercent=50",
+      "-XX:G1MaxNewSizePercent=80",
+      "-XX:G1MixedGCLiveThresholdPercent=35",
+      "-XX:+AlwaysPreTouch",
+      "-XX:+ParallelRefProcEnabled",
+      "-XX:MaxInlineLevel=9",
+      "-XX:MaxTrivialSize=12",
+      "-XX:-DontCompileHugeMethods",
+      // Args adicionales si se proporcionaron
+      ...opts.jvmArgs || []
+    ];
+    const launcherPath = getLauncherDataPath();
+    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    let mainClass = "";
+    let additionalJvmArgs = [];
+    let additionalGameArgs = [];
+    switch (loader) {
+      case "forge":
+      case "neoforge":
+        mainClass = "cpw.mods.bootstraplauncher.BootstrapLauncher";
+        additionalJvmArgs = [
+          `-Dfml.earlyprogresswindow=false`,
+          "--add-opens",
+          "java.base/java.util.jar=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.lang.invoke=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.lang.reflect=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.text=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.util=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.util.concurrent=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.util.concurrent.atomic=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.util.jar=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.util.regex=cpw.mods.securejarhandler",
+          "--add-opens",
+          "java.base/java.util.zip=cpw.mods.securejarhandler"
+        ];
+        additionalGameArgs = [
+          "--launchTarget",
+          "forgeclient",
+          "--fml.forgeVersion",
+          opts.loaderVersion || "",
+          "--fml.mcVersion",
+          opts.mcVersion,
+          "--fml.forgeGroup",
+          "net.minecraftforge",
+          "--fml.mcpVersion",
+          ""
+          // Esto puede requerir información adicional
+        ];
+        break;
+      case "fabric":
+      case "quilt":
+        mainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient";
+        additionalGameArgs = [
+          // No se requieren argumentos específicos del juego en Fabric/Quilt
+        ];
+        break;
+      default:
+        mainClass = "net.minecraft.client.main.Main";
+        break;
+    }
+    const libraryJars = [];
+    const loaderJarPath = this.findLoaderJar(opts.instancePath, loader, opts.loaderVersion);
+    if (loaderJarPath && import_node_fs12.default.existsSync(loaderJarPath)) {
+      libraryJars.push(loaderJarPath);
+      logProgressService.info(`Usando archivo JAR del loader: ${loaderJarPath}`);
+    } else {
+      logProgressService.warning(`No se encontr\xF3 archivo JAR del loader ${loader}, usando client.jar`);
+    }
+    const clientJar = import_node_path13.default.join(opts.instancePath, "client.jar");
+    if (import_node_fs12.default.existsSync(clientJar)) {
+      libraryJars.push(clientJar);
+    }
+    if (import_node_fs12.default.existsSync(versionJsonPath)) {
+      try {
+        const versionData = JSON.parse(import_node_fs12.default.readFileSync(versionJsonPath, "utf-8"));
+        if (versionData.libraries && Array.isArray(versionData.libraries)) {
+          for (const lib of versionData.libraries) {
+            if (lib.downloads && lib.downloads.artifact) {
+              let libPath;
+              if (lib.downloads.artifact.path) {
+                libPath = import_node_path13.default.join(launcherPath, "libraries", lib.downloads.artifact.path);
+              } else {
+                libPath = import_node_path13.default.join(launcherPath, "libraries", this.getLibraryPath(lib.name));
+              }
+              const possiblePaths = [
+                libPath,
+                // Ruta estándar en .DRK Launcher/libraries
+                import_node_path13.default.join(opts.instancePath, "libraries", this.getLibraryPath(lib.name)),
+                // En la instancia
+                import_node_path13.default.join(process.env.APPDATA || "", ".minecraft", "libraries", this.getLibraryPath(lib.name))
+                // .minecraft estándar
+              ];
+              let found = false;
+              for (const possiblePath of possiblePaths) {
+                if (import_node_fs12.default.existsSync(possiblePath)) {
+                  if (!libraryJars.includes(possiblePath)) {
+                    libraryJars.push(possiblePath);
+                  }
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                logProgressService.warning(`Librer\xEDa no encontrada para loader: ${lib.name} en ninguna ubicaci\xF3n`);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logProgressService.error("Error al leer archivo de versi\xF3n para construir classpath para loader:", error);
+      }
+    }
+    const classpath = libraryJars.join(import_node_path13.default.delimiter);
+    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    const baseGameArgs = [
+      "--username",
+      opts.userProfile?.username || "Player",
+      "--version",
+      opts.mcVersion,
+      "--gameDir",
+      opts.instancePath,
+      "--assetsDir",
+      import_node_path13.default.join(getLauncherDataPath(), "assets"),
+      // Usar assets compartidos
+      "--assetIndex",
+      opts.mcVersion,
+      // Nombre del índice de assets
+      "--uuid",
+      fakeUUID,
+      "--accessToken",
+      "0",
+      // Placeholder para no premium
+      "--userType",
+      "mojang",
+      // Para perfiles no premium
+      "--versionType",
+      `DRK Launcher ${loader}`
+    ];
+    if (opts.windowSize) {
+      baseGameArgs.push("--width", opts.windowSize.width.toString(), "--height", opts.windowSize.height.toString());
+    }
+    return [
+      ...updatedJvmArgs,
+      ...additionalJvmArgs,
+      "-cp",
+      classpath,
+      // Usar classpath en lugar de -jar
+      mainClass,
+      // Usar la clase principal específica del loader
+      ...baseGameArgs,
+      ...additionalGameArgs,
+      ...opts.gameArgs || []
+    ];
+  }
+  /**
+   * Función auxiliar para obtener el nombre del sistema operativo
+   */
+  getOSName() {
+    switch (process.platform) {
+      case "win32":
+        return "windows";
+      case "darwin":
+        return "osx";
+      case "linux":
+        return "linux";
+      default:
+        return "linux";
+    }
+  }
+  /**
+   * Función auxiliar para construir la ruta de una librería basada en su nombre
+   */
+  getLibraryPath(libraryName) {
+    const [group, artifact, version] = libraryName.split(":");
+    const parts = group.split(".");
+    return import_node_path13.default.join(...parts, artifact, version, `${artifact}-${version}.jar`);
+  }
+  /**
+   * Función auxiliar para descargar una librería
+   */
+  async downloadLibrary(url, outputPath) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const buffer = await response.buffer();
+      import_node_fs12.default.writeFileSync(outputPath, buffer);
+      return true;
+    } catch (error) {
+      logProgressService.error(`Error downloading library from ${url} to ${outputPath}: ${error}`);
+      return false;
+    }
+  }
+  /**
+   * Función auxiliar para encontrar el JAR del loader
+   */
+  findLoaderJar(instancePath, loader, version) {
+    const loaderDir = import_node_path13.default.join(instancePath, "loader");
+    if (import_node_fs12.default.existsSync(loaderDir)) {
+      const files = import_node_fs12.default.readdirSync(loaderDir);
+      for (const file of files) {
+        if (file.endsWith(".jar")) {
+          if (file.toLowerCase().includes(loader)) {
+            return import_node_path13.default.join(loaderDir, file);
+          }
+        }
+      }
+    }
+    if (import_node_fs12.default.existsSync(instancePath)) {
+      const instanceFiles = import_node_fs12.default.readdirSync(instancePath);
+      for (const file of instanceFiles) {
+        if (file.endsWith(".jar")) {
+          if (file.toLowerCase().includes(loader)) {
+            return import_node_path13.default.join(instancePath, file);
+          }
+        }
+      }
+    }
+    const standardMinecraftPath = import_node_path13.default.join(process.env.APPDATA || "", ".minecraft", "versions");
+    const loaderVersionPath = import_node_path13.default.join(standardMinecraftPath, `${loader}-${version || ""}`);
+    if (import_node_fs12.default.existsSync(loaderVersionPath)) {
+      const versionFiles = import_node_fs12.default.readdirSync(loaderVersionPath);
+      for (const file of versionFiles) {
+        if (file.endsWith(".jar") && file.includes(loader)) {
+          return import_node_path13.default.join(loaderVersionPath, file);
+        }
+      }
+    }
+    return null;
+  }
+};
+var gameLaunchService = new GameLaunchService();
+
+// src/main/main.ts
 var import_node_stream5 = require("node:stream");
 var import_node_util5 = require("node:util");
-var import_node_fetch6 = __toESM(require_lib2(), 1);
 var win = null;
 import_electron2.app.whenReady().then(async () => {
   const { instancesBaseDefault } = basePaths();
@@ -6921,7 +8728,7 @@ async function createWindow() {
     frame: true,
     // Mantener el marco para mantener la funcionalidad de ventana
     webPreferences: {
-      preload: import_node_path10.default.join(__dirname, "preload.cjs"),
+      preload: import_node_path14.default.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
@@ -6932,15 +8739,15 @@ async function createWindow() {
     await win.loadURL(url);
     win.webContents.openDevTools({ mode: "detach" });
   } else {
-    await win.loadFile(import_node_path10.default.join(process.cwd(), "dist", "index.html"));
+    await win.loadFile(import_node_path14.default.join(process.cwd(), "dist", "index.html"));
   }
 }
 function basePaths() {
   const data = getUserDataPath();
-  const settingsPath = import_node_path10.default.join(data, "settings.json");
+  const settingsPath = import_node_path14.default.join(data, "settings.json");
   const drkLauncherDir = data;
   ensureDir2(drkLauncherDir);
-  const instancesDir = import_node_path10.default.join(drkLauncherDir, "instances");
+  const instancesDir = import_node_path14.default.join(drkLauncherDir, "instances");
   ensureDir2(instancesDir);
   return {
     data,
@@ -6956,16 +8763,16 @@ function basePaths() {
 }
 function readJSON(file, fallback) {
   try {
-    if (!import_node_fs9.default.existsSync(file)) return fallback;
-    const raw = import_node_fs9.default.readFileSync(file, "utf-8");
+    if (!import_node_fs13.default.existsSync(file)) return fallback;
+    const raw = import_node_fs13.default.readFileSync(file, "utf-8");
     return JSON.parse(raw);
   } catch {
     return fallback;
   }
 }
 function writeJSON(file, value) {
-  ensureDir2(import_node_path10.default.dirname(file));
-  import_node_fs9.default.writeFileSync(file, JSON.stringify(value, null, 2));
+  ensureDir2(import_node_path14.default.dirname(file));
+  import_node_fs13.default.writeFileSync(file, JSON.stringify(value, null, 2));
 }
 function settings() {
   const { settingsPath, instancesBaseDefault } = basePaths();
@@ -6995,7 +8802,7 @@ function saveSettings(s) {
 }
 function instancesFile() {
   const { data } = basePaths();
-  return import_node_path10.default.join(data, "instances.json");
+  return import_node_path14.default.join(data, "instances.json");
 }
 function listInstances() {
   return readJSON(instancesFile(), []);
@@ -7007,7 +8814,8 @@ function createInstance(payload) {
   const instance = instanceService.createInstance({
     name: payload.name,
     version: payload.version,
-    loader: payload.loader || "vanilla"
+    loader: payload.loader || "vanilla",
+    id: void 0
   });
   const list = listInstances();
   const i = {
@@ -7035,10 +8843,10 @@ function deleteInstance(id) {
   const list = listInstances();
   const item = list.find((x) => x.id === id);
   saveInstances(list.filter((x) => x.id !== id));
-  if (item && import_node_fs9.default.existsSync(item.path)) import_node_fs9.default.rmSync(item.path, { recursive: true, force: true });
+  if (item && import_node_fs13.default.existsSync(item.path)) import_node_fs13.default.rmSync(item.path, { recursive: true, force: true });
 }
 async function mojangVersions() {
-  const res = await (0, import_node_fetch6.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
+  const res = await (0, import_node_fetch7.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
   const json = await res.json();
   return json.versions;
 }
@@ -7051,7 +8859,7 @@ function analyzeLog(content) {
 }
 function crashesFile() {
   const { data } = basePaths();
-  return import_node_path10.default.join(data, "crashes.json");
+  return import_node_path14.default.join(data, "crashes.json");
 }
 function listCrashes() {
   return readJSON(crashesFile(), []);
@@ -7113,9 +8921,9 @@ import_electron2.ipcMain.handle("versions:list", async () => mojangVersions());
 import_electron2.ipcMain.handle("crash:analyze", async (_e, p) => {
   const i = listInstances().find((x) => x.id === p.instanceId);
   if (!i) return null;
-  const target = p.logPath || import_node_path10.default.join(i.path, "logs", "latest.log");
-  if (!import_node_fs9.default.existsSync(target)) return null;
-  const txt = import_node_fs9.default.readFileSync(target, "utf-8");
+  const target = p.logPath || import_node_path14.default.join(i.path, "logs", "latest.log");
+  if (!import_node_fs13.default.existsSync(target)) return null;
+  const txt = import_node_fs13.default.readFileSync(target, "utf-8");
   const res = analyzeLog(txt);
   const rec = { id: Math.random().toString(36).slice(2), instanceId: i.id, createdAt: Date.now(), summary: res.summary, logPath: target, recommendation: res.recommendation };
   const list = listCrashes();
@@ -7126,12 +8934,12 @@ import_electron2.ipcMain.handle("crash:analyze", async (_e, p) => {
 import_electron2.ipcMain.handle("crash:list", async () => listCrashes());
 import_electron2.ipcMain.handle("servers:list", async () => {
   const { data } = basePaths();
-  const file = import_node_path10.default.join(data, "servers.json");
+  const file = import_node_path14.default.join(data, "servers.json");
   return readJSON(file, []);
 });
 import_electron2.ipcMain.handle("servers:save", async (_e, list) => {
   const { data } = basePaths();
-  const file = import_node_path10.default.join(data, "servers.json");
+  const file = import_node_path14.default.join(data, "servers.json");
   writeJSON(file, list);
   return true;
 });
@@ -7140,61 +8948,96 @@ import_electron2.ipcMain.handle("game:launch", async (_e, p) => {
   const i = listInstances().find((x) => x.id === p.instanceId);
   const s = settings();
   if (!i) return null;
-  const clientJarReady = await ensureClientJar(i.path, i.version);
-  if (!clientJarReady) {
-    console.log(`No se pudo asegurar el archivo client.jar para la instancia ${i.name}.`);
-    throw new Error("No se pudo descargar el archivo client.jar necesario para el juego.");
-  }
-  if (!isInstanceReady(i.path)) {
-    console.log(`La instancia ${i.name} no est\xE1 lista para jugar. Archivos esenciales faltantes.`);
-    throw new Error("La instancia no est\xE1 completamente descargada. Espere a que terminen las descargas.");
-  }
-  const assetsReady = areAssetsReadyForVersion(i.path, i.version);
-  if (!assetsReady) {
-    console.log(`Advertencia: Los assets para la versi\xF3n ${i.version} pueden no estar completamente descargados, pero se intentar\xE1 iniciar el juego.`);
-  }
-  const instanceConfig = instanceService.getInstanceConfig(i.path);
-  const ramMb = instanceConfig?.maxMemory || i.ramMb || s.defaultRamMb;
-  const javaPath = instanceConfig?.javaPath || s.javaPath || "java";
-  const windowWidth = instanceConfig?.windowWidth || 1280;
-  const windowHeight = instanceConfig?.windowHeight || 720;
-  const jvmArgs = instanceConfig?.jvmArgs || [];
-  launchJava({
-    javaPath,
-    mcVersion: i.version,
-    instancePath: i.path,
-    ramMb,
-    jvmArgs,
-    userProfile: p.userProfile,
-    windowSize: {
-      width: windowWidth,
-      height: windowHeight
-    },
-    loader: i.loader || "vanilla",
-    // Pasar el tipo de loader de la instancia
-    loaderVersion: instanceConfig?.loaderVersion
-    // Versión específica del loader si está disponible
-  }, (data) => {
-    console.log(`[Minecraft] ${data}`);
-  }, (exitCode) => {
-    console.log(`Minecraft closed with exit code: ${exitCode}`);
+  logProgressService.launch(`Iniciando lanzamiento de la instancia ${i.name}`, {
+    instanceId: i.id,
+    version: i.version,
+    loader: i.loader
   });
-  return { started: true };
+  try {
+    const clientJarReady = await ensureClientJar(i.path, i.version);
+    if (!clientJarReady) {
+      const errorMsg = `No se pudo asegurar el archivo client.jar para la instancia ${i.name}.`;
+      logProgressService.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    if (!isInstanceReady(i.path)) {
+      const errorMsg = `La instancia ${i.name} no est\xE1 lista para jugar. Archivos esenciales faltantes.`;
+      logProgressService.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    const assetsReady = areAssetsReadyForVersion(i.path, i.version);
+    if (!assetsReady) {
+      logProgressService.warning(`Advertencia: Los assets para la versi\xF3n ${i.version} pueden no estar completamente descargados, pero se intentar\xE1 iniciar el juego.`);
+    }
+    const instanceConfig = instanceService.getInstanceConfig(i.path);
+    const ramMb = instanceConfig?.maxMemory || i.ramMb || s.defaultRamMb;
+    const javaPath = instanceConfig?.javaPath || s.javaPath || "java";
+    const windowWidth = instanceConfig?.windowWidth || 1280;
+    const windowHeight = instanceConfig?.windowHeight || 720;
+    const jvmArgs = instanceConfig?.jvmArgs || [];
+    let finalJavaPath = javaPath;
+    if (!javaPath || javaPath === "java") {
+      finalJavaPath = await javaDownloadService.getJavaForMinecraftVersion(i.version);
+    }
+    logProgressService.info(`Usando Java en: ${finalJavaPath}`, { javaPath: finalJavaPath });
+    const childProcess = await gameLaunchService.launchGame({
+      javaPath: finalJavaPath,
+      mcVersion: i.version,
+      instancePath: i.path,
+      ramMb,
+      jvmArgs,
+      userProfile: p.userProfile,
+      windowSize: {
+        width: windowWidth,
+        height: windowHeight
+      },
+      loader: i.loader || "vanilla",
+      // Pasar el tipo de loader de la instancia
+      loaderVersion: instanceConfig?.loaderVersion,
+      // Versión específica del loader si está disponible
+      instanceConfig
+      // Ajuste de tipo temporal
+    });
+    logProgressService.success(`Minecraft lanzado exitosamente para la instancia ${i.name}`, {
+      instanceId: i.id,
+      pid: childProcess.pid
+    });
+    return { started: true, pid: childProcess.pid };
+  } catch (error) {
+    logProgressService.error(`Error al lanzar la instancia ${i.name}: ${error.message}`, {
+      instanceId: i.id,
+      error: error.message
+    });
+    throw error;
+  }
 });
 import_electron2.ipcMain.handle("instance:create-full", async (_e, payload) => {
   try {
-    const instance = await instanceCreationService.createFullInstance(
-      payload.name,
-      payload.version,
-      payload.loader || "vanilla",
-      payload.javaVersion || "17",
-      payload.maxMemory,
-      payload.minMemory,
-      payload.jvmArgs
-    );
+    logProgressService.info(`Iniciando creaci\xF3n de instancia: ${payload.name}`, {
+      name: payload.name,
+      version: payload.version,
+      loader: payload.loader
+    });
+    const instance = await enhancedInstanceCreationService.createInstance({
+      name: payload.name,
+      version: payload.version,
+      loader: payload.loader || "vanilla",
+      javaVersion: payload.javaVersion,
+      maxMemory: payload.maxMemory,
+      minMemory: payload.minMemory,
+      jvmArgs: payload.jvmArgs
+    });
+    logProgressService.success(`Instancia creada exitosamente: ${payload.name}`, {
+      id: instance.id,
+      name: payload.name,
+      version: payload.version
+    });
     return instance;
   } catch (error) {
-    console.error("Error creating full instance:", error);
+    logProgressService.error(`Error creando instancia ${payload.name}: ${error.message}`, {
+      name: payload.name,
+      error: error.message
+    });
     throw error;
   }
 });
@@ -7318,17 +9161,17 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
   const { downloadsBase } = basePaths();
   const downloadPath = downloadsBase;
   ensureDir2(downloadPath);
-  const filePath = import_node_path10.default.join(downloadPath, cleanFilename);
-  const fileDir = import_node_path10.default.dirname(filePath);
+  const filePath = import_node_path14.default.join(downloadPath, cleanFilename);
+  const fileDir = import_node_path14.default.dirname(filePath);
   ensureDir2(fileDir);
   try {
-    const response = await (0, import_node_fetch6.default)(url);
+    const response = await (0, import_node_fetch7.default)(url);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const totalBytes = parseInt(response.headers.get("content-length") || "0", 10);
     let downloadedBytes = 0;
-    const fileStream = import_node_fs9.default.createWriteStream(filePath);
+    const fileStream = import_node_fs13.default.createWriteStream(filePath);
     const progressStream = new (require("stream")).Transform({
       transform(chunk, encoding, callback) {
         downloadedBytes += chunk.length;
@@ -7342,7 +9185,7 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
     });
     response.body.pipe(progressStream).pipe(fileStream);
     await new Promise((resolve, reject) => {
-      fileStream.on("finish", resolve);
+      fileStream.on("finish", () => resolve(void 0));
       fileStream.on("error", reject);
       progressStream.on("error", reject);
     });
@@ -7389,7 +9232,7 @@ async function fetchModrinthContent(contentType, search) {
     console.log("Buscando en Modrinth:", url);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15e3);
-    const response = await (0, import_node_fetch6.default)(url, {
+    const response = await (0, import_node_fetch7.default)(url, {
       method: "GET",
       headers: {
         "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
@@ -7436,6 +9279,32 @@ async function fetchModrinthContent(contentType, search) {
 }
 import_electron2.ipcMain.handle("modrinth:search", async (_event, { contentType, search }) => {
   return fetchModrinthContent(contentType, search);
+});
+import_electron2.ipcMain.handle("download:cancel", async (_event, downloadId) => {
+  const { downloadQueueService: downloadQueueService2 } = await Promise.resolve().then(() => (init_downloadQueueService(), downloadQueueService_exports));
+  return downloadQueueService2.cancelDownloadById(downloadId);
+});
+import_electron2.ipcMain.handle("download:cancelAll", async (_event) => {
+  const { downloadQueueService: downloadQueueService2 } = await Promise.resolve().then(() => (init_downloadQueueService(), downloadQueueService_exports));
+  return downloadQueueService2.cancelAllDownloads();
+});
+import_electron2.ipcMain.handle("logs:get-recent", async (_event, count = 50) => {
+  return logProgressService.getRecentLogs(count);
+});
+import_electron2.ipcMain.handle("logs:get-by-type", async (_event, { type, count }) => {
+  return logProgressService.getLogsByType(type, count);
+});
+import_electron2.ipcMain.handle("logs:get-stats", async () => {
+  return logProgressService.getStats();
+});
+import_electron2.ipcMain.handle("progress:get-all-statuses", async () => {
+  return logProgressService.getAllProgressStatuses();
+});
+import_electron2.ipcMain.handle("progress:get-overall", async () => {
+  return logProgressService.getOverallProgress();
+});
+import_electron2.ipcMain.handle("progress:get-download-statuses", async () => {
+  return logProgressService.getCurrentDownloadStatuses();
 });
 import_electron2.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") import_electron2.app.quit();

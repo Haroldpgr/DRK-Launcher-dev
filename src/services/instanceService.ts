@@ -6,7 +6,8 @@ export interface InstanceConfig {
   id: string;
   name: string;
   version: string;
-  loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'liteloader';
+  loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge';
+  loaderVersion?: string;
   javaPath?: string;
   javaId?: string;
   maxMemory?: number;
@@ -34,7 +35,7 @@ export class InstanceService {
    * @param config Configuración de la instancia
    * @returns La instancia creada
    */
-  public createInstance(config: Omit<InstanceConfig, 'path' | 'createdAt'>): InstanceConfig {
+  public createInstance(config: Omit<InstanceConfig, 'path' | 'createdAt'> & Partial<Pick<InstanceConfig, 'id'>>): InstanceConfig {
     const id = config.id || this.generateInstanceId(config.name);
     const instancePath = path.join(this.basePath, id);
 

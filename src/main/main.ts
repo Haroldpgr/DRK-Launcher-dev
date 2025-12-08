@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { initDB, hasDB, sqlite } from '../services/db'
 import { queryStatus } from '../services/serverService'
-import { launchJava, isInstanceReady, areAssetsReadyForVersion, ensureClientJar } from '../services/gameService'
+import { launchJava as originalLaunchJava, isInstanceReady, areAssetsReadyForVersion, ensureClientJar } from '../services/gameService'
 import { javaDetector } from './javaDetector'
 // Import our Java service
 import javaService from './javaService';
@@ -13,6 +13,13 @@ import { getLauncherDataPath, ensureDir as ensureDirUtil } from '../utils/paths'
 import { instanceService, InstanceConfig } from '../services/instanceService';
 import { instanceCreationService } from '../services/instanceCreationService';
 import { modrinthDownloadService } from '../services/modrinthDownloadService';
+import { downloadQueueService } from '../services/downloadQueueService';
+import { enhancedInstanceCreationService } from '../services/enhancedInstanceCreationService';
+import { versionService } from '../services/versionService';
+import { javaDownloadService } from '../services/javaDownloadService';
+import { loaderService } from '../services/loaderService';
+import { logProgressService } from '../services/logProgressService';
+import { gameLaunchService } from '../services/gameLaunchService';
 
 let win: BrowserWindow | null = null;
 
@@ -128,7 +135,7 @@ type Instance = {
   id: string
   name: string
   version: string
-  loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'liteloader'
+  loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'
   createdAt: number
   path: string
   ramMb?: number
@@ -210,7 +217,8 @@ function createInstance(payload: { name: string; version: string; loader?: Insta
   const instance = instanceService.createInstance({
     name: payload.name,
     version: payload.version,
-    loader: payload.loader || 'vanilla'
+    loader: payload.loader || 'vanilla',
+    id: undefined
   });
 
   // Añadir la instancia a la lista persistente
@@ -354,75 +362,117 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
   const s = settings()
   if (!i) return null
 
-  // Asegurar que el client.jar esté disponible antes de verificar si la instancia está lista
-  const clientJarReady = await ensureClientJar(i.path, i.version);
-  if (!clientJarReady) {
-    console.log(`No se pudo asegurar el archivo client.jar para la instancia ${i.name}.`);
-    throw new Error('No se pudo descargar el archivo client.jar necesario para el juego.')
-  }
-
-  // Verificar si la instancia está completamente descargada (ahora client.jar debería estar presente)
-  if (!isInstanceReady(i.path)) {
-    console.log(`La instancia ${i.name} no está lista para jugar. Archivos esenciales faltantes.`);
-    throw new Error('La instancia no está completamente descargada. Espere a que terminen las descargas.')
-  }
-
-  // Verificar si los assets necesarios para la versión están disponibles
-  // IMPORTANTE: Esta verificación se hace con tolerancia ya que Minecraft puede descargar assets faltantes en tiempo de ejecución
-  const assetsReady = areAssetsReadyForVersion(i.path, i.version);
-  if (!assetsReady) {
-    console.log(`Advertencia: Los assets para la versión ${i.version} pueden no estar completamente descargados, pero se intentará iniciar el juego.`);
-    // No lanzar error, permitir que el juego se inicie y descargue assets según sea necesario
-  }
-
-  // Usar la configuración de la instancia si está disponible
-  const instanceConfig = instanceService.getInstanceConfig(i.path);
-  const ramMb = instanceConfig?.maxMemory || i.ramMb || s.defaultRamMb;
-  const javaPath = instanceConfig?.javaPath || s.javaPath || 'java';
-  const windowWidth = instanceConfig?.windowWidth || 1280;
-  const windowHeight = instanceConfig?.windowHeight || 720;
-  const jvmArgs = instanceConfig?.jvmArgs || [];
-
-  // Launch the game with all configurations
-  launchJava({
-    javaPath: javaPath,
-    mcVersion: i.version,
-    instancePath: i.path,
-    ramMb: ramMb,
-    jvmArgs: jvmArgs,
-    userProfile: p.userProfile,
-    windowSize: {
-      width: windowWidth,
-      height: windowHeight
-    },
-    loader: i.loader || 'vanilla', // Pasar el tipo de loader de la instancia
-    loaderVersion: instanceConfig?.loaderVersion // Versión específica del loader si está disponible
-  }, (data) => {
-    // Handle output from the game process (logs, errors, etc.)
-    console.log(`[Minecraft] ${data}`);
-  }, (exitCode) => {
-    // Handle when the game process exits
-    console.log(`Minecraft closed with exit code: ${exitCode}`);
+  // Registrar inicio del proceso de lanzamiento
+  logProgressService.launch(`Iniciando lanzamiento de la instancia ${i.name}`, {
+    instanceId: i.id,
+    version: i.version,
+    loader: i.loader
   });
 
-  return { started: true }
+  try {
+    // Asegurar que el client.jar esté disponible antes de verificar si la instancia está lista
+    const clientJarReady = await ensureClientJar(i.path, i.version);
+    if (!clientJarReady) {
+      const errorMsg = `No se pudo asegurar el archivo client.jar para la instancia ${i.name}.`;
+      logProgressService.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Verificar si la instancia está completamente descargada (ahora client.jar debería estar presente)
+    if (!isInstanceReady(i.path)) {
+      const errorMsg = `La instancia ${i.name} no está lista para jugar. Archivos esenciales faltantes.`;
+      logProgressService.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Verificar si los assets necesarios para la versión están disponibles
+    // IMPORTANTE: Esta verificación se hace con tolerancia ya que Minecraft puede descargar assets faltantes en tiempo de ejecución
+    const assetsReady = areAssetsReadyForVersion(i.path, i.version);
+    if (!assetsReady) {
+      logProgressService.warning(`Advertencia: Los assets para la versión ${i.version} pueden no estar completamente descargados, pero se intentará iniciar el juego.`);
+      // No lanzar error, permitir que el juego se inicie y descargue assets según sea necesario
+    }
+
+    // Usar la configuración de la instancia si está disponible
+    const instanceConfig = instanceService.getInstanceConfig(i.path);
+    const ramMb = instanceConfig?.maxMemory || i.ramMb || s.defaultRamMb;
+    const javaPath = instanceConfig?.javaPath || s.javaPath || 'java';
+    const windowWidth = instanceConfig?.windowWidth || 1280;
+    const windowHeight = instanceConfig?.windowHeight || 720;
+    const jvmArgs = instanceConfig?.jvmArgs || [];
+
+    // Obtener el JRE recomendado para esta versión de Minecraft si no se ha especificado uno
+    let finalJavaPath = javaPath;
+    if (!javaPath || javaPath === 'java') {
+      finalJavaPath = await javaDownloadService.getJavaForMinecraftVersion(i.version);
+    }
+
+    logProgressService.info(`Usando Java en: ${finalJavaPath}`, { javaPath: finalJavaPath });
+
+    // Launch the game with all configurations using the enhanced service
+    const childProcess = await gameLaunchService.launchGame({
+      javaPath: finalJavaPath,
+      mcVersion: i.version,
+      instancePath: i.path,
+      ramMb: ramMb,
+      jvmArgs: jvmArgs,
+      userProfile: p.userProfile,
+      windowSize: {
+        width: windowWidth,
+        height: windowHeight
+      },
+      loader: i.loader || 'vanilla', // Pasar el tipo de loader de la instancia
+      loaderVersion: instanceConfig?.loaderVersion, // Versión específica del loader si está disponible
+      instanceConfig: instanceConfig as any // Ajuste de tipo temporal
+    });
+
+    logProgressService.success(`Minecraft lanzado exitosamente para la instancia ${i.name}`, {
+      instanceId: i.id,
+      pid: childProcess.pid
+    });
+
+    return { started: true, pid: childProcess.pid }
+  } catch (error) {
+    logProgressService.error(`Error al lanzar la instancia ${i.name}: ${(error as Error).message}`, {
+      instanceId: i.id,
+      error: (error as Error).message
+    });
+    throw error;
+  }
 })
 
 // --- IPC Handlers for Instance Creation --- //
 ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => {
   try {
-    const instance = await instanceCreationService.createFullInstance(
-      payload.name,
-      payload.version,
-      payload.loader || 'vanilla',
-      payload.javaVersion || '17',
-      payload.maxMemory,
-      payload.minMemory,
-      payload.jvmArgs
-    );
+    logProgressService.info(`Iniciando creación de instancia: ${payload.name}`, {
+      name: payload.name,
+      version: payload.version,
+      loader: payload.loader
+    });
+
+    // Usar el servicio mejorado de creación de instancias
+    const instance = await enhancedInstanceCreationService.createInstance({
+      name: payload.name,
+      version: payload.version,
+      loader: payload.loader || 'vanilla',
+      javaVersion: payload.javaVersion,
+      maxMemory: payload.maxMemory,
+      minMemory: payload.minMemory,
+      jvmArgs: payload.jvmArgs
+    });
+
+    logProgressService.success(`Instancia creada exitosamente: ${payload.name}`, {
+      id: instance.id,
+      name: payload.name,
+      version: payload.version
+    });
+
     return instance;
   } catch (error) {
-    console.error('Error creating full instance:', error);
+    logProgressService.error(`Error creando instancia ${payload.name}: ${(error as Error).message}`, {
+      name: payload.name,
+      error: (error as Error).message
+    });
     throw error;
   }
 });
@@ -573,10 +623,8 @@ ipcMain.handle('java:explore', async () => {
 
 
 // ===== MANEJO DE DESCARGAS =====
-import fs from 'node:fs';
 import { pipeline } from 'node:stream';
 import { promisify } from 'node:util';
-import fetch from 'node-fetch';
 
 const pipelineAsync = promisify(pipeline);
 
@@ -642,7 +690,7 @@ ipcMain.on('download:start', async (event, { url, filename, itemId }) => {
 
     // Esperar a que la descarga termine
     await new Promise((resolve, reject) => {
-      fileStream.on('finish', resolve);
+      fileStream.on('finish', () => resolve(undefined));
       fileStream.on('error', reject);
       progressStream.on('error', reject);
     });
@@ -775,6 +823,42 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
 // Manejador IPC para búsquedas de Modrinth
 ipcMain.handle('modrinth:search', async (_event, { contentType, search }) => {
   return fetchModrinthContent(contentType, search);
+});
+
+// IPC Handlers para cancelación de descargas
+ipcMain.handle('download:cancel', async (_event, downloadId: string) => {
+  const { downloadQueueService } = await import('../services/downloadQueueService.js');
+  return downloadQueueService.cancelDownloadById(downloadId);
+});
+
+ipcMain.handle('download:cancelAll', async (_event) => {
+  const { downloadQueueService } = await import('../services/downloadQueueService.js');
+  return downloadQueueService.cancelAllDownloads();
+});
+
+// IPC Handlers para el sistema de logs y progreso
+ipcMain.handle('logs:get-recent', async (_event, count: number = 50) => {
+  return logProgressService.getRecentLogs(count);
+});
+
+ipcMain.handle('logs:get-by-type', async (_event, { type, count }: { type: string; count: number }) => {
+  return logProgressService.getLogsByType(type as any, count);
+});
+
+ipcMain.handle('logs:get-stats', async () => {
+  return logProgressService.getStats();
+});
+
+ipcMain.handle('progress:get-all-statuses', async () => {
+  return logProgressService.getAllProgressStatuses();
+});
+
+ipcMain.handle('progress:get-overall', async () => {
+  return logProgressService.getOverallProgress();
+});
+
+ipcMain.handle('progress:get-download-statuses', async () => {
+  return logProgressService.getCurrentDownloadStatuses();
 });
 
 app.on('window-all-closed', () => {

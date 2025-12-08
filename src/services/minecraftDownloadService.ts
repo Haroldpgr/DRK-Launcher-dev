@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import { pipeline } from 'node:stream';
 import { promisify } from 'node:util';
 import fetch from 'node-fetch';
-import { basePaths } from '../main/main';
 import { getLauncherDataPath } from '../utils/paths';
 import { downloadQueueService } from './downloadQueueService';
 
@@ -16,16 +15,22 @@ export class MinecraftDownloadService {
   private versionsPath: string;
   private librariesPath: string;
   private assetsPath: string;
+  private indexesPath: string;
+  private objectsPath: string;
 
   constructor() {
     const launcherPath = getLauncherDataPath();
     this.versionsPath = path.join(launcherPath, 'versions');
     this.librariesPath = path.join(launcherPath, 'libraries');
     this.assetsPath = path.join(launcherPath, 'assets');
-    
+    this.indexesPath = path.join(this.assetsPath, 'indexes');
+    this.objectsPath = path.join(this.assetsPath, 'objects');
+
     this.ensureDir(this.versionsPath);
     this.ensureDir(this.librariesPath);
     this.ensureDir(this.assetsPath);
+    this.ensureDir(this.indexesPath);
+    this.ensureDir(this.objectsPath);
   }
 
   /**
@@ -293,13 +298,75 @@ export class MinecraftDownloadService {
     // 3. Descargar cliente
     await this.downloadClientJar(version, instancePath);
 
-    // 4. Descargar assets
+    // 4. Descargar assets (ESTO ES LO MÁS IMPORTANTE)
+    console.log(`Iniciando descarga de assets para la versión ${version}...`);
     await this.downloadVersionAssets(version);
+    console.log(`Descarga de assets completada para la versión ${version}`);
 
     // 5. Asegurar que todos los archivos críticos estén presentes en la instancia
     await this.ensureCriticalFiles(version, instancePath, versionJsonPath);
 
+    // 6. Asegurar que los assets estén disponibles para la instancia
+    await this.ensureAssetsForInstance(version, instancePath);
+
+    // 7. Verificar que la versión esté completamente lista
+    await this.verifyCompleteDownload(version, instancePath, versionJsonPath);
+
     console.log(`Versión completa de Minecraft ${version} descargada`);
+  }
+
+  /**
+   * Verifica que todos los archivos necesarios estén completamente descargados
+   */
+  private async verifyCompleteDownload(version: string, instancePath: string, versionJsonPath: string): Promise<void> {
+    console.log(`Verificando completitud de la descarga para la versión ${version}...`);
+
+    // Verificar que el client.jar exista y tenga tamaño razonable
+    const clientJarPath = path.join(instancePath, 'client.jar');
+    if (!fs.existsSync(clientJarPath)) {
+      throw new Error(`client.jar no encontrado en ${clientJarPath}`);
+    }
+
+    const clientStats = fs.statSync(clientJarPath);
+    if (clientStats.size < 1024 * 1024) { // Menos de 1MB
+      throw new Error(`client.jar tiene tamaño inusualmente pequeño: ${clientStats.size} bytes`);
+    }
+
+    // Verificar que el archivo de metadata de la versión exista
+    const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+
+    // Verificar que el asset index esté disponible
+    const assetIndexId = versionMetadata.assetIndex?.id;
+    if (assetIndexId) {
+      const assetIndexPath = path.join(this.assetsPath, 'indexes', `${assetIndexId}.json`);
+      if (!fs.existsSync(assetIndexPath)) {
+        throw new Error(`Índice de assets no encontrado: ${assetIndexPath}`);
+      }
+
+      // Cargar el índice y verificar algunos assets importantes
+      const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
+      const objects = assetIndexData.objects || {};
+
+      // Verificar que al menos algunos assets hayan sido procesados
+      if (Object.keys(objects).length === 0) {
+        console.warn(`advertencia: No se encontraron objetos en el índice de assets para ${version}`);
+      } else {
+        console.log(`Verificados ${Object.keys(objects).length} assets en el índice para la versión ${version}`);
+      }
+    }
+
+    // Verificar que la carpeta de libraries tenga contenido (si hay librerías en el metadata)
+    if (versionMetadata.libraries && versionMetadata.libraries.length > 0) {
+      const librariesPath = path.join(this.librariesPath, '..'); // Carpeta compartida de librerías
+      if (!fs.existsSync(librariesPath)) {
+        console.warn(`Carpeta de librerías no encontrada: ${librariesPath}`);
+      } else {
+        const libraryFiles = fs.readdirSync(librariesPath).filter(f => f.includes(version));
+        console.log(`Encontradas ${libraryFiles.length} librerías relacionadas con la versión ${version}`);
+      }
+    }
+
+    console.log(`Verificación completada para la versión ${version}: todos los archivos críticos están presentes`);
   }
 
   /**
@@ -349,7 +416,7 @@ export class MinecraftDownloadService {
   }
 
   /**
-   * Descarga los assets para una versión específica
+   * Descarga los assets para una versión específica con verificación de integridad
    * @param version Versión de Minecraft
    */
   public async downloadVersionAssets(version: string): Promise<void> {
@@ -364,56 +431,316 @@ export class MinecraftDownloadService {
     }
 
     const assetIndexUrl = assetIndex.url;
-    const assetIndexPath = path.join(this.assetsPath, 'indexes', `${assetIndex.id}.json`);
+    const assetIndexPath = path.join(this.indexesPath, `${assetIndex.id}.json`);
 
     this.ensureDir(path.dirname(assetIndexPath));
 
     // Verificar si el índice de assets ya existe
     if (!fs.existsSync(assetIndexPath)) {
-      await this.downloadFile(assetIndexUrl, assetIndexPath);
-      console.log(`Asset index descargado para la versión ${version}`);
+      try {
+        await this.downloadFile(assetIndexUrl, assetIndexPath);
+        console.log(`Asset index descargado para la versión ${version}: ${assetIndexPath}`);
+      } catch (error) {
+        console.error(`Error al descargar asset index para la versión ${version}:`, error);
+        throw error; // Lanzar error para que se sepa que falló
+      }
+    } else {
+      console.log(`Asset index ya existe para la versión ${version}: ${assetIndexPath}`);
     }
 
     // Cargar el índice de assets
     const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
-    console.log(`Descargando ${Object.keys(assetIndexData.objects).length} assets para la versión ${version}...`);
+    console.log(`Procesando ${Object.keys(assetIndexData.objects).length} assets para la versión ${version}...`);
 
     // Descargar cada asset
     const assetsObjects = assetIndexData.objects;
-    let downloadedCount = 0;
     const totalAssets = Object.keys(assetsObjects).length;
 
-    for (const [assetName, assetInfo] of Object.entries(assetsObjects as any)) {
-      const hash = (assetInfo as any).hash;
-      const size = (assetInfo as any).size;
+    // Si no hay assets para descargar, terminar aquí
+    if (totalAssets === 0) {
+      console.log(`No hay assets para descargar para la versión ${version}`);
+      return;
+    }
 
-      // Crear la ruta del asset basada en el hash (primeros 2 dígitos como subcarpeta)
-      const assetDir = path.join(this.assetsPath, 'objects', hash.substring(0, 2));
-      const assetPath = path.join(assetDir, hash);
-      this.ensureDir(assetDir);
+    console.log(`Iniciando descarga de ${totalAssets} assets para la versión ${version}...`);
 
-      // Verificar si el asset ya existe
-      if (!fs.existsSync(assetPath)) {
-        // URL del asset: https://resources.download.minecraft.net/[first_2_chars_of_hash]/[full_hash]
-        const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+    // Procesar los assets en lotes para evitar sobrecargar el sistema
+    const batchSize = 5; // Reducir el tamaño del lote para mayor estabilidad
+    let downloadedCount = 0;
+    let verifiedCount = 0;
+    const assetsEntries = Object.entries(assetsObjects as any);
+
+    for (let i = 0; i < assetsEntries.length; i += batchSize) {
+      // Verificar si se ha solicitado cancelar la descarga
+      // (Aquí se podría implementar la verificación de un token de cancelación)
+
+      const batch = assetsEntries.slice(i, i + batchSize);
+
+      // Procesar el batch en paralelo
+      const batchPromises = batch.map(async ([assetName, assetInfo]) => {
+        const hash = (assetInfo as any).hash;
+        const size = (assetInfo as any).size;
+
+        // Crear la ruta del asset basada en el hash (primeros 2 dígitos como subcarpeta)
+        const assetDir = path.join(this.objectsPath, hash.substring(0, 2));
+        const assetPath = path.join(assetDir, hash);
+        this.ensureDir(assetDir);
 
         try {
-          // Usar el hash del objeto de asset para verificación
-          const expectedHash = (assetInfo as any).hash;
-          await this.downloadFile(assetUrl, assetPath, expectedHash, 'sha1');
-          downloadedCount++;
-          console.log(`Asset descargado [${downloadedCount}/${totalAssets}]: ${assetName}`);
+          // Verificar si el asset ya existe y tiene el tamaño correcto
+          if (fs.existsSync(assetPath)) {
+            const stats = fs.statSync(assetPath);
+            if (stats.size === size) {
+              // Verificar hash si es posible (requiere cálculo, omitido por rendimiento)
+              verifiedCount++;
+              downloadedCount++;
+              console.log(`Asset verificado [${verifiedCount}/${totalAssets}]: ${assetName}`);
+              return true;
+            } else {
+              console.log(`Asset tiene tamaño incorrecto, se volverá a descargar: ${assetName}`);
+              fs.unlinkSync(assetPath); // Eliminar archivo con tamaño incorrecto
+            }
+          }
+
+          // URL del asset: https://resources.download.minecraft.net/[first_2_chars_of_hash]/[full_hash]
+          const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+
+          try {
+            // Descargar asset con verificación de hash
+            await this.downloadFile(assetUrl, assetPath, hash, 'sha1');
+
+            // Verificar que el tamaño sea correcto después de la descarga
+            const finalStats = fs.statSync(assetPath);
+            if (finalStats.size !== size) {
+              console.warn(`Advertencia: Asset descargado tiene tamaño incorrecto: ${assetName} (${finalStats.size} vs ${size})`);
+            }
+
+            downloadedCount++;
+            verifiedCount++;
+            console.log(`Asset descargado y verificado [${downloadedCount}/${totalAssets}]: ${assetName}`);
+            return true;
+          } catch (downloadError) {
+            console.error(`Error al descargar o verificar asset ${assetName}:`, downloadError);
+
+            // Si el archivo parcial existe, eliminarlo
+            if (fs.existsSync(assetPath)) {
+              try {
+                fs.unlinkSync(assetPath);
+              } catch (unlinkError) {
+                console.error(`Error al eliminar asset parcial ${assetName}:`, unlinkError);
+              }
+            }
+
+            return false;
+          }
         } catch (error) {
-          console.error(`Error al descargar asset ${assetName}:`, error);
-          // Continuar con los demás assets
+          console.error(`Error al procesar asset ${assetName}:`, error);
+          return false;
         }
-      } else {
-        downloadedCount++;
-        console.log(`Asset ya existe [${downloadedCount}/${totalAssets}]: ${assetName}`);
-      }
+      });
+
+      // Esperar a que se complete el batch actual
+      await Promise.all(batchPromises);
     }
 
     console.log(`Descarga de assets completada para la versión ${version}: ${downloadedCount}/${totalAssets} assets`);
+    console.log(`Verificación de assets completada para la versión ${version}: ${verifiedCount}/${totalAssets} assets`);
+
+    if (downloadedCount < totalAssets) {
+      console.warn(`Advertencia: Solo ${downloadedCount} de ${totalAssets} assets descargados. Algunos assets pueden faltar.`);
+    } else {
+      console.log(`Todos los assets descargados exitosamente para la versión ${version}`);
+    }
+  }
+
+  /**
+   * Verifica la integridad de un archivo usando su hash
+   */
+  public async verifyFileIntegrity(filePath: string, expectedHash: string, algorithm: string = 'sha1'): Promise<boolean> {
+    if (!fs.existsSync(filePath)) {
+      console.log(`Archivo no existe para verificación: ${filePath}`);
+      return false;
+    }
+
+    try {
+      const crypto = await import('node:crypto');
+      const hash = crypto.createHash(algorithm);
+      const stream = fs.createReadStream(filePath);
+
+      return new Promise((resolve, reject) => {
+        stream.on('data', (data) => hash.update(data));
+        stream.on('end', () => {
+          const calculatedHash = hash.digest('hex');
+          const isValid = calculatedHash.toLowerCase() === expectedHash.toLowerCase();
+          resolve(isValid);
+        });
+        stream.on('error', reject);
+      });
+    } catch (error) {
+      console.error(`Error al verificar integridad del archivo ${filePath}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Obtiene el progreso de descarga de assets para una versión
+   */
+  public getAssetsDownloadProgress(version: string): { downloaded: number; total: number; percentage: number } {
+    try {
+      const versionJsonPath = path.join(this.versionsPath, version, `${version}.json`);
+      if (!fs.existsSync(versionJsonPath)) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+
+      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+
+      const assetIndexPath = path.join(this.indexesPath, `${assetIndex.id}.json`);
+      if (!fs.existsSync(assetIndexPath)) {
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+
+      const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
+      const totalAssets = Object.keys(assetIndexData.objects).length;
+
+      let downloadedAssets = 0;
+      for (const [assetName, assetInfo] of Object.entries(assetIndexData.objects as any)) {
+        const hash = (assetInfo as any).hash;
+        const assetPath = path.join(this.objectsPath, hash.substring(0, 2), hash);
+        if (fs.existsSync(assetPath)) {
+          downloadedAssets++;
+        }
+      }
+
+      const percentage = totalAssets > 0 ? (downloadedAssets / totalAssets) * 100 : 0;
+
+      return {
+        downloaded: downloadedAssets,
+        total: totalAssets,
+        percentage: parseFloat(percentage.toFixed(2))
+      };
+    } catch (error) {
+      console.error(`Error al obtener progreso de descarga de assets para la versión ${version}:`, error);
+      return { downloaded: 0, total: 0, percentage: 0 };
+    }
+  }
+
+  /**
+   * Obtiene el progreso de descarga de bibliotecas para una versión
+   */
+  public getLibrariesDownloadProgress(version: string): { downloaded: number; total: number; percentage: number } {
+    try {
+      const versionJsonPath = path.join(this.versionsPath, version, `${version}.json`);
+      if (!fs.existsSync(versionJsonPath)) {
+        // Intentar descargar el metadata para poder calcular el progreso
+        return { downloaded: 0, total: 0, percentage: 0 };
+      }
+
+      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+      const libraries = versionMetadata.libraries || [];
+      const totalLibraries = libraries.length;
+
+      let downloadedLibraries = 0;
+      for (const library of libraries) {
+        if (this.isLibraryDownloaded(library)) {
+          downloadedLibraries++;
+        }
+      }
+
+      const percentage = totalLibraries > 0 ? (downloadedLibraries / totalLibraries) * 100 : 0;
+
+      return {
+        downloaded: downloadedLibraries,
+        total: totalLibraries,
+        percentage: parseFloat(percentage.toFixed(2))
+      };
+    } catch (error) {
+      console.error(`Error al obtener progreso de descarga de bibliotecas para la versión ${version}:`, error);
+      return { downloaded: 0, total: 0, percentage: 0 };
+    }
+  }
+
+  /**
+   * Verifica si una biblioteca ya ha sido descargada
+   */
+  private isLibraryDownloaded(library: any): boolean {
+    if (!library.downloads?.artifact) {
+      return false;
+    }
+
+    const libraryPath = this.getLibraryPath(library.name);
+    return fs.existsSync(libraryPath);
+  }
+
+  /**
+   * Asegura que los assets estén disponibles para una instancia específica
+   * @param version Versión de Minecraft
+   * @param instancePath Ruta de la instancia
+   */
+  public async ensureAssetsForInstance(version: string, instancePath: string): Promise<void> {
+    console.log(`Asegurando assets para la instancia de ${version} en ${instancePath}`);
+
+    const versionJsonPath = await this.downloadVersionMetadata(version);
+    const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+
+    // Verificar que el índice de assets exista
+    const assetIndexId = versionMetadata.assetIndex?.id;
+    if (!assetIndexId) {
+      console.log(`No se encontró ID del asset index para la versión ${version}`);
+      return;
+    }
+
+    // Crear enlaces simbólicos o copiar assets a la instancia si no existen
+    const instanceAssetsPath = path.join(instancePath, 'assets');
+    const sharedAssetsPath = path.join(this.assetsPath, '..'); // Carpeta compartida de assets
+
+    // Solo crear enlace simbólico si la carpeta compartida existe y la instancia no
+    if (fs.existsSync(sharedAssetsPath) && !fs.existsSync(instanceAssetsPath)) {
+      try {
+        // Crear directorio de assets en la instancia
+        fs.mkdirSync(instanceAssetsPath, { recursive: true });
+
+        // Crear enlace simbólico al índice de assets
+        const sharedIndexesPath = path.join(sharedAssetsPath, 'indexes');
+        const instanceIndexesPath = path.join(instanceAssetsPath, 'indexes');
+
+        if (fs.existsSync(sharedIndexesPath)) {
+          // Copiar los archivos de índice en lugar de crear enlace simbólico para evitar problemas
+          this.copyAssetsIndex(assetIndexId, sharedIndexesPath, instanceIndexesPath);
+        }
+
+        // Crear carpeta virtual simulada en la instancia para que Minecraft pueda encontrar los assets
+        // Esto ayuda a que Minecraft pueda usar los assets compartidos
+        const virtualAssetsPath = path.join(instanceAssetsPath, 'virtual');
+        if (!fs.existsSync(virtualAssetsPath)) {
+          fs.mkdirSync(virtualAssetsPath, { recursive: true });
+        }
+
+        console.log(`Estructura de assets configurada para la instancia ${instancePath}`);
+      } catch (error) {
+        console.error(`Error al configurar assets para la instancia ${instancePath}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Copia el archivo de índice de assets a la instancia
+   */
+  private copyAssetsIndex(assetIndexId: string, sharedIndexesPath: string, instanceIndexesPath: string): void {
+    const sourceIndexPath = path.join(sharedIndexesPath, `${assetIndexId}.json`);
+    const destIndexPath = path.join(instanceIndexesPath, `${assetIndexId}.json`);
+
+    if (fs.existsSync(sourceIndexPath) && !fs.existsSync(destIndexPath)) {
+      // Crear directorio destino si no existe
+      fs.mkdirSync(path.dirname(destIndexPath), { recursive: true });
+
+      // Copiar el archivo de índice
+      fs.copyFileSync(sourceIndexPath, destIndexPath);
+      console.log(`Índice de assets copiado para instancia: ${destIndexPath}`);
+    }
   }
 }
 

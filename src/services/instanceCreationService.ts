@@ -46,7 +46,8 @@ export class InstanceCreationService {
       loader,
       maxMemory,
       javaPath,
-      jvmArgs
+      jvmArgs,
+      id: undefined  // The service will generate an ID if not provided
     });
 
     // PASO 2.2: Descarga de archivos base de Minecraft
@@ -57,11 +58,128 @@ export class InstanceCreationService {
     console.log('PASO 2.3: Descargando cliente de Minecraft...');
     await this.downloadClientForInstance(version, loader, instance.path);
 
+    // PASO 2.4: Asegurar que todos los assets estén disponibles
+    console.log('PASO 2.4: Asegurando la disponibilidad de assets...');
+    await this.ensureAssetsAvailability(version);
+
+    // PASO 2.5: Asegurar que la carpeta de assets esté correctamente configurada
+    console.log('PASO 2.5: Verificando configuración de carpeta de assets...');
+    await this.validateAssetsConfiguration(instance.path, version);
+
     console.log(`Instancia ${name} (ID: ${instance.id}) creada exitosamente en ${instance.path}`);
 
     return instance;
   }
-  
+
+  /**
+   * Asegura la disponibilidad de todos los assets necesarios para una versión
+   */
+  private async ensureAssetsAvailability(version: string): Promise<void> {
+    console.log(`Asegurando disponibilidad de assets para Minecraft ${version}...`);
+
+    try {
+      // 1. Descargar el metadata de la versión que contiene la información de assets
+      const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+
+      // 2. Verificar el asset index para esta versión
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        console.log(`No se encontró información de asset index para la versión ${version}, omitiendo assets...`);
+        return;
+      }
+
+      console.log(`Descargando asset index ${assetIndex.id} para la versión ${version}...`);
+
+      // 3. Asegurar que los assets estén completamente descargados
+      await minecraftDownloadService.downloadVersionAssets(version);
+
+      // 4. Asegurar que la carpeta de assets compartida esté completamente lista
+      const launcherPath = getLauncherDataPath();
+      const assetsPath = path.join(launcherPath, 'assets');
+      const indexesPath = path.join(assetsPath, 'indexes');
+      const objectsPath = path.join(assetsPath, 'objects');
+
+      // Asegurar que existan las carpetas esenciales
+      if (!fs.existsSync(assetsPath)) {
+        fs.mkdirSync(assetsPath, { recursive: true });
+        console.log(`Carpeta de assets creada: ${assetsPath}`);
+      }
+
+      if (!fs.existsSync(indexesPath)) {
+        fs.mkdirSync(indexesPath, { recursive: true });
+        console.log(`Carpeta de índices de assets creada: ${indexesPath}`);
+      }
+
+      if (!fs.existsSync(objectsPath)) {
+        fs.mkdirSync(objectsPath, { recursive: true });
+        console.log(`Carpeta de objetos de assets creada: ${objectsPath}`);
+      }
+
+      console.log(`Disponibilidad de assets asegurada para Minecraft ${version}`);
+    } catch (error) {
+      console.error(`Error al asegurar la disponibilidad de assets para ${version}:`, error);
+      // No lanzar error, ya que los assets pueden descargarse en tiempo de ejecución
+      // Sin embargo, registramos el problema para que sea resuelto más tarde
+      console.log(`CONTINUANDO CREACIÓN DE INSTANCIA AÚN CON PROBLEMAS EN LA DESCARGA DE ASSETS`);
+    }
+  }
+
+  /**
+   * Valida la configuración de assets para una instancia específica
+   */
+  private async validateAssetsConfiguration(instancePath: string, version: string): Promise<void> {
+    console.log(`Validando configuración de assets para instancia en ${instancePath}...`);
+
+    try {
+      // Verificar que exista el archivo de metadata de la versión
+      const versionJsonPath = path.join(getLauncherDataPath(), 'versions', version, `${version}.json`);
+      if (!fs.existsSync(versionJsonPath)) {
+        throw new Error(`Metadata de la versión ${version} no encontrado`);
+      }
+
+      // Verificar la estructura de assets en la carpeta compartida
+      const launcherAssetsPath = path.join(getLauncherDataPath(), 'assets');
+      if (!fs.existsSync(launcherAssetsPath)) {
+        throw new Error(`Carpeta de assets compartida no existe: ${launcherAssetsPath}`);
+      }
+
+      // Verificar que existan carpetas esenciales
+      const indexesPath = path.join(launcherAssetsPath, 'indexes');
+      const objectsPath = path.join(launcherAssetsPath, 'objects');
+
+      if (!fs.existsSync(indexesPath)) {
+        throw new Error(`Carpeta de índices de assets no existe: ${indexesPath}`);
+      }
+
+      if (!fs.existsSync(objectsPath)) {
+        throw new Error(`Carpeta de objetos de assets no existe: ${objectsPath}`);
+      }
+
+      // Verificar que haya al menos archivos de índice
+      const indexFiles = fs.readdirSync(indexesPath);
+      if (indexFiles.length === 0) {
+        console.warn(`Advertencia: No se encontraron archivos de índice de assets`);
+      } else {
+        console.log(`Se encontraron ${indexFiles.length} archivos de índice de assets`);
+      }
+
+      // Verificar que haya directorios de objetos
+      const objectFolders = fs.readdirSync(objectsPath);
+      if (objectFolders.length === 0) {
+        console.warn(`Advertencia: No se encontraron directorios de objetos de assets`);
+      } else {
+        console.log(`Se encontraron ${objectFolders.length} directorios de objetos de assets`);
+      }
+
+      console.log(`Configuración de assets validada para instancia en ${instancePath}`);
+    } catch (error) {
+      console.error(`Error al validar configuración de assets:`, error);
+      // Lanzamos el error para asegurar que la instancia no se considere lista si los assets no están bien configurados
+      throw error;
+    }
+  }
+
   /**
    * FASE 1: Preparación del entorno - Descarga de Java
    */
@@ -212,7 +330,7 @@ export class InstanceCreationService {
       }
 
       // Guardar el archivo
-      const buffer = await responseLoader.buffer();
+      const buffer = Buffer.from(await responseLoader.arrayBuffer());
       fs.writeFileSync(fabricLoaderPath, buffer);
 
       console.log(`Fabric Loader descargado en: ${fabricLoaderPath}`);
@@ -277,7 +395,7 @@ export class InstanceCreationService {
       }
 
       // Guardar el archivo
-      const buffer = await responseClient.buffer();
+      const buffer = Buffer.from(await responseClient.arrayBuffer());
       fs.writeFileSync(forgeClientPath, buffer);
 
       console.log(`Forge Client descargado en: ${forgeClientPath}`);
@@ -327,7 +445,7 @@ export class InstanceCreationService {
       }
 
       // Guardar el archivo
-      const buffer = await responseLoader.buffer();
+      const buffer = Buffer.from(await responseLoader.arrayBuffer());
       fs.writeFileSync(quiltLoaderPath, buffer);
 
       console.log(`Quilt Loader descargado en: ${quiltLoaderPath}`);
