@@ -477,6 +477,136 @@ ipcMain.handle('instance:create-full', async (_e, payload: { name: string; versi
   }
 });
 
+// --- IPC Handler para escanear y registrar instancias faltantes --- //
+ipcMain.handle('instances:scan-and-register', async () => {
+  try {
+    const { instancesBaseDefault } = basePaths();
+
+    // Verificar si existe el directorio de instancias
+    if (!fs.existsSync(instancesBaseDefault)) {
+      console.log('No existe el directorio de instancias:', instancesBaseDefault);
+      return { count: 0, registered: [] };
+    }
+
+    // Obtener todas las carpetas en el directorio de instancias
+    const allItems = fs.readdirSync(instancesBaseDefault);
+    const instanceFolders = allItems.filter(item => {
+      const itemPath = path.join(instancesBaseDefault, item);
+      return fs.statSync(itemPath).isDirectory();
+    });
+
+    // Obtener la lista actual de instancias registradas
+    const registeredInstances = listInstances();
+    const registeredPaths = new Set(registeredInstances.map(instance => instance.path));
+
+    // Encontrar carpetas que no están registradas
+    const unregisteredFolders = instanceFolders.filter(folder => {
+      const folderPath = path.join(instancesBaseDefault, folder);
+      return !Array.from(registeredPaths).some(registeredPath => registeredPath === folderPath);
+    });
+
+    const newlyRegistered = [];
+    let registeredCount = 0;
+
+    // Intentar registrar cada carpeta no registrada
+    for (const folder of unregisteredFolders) {
+      const instancePath = path.join(instancesBaseDefault, folder);
+
+      try {
+        // Verificar si hay un archivo de configuración de instancia o información de versión
+        // para reconstruir la información de la instancia
+        const instanceJsonPath = path.join(instancePath, 'instance.json');
+        let instanceConfig: InstanceConfig | null = null;
+
+        if (fs.existsSync(instanceJsonPath)) {
+          // Si existe el archivo de configuración, usarlo
+          instanceConfig = JSON.parse(fs.readFileSync(instanceJsonPath, 'utf-8'));
+
+          // Asegurarse de que tenga un ID único
+          if (!instanceConfig.id) {
+            instanceConfig.id = `${folder}_${Date.now()}`;
+          }
+        } else {
+          // Si no existe, intentar reconstruir la información desde el directorio
+          // Buscar información en archivos comunes de Minecraft
+          const filesInDir = fs.readdirSync(instancePath);
+
+          // Intentar encontrar alguna información básica
+          let version = 'unknown';
+          let loader: Instance['loader'] = 'vanilla';
+
+          // Si hay cliente.jar, intentar encontrar información de versión
+          // Buscar archivos que puedan dar indicios de la versión
+          const jarFiles = filesInDir.filter(f => f.endsWith('.jar') && (f.includes('client') || f.includes('minecraft')));
+          if (jarFiles.length > 0) {
+            // Intentar extraer la versión del nombre del archivo
+            const jarName = jarFiles[0];
+            // Buscar patrones como 1.20.1 o versiones reconocibles
+            const versionMatch = jarName.match(/(\d+\.\d+(?:\.\d+)?)/)?.[0];
+            if (versionMatch) {
+              version = versionMatch;
+            }
+          }
+
+          // Revisar si hay archivos que indiquen el uso de un loader específico
+          if (filesInDir.some(f => f.toLowerCase().includes('forge'))) {
+            loader = 'forge';
+          } else if (filesInDir.some(f => f.toLowerCase().includes('fabric'))) {
+            loader = 'fabric';
+          } else if (filesInDir.some(f => f.toLowerCase().includes('quilt'))) {
+            loader = 'quilt';
+          }
+
+          // Crear una configuración mínima
+          instanceConfig = {
+            id: `${folder}_${Date.now()}`, // ID único
+            name: folder,
+            version: version,
+            loader: loader,
+            createdAt: Date.now(),
+            path: instancePath
+          };
+        }
+
+        // Asegurarse de que el ID sea único
+        if (!instanceConfig.id) {
+          instanceConfig.id = `${folder}_${Date.now()}`;
+        }
+
+        // Registrar la instancia en la lista
+        const existingInList = registeredInstances.find(i => i.id === instanceConfig!.id);
+        if (!existingInList) {
+          const instanceForList: Instance = {
+            id: instanceConfig.id,
+            name: instanceConfig.name || folder,
+            version: instanceConfig.version,
+            loader: instanceConfig.loader || 'vanilla',
+            createdAt: instanceConfig.createdAt || Date.now(),
+            path: instanceConfig.path
+          };
+
+          // Guardar en la lista de instancias
+          const list = listInstances();
+          list.push(instanceForList);
+          saveInstances(list);
+
+          newlyRegistered.push(instanceForList);
+          registeredCount++;
+
+          console.log(`Instancia registrada automáticamente: ${folder} -> ${instanceConfig.id}`);
+        }
+      } catch (folderError) {
+        console.error(`Error al procesar carpeta de instancia ${folder}:`, folderError);
+      }
+    }
+
+    return { count: registeredCount, registered: newlyRegistered };
+  } catch (error) {
+    console.error('Error al escanear instancias:', error);
+    throw error;
+  }
+});
+
 ipcMain.handle('instance:install-content', async (_e, payload: {
   instancePath: string;
   contentId: string;

@@ -259,7 +259,17 @@ export default function Instances({ onPlay }: InstancesProps) {
     if (!window.api?.instances || !selectedProfile) return;
 
     try {
-      // Obtener todas las instancias existentes en el sistema
+      // Primero, escanear el directorio y registrar instancias que no están en la base de datos
+      if (window.api.instances.scanAndRegister) {
+        try {
+          const scanResult = await window.api.instances.scanAndRegister();
+          console.log(`Registro automático completado: ${scanResult.count} instancias nuevas registradas`);
+        } catch (scanError) {
+          console.error('Error al escanear y registrar instancias:', scanError);
+        }
+      }
+
+      // Obtener todas las instancias existentes en el sistema (después del escaneo)
       const allSystemInstances = await window.api.instances.list();
 
       // Verificar si hay instancias en el directorio de instancias que no están registradas
@@ -282,57 +292,43 @@ export default function Instances({ onPlay }: InstancesProps) {
         }
       }
 
-      // IMPORTANTE: Ahora debemos verificar si hay carpetas de instancias que no están en la base de datos
-      // Para esto necesitamos una función que busque en el directorio de instancias
-      if (window.api?.instances?.list) {
-        try {
-          // Solicitar al backend que escanee el directorio de instancias y registre las faltantes
-          // Necesitamos un nuevo endpoint para esto o usar una función existente
-          // Intentar registrar instancias que existen físicamente pero no están registradas
-          const allInstancesAfter = await window.api.instances.list();
+      // Recargar instancias con los vínculos actualizados
+      const updatedList = await window.api.instances.list();
+      // Filtrar instancias que pertenecen al perfil seleccionado
+      const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile);
+      const profileInstances = updatedList.filter(instance =>
+        profileInstanceIds.includes(instance.id)
+      )
 
-          // Ahora recargar instancias con los vínculos actualizados
-          const updatedList = allInstancesAfter;
-          // Filtrar instancias que pertenecen al perfil seleccionado
-          const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile);
-          const profileInstances = updatedList.filter(instance =>
-            profileInstanceIds.includes(instance.id)
-          )
+      // Determinar el tipo de instancia y actualizar las listas
+      const classifiedInstances = profileInstances.map(instance => {
+        let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
 
-          // Determinar el tipo de instancia y actualizar las listas
-          const classifiedInstances = profileInstances.map(instance => {
-            let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
-
-            // Si la instancia fue creada a través de importación o compartición
-            if (instance.source) {
-              if (instance.source.startsWith('http')) {
-                // Si el origen es una URL, probablemente sea importada o compartida
-                type = 'imported';
-              } else if (instance.source.includes('\\') || instance.source.includes('/')) {
-                // Si el origen es una ruta de archivo, podría ser importada
-                type = 'imported';
-              }
-            } else {
-              // Si no tiene origen definido, probablemente sea una instancia creada localmente
-              type = 'owned';
-            }
-
-            const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile);
-            return {
-              ...instance,
-              totalTimePlayed: timePlayed,
-              type: type
-            };
-          });
-
-          setInstances(classifiedInstances);
-          classifyInstances(classifiedInstances);
-          setError(null); // Limpiar error si todo funciona
-        } catch (scanErr) {
-          console.error('Error al recargar instancias:', scanErr);
-          setError(`Error al recargar instancias: ${(scanErr as Error).message || 'Error desconocido'}`);
+        // Si la instancia fue creada a través de importación o compartición
+        if (instance.source) {
+          if (instance.source.startsWith('http')) {
+            // Si el origen es una URL, probablemente sea importada o compartida
+            type = 'imported';
+          } else if (instance.source.includes('\\') || instance.source.includes('/')) {
+            // Si el origen es una ruta de archivo, podría ser importada
+            type = 'imported';
+          }
+        } else {
+          // Si no tiene origen definido, probablemente sea una instancia creada localmente
+          type = 'owned';
         }
-      }
+
+        const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile);
+        return {
+          ...instance,
+          totalTimePlayed: timePlayed,
+          type: type
+        };
+      });
+
+      setInstances(classifiedInstances);
+      classifyInstances(classifiedInstances);
+      setError(null); // Limpiar error si todo funciona
     } catch (err) {
       console.error('Error en auto-detección de instancias:', err);
       setError(`Error en auto-detección de instancias: ${(err as Error).message || 'Error desconocido'}`);

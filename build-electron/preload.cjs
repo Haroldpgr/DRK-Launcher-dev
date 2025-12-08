@@ -40,7 +40,8 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     update: (p) => import_electron.ipcRenderer.invoke("instances:update", p),
     delete: (id) => import_electron.ipcRenderer.invoke("instances:delete", id),
     openFolder: (id) => import_electron.ipcRenderer.invoke("instances:openFolder", id),
-    installContent: (payload) => import_electron.ipcRenderer.invoke("instance:install-content", payload)
+    installContent: (payload) => import_electron.ipcRenderer.invoke("instance:install-content", payload),
+    scanAndRegister: () => import_electron.ipcRenderer.invoke("instances:scan-and-register")
   },
   // API para creación completa de instancias
   instance: {

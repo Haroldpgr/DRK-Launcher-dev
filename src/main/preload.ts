@@ -46,7 +46,8 @@ contextBridge.exposeInMainWorld('api', {
     update: (p: unknown) => ipcRenderer.invoke('instances:update', p),
     delete: (id: string) => ipcRenderer.invoke('instances:delete', id),
     openFolder: (id: string) => ipcRenderer.invoke('instances:openFolder', id),
-    installContent: (payload: unknown) => ipcRenderer.invoke('instance:install-content', payload)
+    installContent: (payload: unknown) => ipcRenderer.invoke('instance:install-content', payload),
+    scanAndRegister: () => ipcRenderer.invoke('instances:scan-and-register')
   },
 
   // API para creación completa de instancias
@@ -122,6 +123,7 @@ declare global {
         delete: (id: string) => Promise<any>;
         openFolder: (id: string) => Promise<any>;
         installContent: (payload: unknown) => Promise<any>;
+        scanAndRegister: () => Promise<any>;
       };
       instance: {
         createFull: (payload: { name: string; version: string; loader?: any; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => Promise<any>;

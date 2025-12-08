@@ -9041,6 +9041,95 @@ import_electron2.ipcMain.handle("instance:create-full", async (_e, payload) => {
     throw error;
   }
 });
+import_electron2.ipcMain.handle("instances:scan-and-register", async () => {
+  try {
+    const { instancesBaseDefault } = basePaths();
+    if (!import_node_fs13.default.existsSync(instancesBaseDefault)) {
+      console.log("No existe el directorio de instancias:", instancesBaseDefault);
+      return { count: 0, registered: [] };
+    }
+    const allItems = import_node_fs13.default.readdirSync(instancesBaseDefault);
+    const instanceFolders = allItems.filter((item) => {
+      const itemPath = import_node_path14.default.join(instancesBaseDefault, item);
+      return import_node_fs13.default.statSync(itemPath).isDirectory();
+    });
+    const registeredInstances = listInstances();
+    const registeredPaths = new Set(registeredInstances.map((instance) => instance.path));
+    const unregisteredFolders = instanceFolders.filter((folder) => {
+      const folderPath = import_node_path14.default.join(instancesBaseDefault, folder);
+      return !Array.from(registeredPaths).some((registeredPath) => registeredPath === folderPath);
+    });
+    const newlyRegistered = [];
+    let registeredCount = 0;
+    for (const folder of unregisteredFolders) {
+      const instancePath = import_node_path14.default.join(instancesBaseDefault, folder);
+      try {
+        const instanceJsonPath = import_node_path14.default.join(instancePath, "instance.json");
+        let instanceConfig = null;
+        if (import_node_fs13.default.existsSync(instanceJsonPath)) {
+          instanceConfig = JSON.parse(import_node_fs13.default.readFileSync(instanceJsonPath, "utf-8"));
+          if (!instanceConfig.id) {
+            instanceConfig.id = `${folder}_${Date.now()}`;
+          }
+        } else {
+          const filesInDir = import_node_fs13.default.readdirSync(instancePath);
+          let version = "unknown";
+          let loader = "vanilla";
+          const jarFiles = filesInDir.filter((f) => f.endsWith(".jar") && (f.includes("client") || f.includes("minecraft")));
+          if (jarFiles.length > 0) {
+            const jarName = jarFiles[0];
+            const versionMatch = jarName.match(/(\d+\.\d+(?:\.\d+)?)/)?.[0];
+            if (versionMatch) {
+              version = versionMatch;
+            }
+          }
+          if (filesInDir.some((f) => f.toLowerCase().includes("forge"))) {
+            loader = "forge";
+          } else if (filesInDir.some((f) => f.toLowerCase().includes("fabric"))) {
+            loader = "fabric";
+          } else if (filesInDir.some((f) => f.toLowerCase().includes("quilt"))) {
+            loader = "quilt";
+          }
+          instanceConfig = {
+            id: `${folder}_${Date.now()}`,
+            // ID único
+            name: folder,
+            version,
+            loader,
+            createdAt: Date.now(),
+            path: instancePath
+          };
+        }
+        if (!instanceConfig.id) {
+          instanceConfig.id = `${folder}_${Date.now()}`;
+        }
+        const existingInList = registeredInstances.find((i) => i.id === instanceConfig.id);
+        if (!existingInList) {
+          const instanceForList = {
+            id: instanceConfig.id,
+            name: instanceConfig.name || folder,
+            version: instanceConfig.version,
+            loader: instanceConfig.loader || "vanilla",
+            createdAt: instanceConfig.createdAt || Date.now(),
+            path: instanceConfig.path
+          };
+          const list = listInstances();
+          list.push(instanceForList);
+          saveInstances(list);
+          newlyRegistered.push(instanceForList);
+          registeredCount++;
+          console.log(`Instancia registrada autom\xE1ticamente: ${folder} -> ${instanceConfig.id}`);
+        }
+      } catch (folderError) {
+        console.error(`Error al procesar carpeta de instancia ${folder}:`, folderError);
+      }
+    }
+    return { count: registeredCount, registered: newlyRegistered };
+  } catch (error) {
+    console.error("Error al escanear instancias:", error);
+    throw error;
+  }
+});
 import_electron2.ipcMain.handle("instance:install-content", async (_e, payload) => {
   try {
     if (payload.contentType === "modpack") {

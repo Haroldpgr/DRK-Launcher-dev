@@ -69,6 +69,16 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
   // Función para auto-detectar y validar instancias
   const autoDetectAndLoadInstances = async () => {
     try {
+      // Primero, escanear el directorio y registrar instancias que no están en la base de datos
+      if (window.api?.instances?.scanAndRegister) {
+        try {
+          const scanResult = await window.api.instances.scanAndRegister();
+          console.log(`Registro automático en Home completado: ${scanResult.count} instancias nuevas registradas`);
+        } catch (scanError) {
+          console.error('Error al escanear y registrar instancias en Home:', scanError);
+        }
+      }
+
       // Cargar instancias
       if (window.api?.instances?.list) {
         const allInstances = await window.api.instances.list();
