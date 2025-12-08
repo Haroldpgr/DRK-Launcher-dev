@@ -75,7 +75,8 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   },
   java: {
     getAll: () => import_electron.ipcRenderer.invoke("java:get-all"),
-    detect: () => import_electron.ipcRenderer.invoke("java:detect")
+    detect: () => import_electron.ipcRenderer.invoke("java:detect"),
+    getJavaForMinecraftVersion: (version) => import_electron.ipcRenderer.invoke("java:getJavaForMinecraftVersion", version)
   },
   // API de diálogo del sistema
   dialog: {

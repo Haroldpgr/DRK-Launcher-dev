@@ -170,9 +170,11 @@ export class GameLaunchService {
         if (versionData.libraries && Array.isArray(versionData.libraries)) {
           for (const lib of versionData.libraries) {
             // Verificar reglas de aplicabilidad
+            let allowed = true; // Valor por defecto
+            let appliesToOS = true;
+
             if (lib.rules) {
-              let allowed = false;
-              let appliesToOS = true;
+              allowed = false; // Reiniciar valor si hay reglas
 
               for (const rule of lib.rules) {
                 if (rule.os && rule.os.name) {
@@ -196,10 +198,8 @@ export class GameLaunchService {
 
               if (!appliesToOS && lib.rules.some((r: any) => r.os?.name)) continue;
               if (!allowed && lib.rules.some((r: any) => r.action === 'disallow')) continue;
-            } else {
-              // Si no hay reglas, asumir que está permitido
-              allowed = true;
             }
+            // Si no hay reglas, allowed sigue siendo true por defecto
 
             if (lib.downloads && lib.downloads.artifact) {
               // Usar la ruta proporcionada en el artifact.path o construir la ruta tradicional
@@ -352,14 +352,30 @@ export class GameLaunchService {
 
     // Definir argumentos del juego (necesarios para Minecraft)
     // Crear un UUID falso para perfiles no premium, o usar el real si está disponible
-    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    // Generar UUID en formato estándar (8-4-4-4-12 caracteres hexadecimales)
+    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+
+    // Obtener el ID real del assetIndex del archivo version.json
+    let assetIndexId = opts.mcVersion; // Por defecto usar la versión de Minecraft
+    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+
+    if (fs.existsSync(versionJsonPath)) {
+      try {
+        const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        if (versionData.assetIndex && versionData.assetIndex.id) {
+          assetIndexId = versionData.assetIndex.id;
+        }
+      } catch (error) {
+        logProgressService.warning(`No se pudo leer el archivo version.json para obtener el assetIndex: ${error}`);
+      }
+    }
 
     const gameArgs = [
       '--username', opts.userProfile?.username || 'Player',
       '--version', opts.mcVersion,
       '--gameDir', opts.instancePath,
       '--assetsDir', path.join(getLauncherDataPath(), 'assets'), // Usar assets compartidos
-      '--assetIndex', opts.mcVersion, // Nombre del índice de assets
+      '--assetIndex', assetIndexId, // Usar el ID real del assetIndex
       '--uuid', fakeUUID,
       '--accessToken', '0', // Placeholder para no premium
       '--userType', 'mojang', // Para perfiles no premium
@@ -536,14 +552,30 @@ export class GameLaunchService {
 
     // Definir argumentos del juego (necesarios para Minecraft)
     // Crear un UUID falso para perfiles no premium, o usar el real si está disponible
-    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    // Generar UUID en formato estándar (8-4-4-4-12 caracteres hexadecimales)
+    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+
+    // Obtener el ID real del assetIndex del archivo version.json
+    let assetIndexId = opts.mcVersion; // Por defecto usar la versión de Minecraft
+    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+
+    if (fs.existsSync(versionJsonPath)) {
+      try {
+        const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        if (versionData.assetIndex && versionData.assetIndex.id) {
+          assetIndexId = versionData.assetIndex.id;
+        }
+      } catch (error) {
+        logProgressService.warning(`No se pudo leer el archivo version.json para obtener el assetIndex: ${error}`);
+      }
+    }
 
     const baseGameArgs = [
       '--username', opts.userProfile?.username || 'Player',
       '--version', opts.mcVersion,
       '--gameDir', opts.instancePath,
       '--assetsDir', path.join(getLauncherDataPath(), 'assets'), // Usar assets compartidos
-      '--assetIndex', opts.mcVersion, // Nombre del índice de assets
+      '--assetIndex', assetIndexId, // Usar el ID real del assetIndex
       '--uuid', fakeUUID,
       '--accessToken', '0', // Placeholder para no premium
       '--userType', 'mojang', // Para perfiles no premium

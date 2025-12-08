@@ -26,6 +26,7 @@ export interface JavaInstallation {
  * Mapeo de versión de Minecraft a versión mínima de Java recomendada
  */
 const MINECRAFT_JAVA_REQUIREMENTS: { [key: string]: string } = {
+  '1.21': '21',  // Minecraft 1.21+ requiere Java 21
   '1.20': '17',
   '1.19': '17',
   '1.18': '17',

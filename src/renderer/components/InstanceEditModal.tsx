@@ -83,6 +83,35 @@ const InstanceEditModal: React.FC<InstanceEditModalProps> = ({
     }
   }, [isOpen, instance]);
 
+  // Actualizar la ruta de Java cuando se cambia la versión de Minecraft
+  useEffect(() => {
+    if (isOpen && instance && version && version !== instance.version) {
+      const updateJavaPathForMinecraftVersion = async () => {
+        try {
+          // Usar el API de Java para obtener la ruta recomendada
+          if (window.api?.java?.getJavaForMinecraftVersion) {
+            const recommendedJavaPath = await window.api.java.getJavaForMinecraftVersion(version);
+            // Solo actualizar si la nueva versión de Java es diferente a la actual
+            if (recommendedJavaPath !== javaPath) {
+              setJavaPath(recommendedJavaPath);
+
+              // Intentar extraer el ID de Java del path para actualizar javaId también
+              const javaIdMatch = recommendedJavaPath.match(/java(\d+)/i);
+              if (javaIdMatch && javaIdMatch[1]) {
+                const newJavaId = `java${javaIdMatch[1]}`;
+                setJavaId(newJavaId);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error al actualizar la ruta de Java para la nueva versión de Minecraft:', error);
+        }
+      };
+
+      updateJavaPathForMinecraftVersion();
+    }
+  }, [version, isOpen]);
+
   const loadAvailableVersions = async () => {
     try {
       // Simular carga de versiones, en realidad esto debería venir de tu servicio de versiones
@@ -133,14 +162,35 @@ const InstanceEditModal: React.FC<InstanceEditModalProps> = ({
     }
 
     try {
+      // Si la versión de Minecraft cambió y no se especificó una ruta de Java personalizada,
+      // actualizar automáticamente la ruta de Java a la recomendada para la nueva versión
+      let finalJavaPath = javaPath || undefined;
+      let finalJavaId = javaId || undefined;
+
+      if (instance && instance.version !== version && !javaPath) {
+        // Si cambió la versión de Minecraft y no se tiene una ruta de Java personalizada,
+        // obtener la versión de Java recomendada para la nueva versión de Minecraft
+        if (window.api?.java?.getJavaForMinecraftVersion) {
+          finalJavaPath = await window.api.java.getJavaForMinecraftVersion(version);
+        } else {
+          // Fallback: usar javaDownloadService directamente
+          const { javaDownloadService } = await import('../services/javaDownloadService');
+          finalJavaPath = await javaDownloadService.getJavaForMinecraftVersion(version);
+        }
+      } else {
+        // Mantener las rutas de Java existentes o las nuevas si se especificaron
+        finalJavaPath = javaPath || undefined;
+        finalJavaId = javaId || undefined;
+      }
+
       const updatedInstance: InstanceConfig = {
         ...instance!,
         name,
         version,
         loader: loader,
         loaderVersion: loaderVersion || undefined,
-        javaPath: javaPath || undefined,
-        javaId: javaId || undefined,
+        javaPath: finalJavaPath,
+        javaId: finalJavaId,
         maxMemory: maxMemory || undefined,
         minMemory: minMemory || undefined,
         windowWidth: windowWidth,

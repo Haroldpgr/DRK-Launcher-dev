@@ -146,25 +146,36 @@ button {
 
 /* Estilo personalizado para la barra de desplazamiento */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(75, 85, 99, 0.1);
-  border-radius: 3px;
+  background: rgba(31, 41, 55, 0.2); /* color oscuro del launcher */
+  border-radius: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
-  border-radius: 3px;
+  background: rgba(107, 114, 128, 0.5); /* color oscuro más claro */
+  border-radius: 4px;
+  transition: all 0.3s ease;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
+  background: rgba(156, 163, 175, 0.7); /* color ligeramente más claro al hover */
 }
 
 /* Para Firefox */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(156, 163, 175, 0.3) rgba(75, 85, 99, 0.1);
+  scrollbar-color: rgba(107, 114, 128, 0.5) rgba(31, 41, 55, 0.2);
+}
+
+/* Opción alternativa: Ocultar completamente la barra de scroll pero permitir desplazamiento */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

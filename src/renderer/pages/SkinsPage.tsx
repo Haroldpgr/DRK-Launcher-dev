@@ -7,27 +7,8 @@ import { modernSkins } from "../data/skins";
 import { WalkingAnimation, RunningAnimation, IdleAnimation } from 'skinview3d';
 import * as THREE from 'three';
 
-// Añadir estilos CSS para los scrolls personalizados y renderizado pixelado
+// Añadir estilos CSS para renderizado pixelado
 const customStyles = `
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: rgba(26, 32, 44, 0.5);
-    border-radius: 4px;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: linear-gradient(to bottom, #4f46e5, #7c3aed);
-    border-radius: 4px;
-    transition: all 0.3s ease;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(to bottom, #6366f1, #8b5cf6);
-  }
-
   .pixelated {
     image-rendering: pixelated;
     image-rendering: -moz-crisp-edges;

@@ -89,7 +89,8 @@ contextBridge.exposeInMainWorld('api', {
 
   java: {
     getAll: () => ipcRenderer.invoke('java:get-all'),
-    detect: () => ipcRenderer.invoke('java:detect')
+    detect: () => ipcRenderer.invoke('java:detect'),
+    getJavaForMinecraftVersion: (version: string) => ipcRenderer.invoke('java:getJavaForMinecraftVersion', version)
   },
 
   // API de diálogo del sistema
@@ -156,6 +157,7 @@ declare global {
       java: {
         getAll: () => Promise<any[]>;
         detect: () => Promise<any[]>;
+        getJavaForMinecraftVersion: (version: string) => Promise<string>;
       };
       dialog: {
         showOpenDialog: (options: any) => Promise<any>;

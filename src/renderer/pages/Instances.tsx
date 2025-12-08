@@ -182,6 +182,12 @@ export default function Instances({ onPlay }: InstancesProps) {
   }, [selectedProfile]);
 
   const remove = async (id: string) => {
+    // Mostrar confirmación de seguridad
+    const instance = instances.find(inst => inst.id === id);
+    if (!instance || !window.confirm(`¿Estás seguro de que quieres eliminar la instancia "${instance.name}"? Esta acción no se puede deshacer y eliminará permanentemente todos los archivos de la instancia.`)) {
+      return; // Cancelar si el usuario no confirma
+    }
+
     // Verificar que la API esté completamente disponible
     if (!window.api?.instances) {
       setError('Servicio de instancias no disponible aún. Esperando inicialización...');

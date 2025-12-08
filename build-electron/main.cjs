@@ -5720,297 +5720,17 @@ var JavaDetector = class {
 };
 var javaDetector = new JavaDetector();
 
-// src/main/javaService.ts
-var JavaService = class {
-  detector;
-  installedJavas = [];
-  defaultJavaId = null;
-  constructor() {
-    this.detector = new JavaDetector();
-    this.loadConfig();
-  }
-  loadConfig() {
-    console.log("Cargando configuraci\xF3n de Java...");
-  }
-  saveConfig() {
-    console.log("Guardando configuraci\xF3n de Java...");
-  }
-  async detectJava() {
-    const detected = await this.detector.detectJava();
-    this.installedJavas = detected;
-    return this.installedJavas;
-  }
-  getAllJavas() {
-    return this.installedJavas;
-  }
-  getDefaultJava() {
-    if (!this.defaultJavaId) return void 0;
-    return this.installedJavas.find((j) => j.id === this.defaultJavaId);
-  }
-  setDefaultJava(javaId) {
-    const java = this.installedJavas.find((j) => j.id === javaId);
-    if (!java) {
-      console.error(`Java con ID ${javaId} no encontrado.`);
-      return false;
-    }
-    this.defaultJavaId = javaId;
-    this.saveConfig();
-    console.log(`Java predeterminado establecido en: ${java.path}`);
-    return true;
-  }
-  removeInstalledJava(javaId) {
-    const initialLength = this.installedJavas.length;
-    this.installedJavas = this.installedJavas.filter((j) => j.id !== javaId);
-    if (this.defaultJavaId === javaId) {
-      this.defaultJavaId = null;
-    }
-    this.saveConfig();
-    return this.installedJavas.length < initialLength;
-  }
-  getMinecraftJavaCompatibility(minecraftVersion) {
-    const mcMajorVersion = parseInt(minecraftVersion.split(".")[1], 10);
-    if (mcMajorVersion >= 17) {
-      return { recommended: "17", latest: "21" };
-    }
-    if (mcMajorVersion >= 16) {
-      return { recommended: "16", latest: "17" };
-    }
-    return { recommended: "8", latest: "8" };
-  }
-  async testJava(path15) {
-    try {
-      await this.detector.getJavaVersion(path15);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-};
-var javaService = new JavaService();
-var javaService_default = javaService;
-
-// src/main/main.ts
-var import_node_fetch7 = __toESM(require_lib2(), 1);
-
-// src/services/instanceService.ts
+// src/services/javaDownloadService.ts
 var import_node_path6 = __toESM(require("node:path"), 1);
 var import_node_fs5 = __toESM(require("node:fs"), 1);
-var InstanceService = class {
-  basePath;
-  constructor() {
-    const launcherPath = getLauncherDataPath();
-    this.basePath = import_node_path6.default.join(launcherPath, "instances");
-    this.ensureDir(this.basePath);
-  }
-  /**
-   * Crea una nueva instancia con la estructura correcta
-   * @param config Configuración de la instancia
-   * @returns La instancia creada
-   */
-  createInstance(config) {
-    const id = config.id || this.generateInstanceId(config.name);
-    const instancePath = import_node_path6.default.join(this.basePath, id);
-    if (import_node_fs5.default.existsSync(instancePath)) {
-      let counter = 1;
-      let uniqueId = `${id}_${counter}`;
-      let uniquePath = import_node_path6.default.join(this.basePath, uniqueId);
-      while (import_node_fs5.default.existsSync(uniquePath)) {
-        counter++;
-        uniqueId = `${id}_${counter}`;
-        uniquePath = import_node_path6.default.join(this.basePath, uniqueId);
-      }
-      const newInstanceId = uniqueId;
-      const newInstancePath = import_node_path6.default.join(this.basePath, newInstanceId);
-      this.ensureDir(newInstancePath);
-      this.createInstanceStructure(newInstancePath);
-      const instanceConfig2 = {
-        ...config,
-        id: newInstanceId,
-        createdAt: Date.now(),
-        path: newInstancePath
-      };
-      this.saveInstanceConfig(newInstancePath, instanceConfig2);
-      return instanceConfig2;
-    }
-    this.ensureDir(instancePath);
-    this.createInstanceStructure(instancePath);
-    const instanceConfig = {
-      ...config,
-      id: config.id || id,
-      createdAt: Date.now(),
-      path: instancePath
-    };
-    this.saveInstanceConfig(instancePath, instanceConfig);
-    return instanceConfig;
-  }
-  /**
-   * Genera un ID para la instancia basado en el nombre
-   */
-  generateInstanceId(name) {
-    return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
-  }
-  /**
-   * Crea la estructura de carpetas necesaria para una instancia de Minecraft
-   * @param instancePath Ruta de la instancia
-   */
-  createInstanceStructure(instancePath) {
-    const requiredFolders = [
-      "mods",
-      // Mods de juego
-      "resourcepacks",
-      // Paquetes de recursos
-      "shaderpacks",
-      // Shaders (para OptiFine/Iris)
-      "config",
-      // Configuración de mods y loader
-      "saves",
-      // Mundos guardados
-      "logs",
-      // Registros del cliente
-      "assets",
-      // Assets del juego (texturas, sonidos, etc.)
-      "natives"
-      // Bibliotecas nativas
-    ];
-    requiredFolders.forEach((folder) => {
-      const folderPath = import_node_path6.default.join(instancePath, folder);
-      this.ensureDir(folderPath);
-    });
-  }
-  /**
-   * Asegura que un directorio exista, creándolo si es necesario
-   * @param dir Directorio a asegurar
-   */
-  ensureDir(dir) {
-    if (!import_node_fs5.default.existsSync(dir)) {
-      import_node_fs5.default.mkdirSync(dir, { recursive: true });
-    }
-  }
-  /**
-   * Guarda la configuración de la instancia
-   */
-  saveInstanceConfig(instancePath, config) {
-    const configPath = import_node_path6.default.join(instancePath, "instance.json");
-    import_node_fs5.default.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  }
-  /**
-   * Verifica si una instancia está lista para ejecutarse
-   * @param instancePath Ruta de la instancia
-   * @returns true si la instancia tiene los archivos necesarios
-   */
-  isInstanceReady(instancePath) {
-    const clientJarPath = import_node_path6.default.join(instancePath, "client.jar");
-    if (!import_node_fs5.default.existsSync(clientJarPath)) {
-      console.log(`client.jar no encontrado en ${clientJarPath}`);
-      try {
-        const files = import_node_fs5.default.readdirSync(instancePath);
-        console.log(`Archivos en la instancia:`, files.join(", "));
-      } catch (dirError) {
-        console.log(`No se pudo leer el directorio de la instancia:`, dirError);
-      }
-      return false;
-    }
-    let clientJarStats;
-    try {
-      clientJarStats = import_node_fs5.default.statSync(clientJarPath);
-    } catch (statError) {
-      console.log(`No se pudo acceder al archivo client.jar: ${statError}`);
-      return false;
-    }
-    if (clientJarStats.size < 1024 * 1024) {
-      console.log(`client.jar es demasiado peque\xF1o (${clientJarStats.size} bytes), probablemente no est\xE9 completamente descargado`);
-      return false;
-    }
-    console.log(`client.jar encontrado y v\xE1lido: ${clientJarPath} (${clientJarStats.size} bytes)`);
-    const launcherPath = getLauncherDataPath();
-    const launcherAssetsPath = import_node_path6.default.join(launcherPath, "assets");
-    if (!import_node_fs5.default.existsSync(launcherAssetsPath)) {
-      console.log(`No se encontr\xF3 la carpeta de assets compartida en (${launcherAssetsPath})`);
-      return false;
-    }
-    const requiredFolders = ["mods", "config", "saves", "logs"];
-    for (const folder of requiredFolders) {
-      const folderPath = import_node_path6.default.join(instancePath, folder);
-      if (!import_node_fs5.default.existsSync(folderPath)) {
-        try {
-          import_node_fs5.default.mkdirSync(folderPath, { recursive: true });
-          console.log(`Carpeta creada: ${folderPath}`);
-        } catch (mkdirErr) {
-          console.log(`No se pudo crear carpeta ${folder}:`, mkdirErr);
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-  /**
-   * Genera el comando de ejecución para la instancia
-   * @param instancePath Ruta de la instancia
-   * @param javaPath Ruta al ejecutable de Java
-   * @param maxMemory Memoria máxima en MB
-   * @returns Comando de ejecución completo
-   */
-  buildGameCommand(instancePath, javaPath, maxMemory) {
-    const jvmArgs = [
-      `-Xmx${maxMemory}M`,
-      // Límite de RAM (Ej. 4096M)
-      `-Dminecraft.client.dir=${instancePath}`,
-      // CRUCIAL: Le dice al juego dónde está la carpeta de trabajo
-      "-jar",
-      import_node_path6.default.join(instancePath, "client.jar")
-      // Apunta al archivo que inicia el proceso de juego/loader
-    ];
-    const fullCommand = `${javaPath} ${jvmArgs.join(" ")}`;
-    console.log("Comando a ejecutar:", fullCommand);
-    return fullCommand;
-  }
-  /**
-   * Obtiene la configuración de una instancia desde su archivo
-   * @param instancePath Ruta de la instancia
-   * @returns Configuración de la instancia o null si no existe
-   */
-  getInstanceConfig(instancePath) {
-    const configPath = import_node_path6.default.join(instancePath, "instance.json");
-    if (!import_node_fs5.default.existsSync(configPath)) {
-      return null;
-    }
-    try {
-      const configContent = import_node_fs5.default.readFileSync(configPath, "utf-8");
-      return JSON.parse(configContent);
-    } catch (error) {
-      console.error(`Error al leer la configuraci\xF3n de la instancia: ${error}`);
-      return null;
-    }
-  }
-  /**
-   * Actualiza la configuración de la instancia
-   * @param instancePath Ruta de la instancia
-   * @param updates Actualizaciones a aplicar
-   */
-  updateInstanceConfig(instancePath, updates) {
-    const config = this.getInstanceConfig(instancePath);
-    if (!config) {
-      throw new Error(`No se encontr\xF3 la configuraci\xF3n de la instancia: ${instancePath}`);
-    }
-    const updatedConfig = { ...config, ...updates };
-    this.saveInstanceConfig(instancePath, updatedConfig);
-  }
-};
-var instanceService = new InstanceService();
-
-// src/services/instanceCreationService.ts
-var import_node_path9 = __toESM(require("node:path"), 1);
-var import_node_fs8 = __toESM(require("node:fs"), 1);
-
-// src/services/javaDownloadService.ts
-var import_node_path7 = __toESM(require("node:path"), 1);
-var import_node_fs6 = __toESM(require("node:fs"), 1);
 var import_node_stream3 = require("node:stream");
 var import_node_util3 = require("node:util");
 var import_node_fetch4 = __toESM(require_lib2(), 1);
 init_downloadQueueService();
 var pipelineAsync3 = (0, import_node_util3.promisify)(import_node_stream3.pipeline);
 var MINECRAFT_JAVA_REQUIREMENTS = {
+  "1.21": "21",
+  // Minecraft 1.21+ requiere Java 21
   "1.20": "17",
   "1.19": "17",
   "1.18": "17",
@@ -6025,7 +5745,7 @@ var JavaDownloadService = class {
   runtimePath;
   javaInstallations = /* @__PURE__ */ new Map();
   constructor() {
-    this.runtimePath = import_node_path7.default.join(getLauncherDataPath(), "runtime");
+    this.runtimePath = import_node_path6.default.join(getLauncherDataPath(), "runtime");
     this.ensureDir(this.runtimePath);
     this.loadJavaInstallations();
   }
@@ -6034,8 +5754,8 @@ var JavaDownloadService = class {
    * @param dir Directorio a asegurar
    */
   ensureDir(dir) {
-    if (!import_node_fs6.default.existsSync(dir)) {
-      import_node_fs6.default.mkdirSync(dir, { recursive: true });
+    if (!import_node_fs5.default.existsSync(dir)) {
+      import_node_fs5.default.mkdirSync(dir, { recursive: true });
     }
   }
   /**
@@ -6132,12 +5852,12 @@ var JavaDownloadService = class {
         process.env.JRE_HOME || ""
       ].filter((path15) => path15 !== "");
       for (const basePath of commonPaths) {
-        if (import_node_fs6.default.existsSync(basePath)) {
-          const folders = import_node_fs6.default.readdirSync(basePath);
+        if (import_node_fs5.default.existsSync(basePath)) {
+          const folders = import_node_fs5.default.readdirSync(basePath);
           for (const folder of folders) {
-            const javaPath = import_node_path7.default.join(basePath, folder);
-            const exePath = import_node_path7.default.join(javaPath, "bin", "java.exe");
-            if (import_node_fs6.default.existsSync(exePath)) {
+            const javaPath = import_node_path6.default.join(basePath, folder);
+            const exePath = import_node_path6.default.join(javaPath, "bin", "java.exe");
+            if (import_node_fs5.default.existsSync(exePath)) {
               try {
                 const isWorking = await this.isJavaWorking(exePath);
                 const version = await this.getJavaVersion(exePath);
@@ -6156,12 +5876,12 @@ var JavaDownloadService = class {
         }
       }
     }
-    const runtimeFolders = import_node_fs6.default.readdirSync(this.runtimePath);
+    const runtimeFolders = import_node_fs5.default.readdirSync(this.runtimePath);
     for (const folder of runtimeFolders) {
-      const javaPath = import_node_path7.default.join(this.runtimePath, folder);
+      const javaPath = import_node_path6.default.join(this.runtimePath, folder);
       const isWindows = process.platform === "win32";
-      const exePath = import_node_path7.default.join(javaPath, "bin", isWindows ? "java.exe" : "java");
-      if (import_node_fs6.default.existsSync(exePath)) {
+      const exePath = import_node_path6.default.join(javaPath, "bin", isWindows ? "java.exe" : "java");
+      if (import_node_fs5.default.existsSync(exePath)) {
         try {
           const isWorking = await this.isJavaWorking(exePath);
           const version = folder.replace("java", "").replace(/[^0-9.]/g, "") || "unknown";
@@ -6216,14 +5936,14 @@ var JavaDownloadService = class {
    */
   loadJavaInstallations() {
     try {
-      if (import_node_fs6.default.existsSync(this.runtimePath)) {
-        const folders = import_node_fs6.default.readdirSync(this.runtimePath);
+      if (import_node_fs5.default.existsSync(this.runtimePath)) {
+        const folders = import_node_fs5.default.readdirSync(this.runtimePath);
         for (const folder of folders) {
           const version = folder.replace("java", "").replace(/[^0-9.]/g, "");
           if (version) {
             const exePath = this.getJavaExecutable(version);
             if (exePath) {
-              const javaPath = import_node_path7.default.dirname(import_node_path7.default.dirname(exePath));
+              const javaPath = import_node_path6.default.dirname(import_node_path6.default.dirname(exePath));
               const installation = {
                 id: folder,
                 version,
@@ -6249,38 +5969,38 @@ var JavaDownloadService = class {
    * Obtiene la ruta de ejecución de una versión específica de Java
    */
   getJavaExecutable(javaVersion) {
-    const javaDir = import_node_path7.default.join(this.runtimePath, `java${javaVersion}`);
+    const javaDir = import_node_path6.default.join(this.runtimePath, `java${javaVersion}`);
     console.log(`Buscando Java ejecutable para versi\xF3n ${javaVersion} en: ${javaDir}`);
     const isWindows = process.platform === "win32";
     const javaExecutableName = isWindows ? "java.exe" : "java";
     const possibleLocations = [
       // Ubicación estándar después de reorganización
-      import_node_path7.default.join(javaDir, "bin", javaExecutableName),
+      import_node_path6.default.join(javaDir, "bin", javaExecutableName),
       // Posible ubicación si la reorganización no funcionó completamente
-      import_node_path7.default.join(javaDir, "bin"),
+      import_node_path6.default.join(javaDir, "bin"),
       // Directorio bin en raíz
       // Posibles ubicaciones en subdirectorios comunes
-      import_node_path7.default.join(javaDir, "jdk-17.0.17+10", "bin", javaExecutableName),
-      import_node_path7.default.join(javaDir, "jdk-17.0.17+10", "bin"),
-      import_node_path7.default.join(javaDir, "jdk-17.*", "bin", javaExecutableName),
+      import_node_path6.default.join(javaDir, "jdk-17.0.17+10", "bin", javaExecutableName),
+      import_node_path6.default.join(javaDir, "jdk-17.0.17+10", "bin"),
+      import_node_path6.default.join(javaDir, "jdk-17.*", "bin", javaExecutableName),
       // Patrón general
-      import_node_path7.default.join(javaDir, "openjdk-17*", "bin", javaExecutableName),
-      import_node_path7.default.join(javaDir, "temurin-17*", "bin", javaExecutableName)
+      import_node_path6.default.join(javaDir, "openjdk-17*", "bin", javaExecutableName),
+      import_node_path6.default.join(javaDir, "temurin-17*", "bin", javaExecutableName)
     ];
     for (const location of possibleLocations) {
       if (location.includes("*")) {
         continue;
       }
       console.log(`Verificando ubicaci\xF3n: ${location}`);
-      if (import_node_fs6.default.existsSync(location)) {
-        if (import_node_fs6.default.statSync(location).isFile()) {
+      if (import_node_fs5.default.existsSync(location)) {
+        if (import_node_fs5.default.statSync(location).isFile()) {
           if (location.endsWith(javaExecutableName)) {
             console.log(`Java encontrado en ubicaci\xF3n espec\xEDfica: ${location}`);
             return location;
           }
-        } else if (import_node_fs6.default.statSync(location).isDirectory()) {
-          const exeInDir = import_node_path7.default.join(location, javaExecutableName);
-          if (import_node_fs6.default.existsSync(exeInDir)) {
+        } else if (import_node_fs5.default.statSync(location).isDirectory()) {
+          const exeInDir = import_node_path6.default.join(location, javaExecutableName);
+          if (import_node_fs5.default.existsSync(exeInDir)) {
             console.log(`Java encontrado en directorio: ${exeInDir}`);
             return exeInDir;
           }
@@ -6288,7 +6008,7 @@ var JavaDownloadService = class {
       }
     }
     try {
-      if (import_node_fs6.default.existsSync(javaDir)) {
+      if (import_node_fs5.default.existsSync(javaDir)) {
         const result = this.findJavaExecutableRecursive(javaDir, javaExecutableName);
         if (result) {
           console.log(`Java encontrado en b\xFAsqueda recursiva: ${result}`);
@@ -6309,10 +6029,10 @@ var JavaDownloadService = class {
       return null;
     }
     try {
-      const items = import_node_fs6.default.readdirSync(dirPath);
+      const items = import_node_fs5.default.readdirSync(dirPath);
       for (const item of items) {
-        const itemPath = import_node_path7.default.join(dirPath, item);
-        const stat = import_node_fs6.default.statSync(itemPath);
+        const itemPath = import_node_path6.default.join(dirPath, item);
+        const stat = import_node_fs5.default.statSync(itemPath);
         if (stat.isFile() && item === executableName) {
           return itemPath;
         } else if (stat.isDirectory()) {
@@ -6337,14 +6057,14 @@ var JavaDownloadService = class {
     if (this.isJavaInstalled(javaVersion)) {
       const javaExe = this.getJavaExecutable(javaVersion);
       if (javaExe) {
-        console.log(`Java ${javaVersion} ya est\xE1 instalado en ${import_node_path7.default.dirname(javaExe)}`);
+        console.log(`Java ${javaVersion} ya est\xE1 instalado en ${import_node_path6.default.dirname(javaExe)}`);
         return javaExe;
       }
     }
-    const javaDir = import_node_path7.default.join(this.runtimePath, `java${javaVersion}`);
-    if (import_node_fs6.default.existsSync(javaDir)) {
+    const javaDir = import_node_path6.default.join(this.runtimePath, `java${javaVersion}`);
+    if (import_node_fs5.default.existsSync(javaDir)) {
       console.log(`Limpiando directorio existente de Java ${javaVersion}...`);
-      import_node_fs6.default.rmSync(javaDir, { recursive: true, force: true });
+      import_node_fs5.default.rmSync(javaDir, { recursive: true, force: true });
     }
     this.ensureDir(javaDir);
     console.log(`Descargando Java ${javaVersion} para ${os2}-${arch} desde Adoptium...`);
@@ -6365,9 +6085,9 @@ var JavaDownloadService = class {
       const binary = data[0];
       const downloadUrl = binary.binary.package.link;
       const expectedChecksum = binary.binary.package.checksum;
-      const fileName = import_node_path7.default.basename(downloadUrl);
+      const fileName = import_node_path6.default.basename(downloadUrl);
       console.log(`Iniciando descarga de Java ${javaVersion} desde: ${downloadUrl}`);
-      const tempZipPath = import_node_path7.default.join(this.runtimePath, fileName);
+      const tempZipPath = import_node_path6.default.join(this.runtimePath, fileName);
       const downloadId = await downloadQueueService.addDownload(
         downloadUrl,
         tempZipPath,
@@ -6382,27 +6102,27 @@ var JavaDownloadService = class {
       }
       console.log(`Extrayendo Java ${javaVersion}...`);
       await this.extractJavaArchive(tempZipPath, javaDir);
-      if (import_node_fs6.default.existsSync(tempZipPath)) {
-        import_node_fs6.default.unlinkSync(tempZipPath);
+      if (import_node_fs5.default.existsSync(tempZipPath)) {
+        import_node_fs5.default.unlinkSync(tempZipPath);
       }
       const javaExe = this.getJavaExecutable(javaVersion);
       if (!javaExe) {
         try {
-          const dirContents = import_node_fs6.default.readdirSync(javaDir, { withFileTypes: true });
+          const dirContents = import_node_fs5.default.readdirSync(javaDir, { withFileTypes: true });
           console.log(`Contenido del directorio de Java (${javaDir}):`, dirContents.map(
             (item) => item.isDirectory() ? `[DIR] ${item.name}` : item.name
           ));
           for (const item of dirContents) {
             if (item.isDirectory()) {
-              const subDirPath = import_node_path7.default.join(javaDir, item.name);
+              const subDirPath = import_node_path6.default.join(javaDir, item.name);
               try {
-                const subDirContents = import_node_fs6.default.readdirSync(subDirPath, { withFileTypes: true });
+                const subDirContents = import_node_fs5.default.readdirSync(subDirPath, { withFileTypes: true });
                 console.log(`Contenido del subdirectorio ${subDirPath}:`, subDirContents.map(
                   (subItem) => subItem.isDirectory() ? `[DIR] ${subItem.name}` : subItem.name
                 ));
                 if (subDirContents.some((subItem) => subItem.name === "bin" && subItem.isDirectory())) {
-                  const binPath = import_node_path7.default.join(subDirPath, "bin");
-                  const binContents = import_node_fs6.default.readdirSync(binPath);
+                  const binPath = import_node_path6.default.join(subDirPath, "bin");
+                  const binContents = import_node_fs5.default.readdirSync(binPath);
                   console.log(`Contenido de bin en ${binPath}:`, binContents);
                 }
               } catch (subDirError) {
@@ -6503,31 +6223,31 @@ var JavaDownloadService = class {
    */
   reorganizeJavaStructure(extractTo) {
     try {
-      const items = import_node_fs6.default.readdirSync(extractTo);
+      const items = import_node_fs5.default.readdirSync(extractTo);
       let javaDirFound = false;
       for (const item of items) {
-        const itemPath = import_node_path7.default.join(extractTo, item);
-        const isDir = import_node_fs6.default.statSync(itemPath).isDirectory();
+        const itemPath = import_node_path6.default.join(extractTo, item);
+        const isDir = import_node_fs5.default.statSync(itemPath).isDirectory();
         if (isDir) {
-          const binPath = import_node_path7.default.join(itemPath, "bin");
-          const javaExePath = import_node_path7.default.join(binPath, process.platform === "win32" ? "java.exe" : "java");
-          if (import_node_fs6.default.existsSync(binPath) && import_node_fs6.default.existsSync(javaExePath)) {
+          const binPath = import_node_path6.default.join(itemPath, "bin");
+          const javaExePath = import_node_path6.default.join(binPath, process.platform === "win32" ? "java.exe" : "java");
+          if (import_node_fs5.default.existsSync(binPath) && import_node_fs5.default.existsSync(javaExePath)) {
             console.log(`Estructura de Java encontrada en subdirectorio: ${itemPath}`);
-            const nestedItems = import_node_fs6.default.readdirSync(itemPath);
+            const nestedItems = import_node_fs5.default.readdirSync(itemPath);
             for (const nestedItem of nestedItems) {
-              const sourcePath = import_node_path7.default.join(itemPath, nestedItem);
-              const destPath = import_node_path7.default.join(extractTo, nestedItem);
-              if (import_node_fs6.default.existsSync(destPath)) {
-                const destStat = import_node_fs6.default.statSync(destPath);
+              const sourcePath = import_node_path6.default.join(itemPath, nestedItem);
+              const destPath = import_node_path6.default.join(extractTo, nestedItem);
+              if (import_node_fs5.default.existsSync(destPath)) {
+                const destStat = import_node_fs5.default.statSync(destPath);
                 if (destStat.isDirectory()) {
-                  import_node_fs6.default.rmSync(destPath, { recursive: true, force: true });
+                  import_node_fs5.default.rmSync(destPath, { recursive: true, force: true });
                 } else {
-                  import_node_fs6.default.unlinkSync(destPath);
+                  import_node_fs5.default.unlinkSync(destPath);
                 }
               }
-              import_node_fs6.default.renameSync(sourcePath, destPath);
+              import_node_fs5.default.renameSync(sourcePath, destPath);
             }
-            import_node_fs6.default.rmdirSync(itemPath);
+            import_node_fs5.default.rmdirSync(itemPath);
             console.log(`Reorganizada estructura de Java: contenido movido desde subdirectorio ${item} a ra\xEDz`);
             javaDirFound = true;
             break;
@@ -6563,7 +6283,7 @@ var JavaDownloadService = class {
       return false;
     }
     try {
-      import_node_fs6.default.rmSync(installation.path, { recursive: true, force: true });
+      import_node_fs5.default.rmSync(installation.path, { recursive: true, force: true });
       this.javaInstallations.delete(javaId);
       return true;
     } catch (error) {
@@ -6589,6 +6309,291 @@ var JavaDownloadService = class {
   }
 };
 var javaDownloadService = new JavaDownloadService();
+
+// src/main/javaService.ts
+var JavaService = class {
+  detector;
+  installedJavas = [];
+  defaultJavaId = null;
+  constructor() {
+    this.detector = new JavaDetector();
+    this.loadConfig();
+  }
+  loadConfig() {
+    console.log("Cargando configuraci\xF3n de Java...");
+  }
+  saveConfig() {
+    console.log("Guardando configuraci\xF3n de Java...");
+  }
+  async detectJava() {
+    const detected = await this.detector.detectJava();
+    this.installedJavas = detected;
+    return this.installedJavas;
+  }
+  getAllJavas() {
+    return this.installedJavas;
+  }
+  getDefaultJava() {
+    if (!this.defaultJavaId) return void 0;
+    return this.installedJavas.find((j) => j.id === this.defaultJavaId);
+  }
+  setDefaultJava(javaId) {
+    const java = this.installedJavas.find((j) => j.id === javaId);
+    if (!java) {
+      console.error(`Java con ID ${javaId} no encontrado.`);
+      return false;
+    }
+    this.defaultJavaId = javaId;
+    this.saveConfig();
+    console.log(`Java predeterminado establecido en: ${java.path}`);
+    return true;
+  }
+  removeInstalledJava(javaId) {
+    const initialLength = this.installedJavas.length;
+    this.installedJavas = this.installedJavas.filter((j) => j.id !== javaId);
+    if (this.defaultJavaId === javaId) {
+      this.defaultJavaId = null;
+    }
+    this.saveConfig();
+    return this.installedJavas.length < initialLength;
+  }
+  async getJavaForMinecraftVersion(minecraftVersion) {
+    return await javaDownloadService.getJavaForMinecraftVersion(minecraftVersion);
+  }
+  getMinecraftJavaCompatibility(minecraftVersion) {
+    const mcMajorVersion = parseInt(minecraftVersion.split(".")[1], 10);
+    if (mcMajorVersion >= 17) {
+      return { recommended: "17", latest: "21" };
+    }
+    if (mcMajorVersion >= 16) {
+      return { recommended: "16", latest: "17" };
+    }
+    return { recommended: "8", latest: "8" };
+  }
+  async testJava(path15) {
+    try {
+      await this.detector.getJavaVersion(path15);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+};
+var javaService = new JavaService();
+var javaService_default = javaService;
+
+// src/main/main.ts
+var import_node_fetch7 = __toESM(require_lib2(), 1);
+
+// src/services/instanceService.ts
+var import_node_path7 = __toESM(require("node:path"), 1);
+var import_node_fs6 = __toESM(require("node:fs"), 1);
+var InstanceService = class {
+  basePath;
+  constructor() {
+    const launcherPath = getLauncherDataPath();
+    this.basePath = import_node_path7.default.join(launcherPath, "instances");
+    this.ensureDir(this.basePath);
+  }
+  /**
+   * Crea una nueva instancia con la estructura correcta
+   * @param config Configuración de la instancia
+   * @returns La instancia creada
+   */
+  createInstance(config) {
+    const id = config.id || this.generateInstanceId(config.name);
+    const instancePath = import_node_path7.default.join(this.basePath, id);
+    if (import_node_fs6.default.existsSync(instancePath)) {
+      let counter = 1;
+      let uniqueId = `${id}_${counter}`;
+      let uniquePath = import_node_path7.default.join(this.basePath, uniqueId);
+      while (import_node_fs6.default.existsSync(uniquePath)) {
+        counter++;
+        uniqueId = `${id}_${counter}`;
+        uniquePath = import_node_path7.default.join(this.basePath, uniqueId);
+      }
+      const newInstanceId = uniqueId;
+      const newInstancePath = import_node_path7.default.join(this.basePath, newInstanceId);
+      this.ensureDir(newInstancePath);
+      this.createInstanceStructure(newInstancePath);
+      const instanceConfig2 = {
+        ...config,
+        id: newInstanceId,
+        createdAt: Date.now(),
+        path: newInstancePath
+      };
+      this.saveInstanceConfig(newInstancePath, instanceConfig2);
+      return instanceConfig2;
+    }
+    this.ensureDir(instancePath);
+    this.createInstanceStructure(instancePath);
+    const instanceConfig = {
+      ...config,
+      id: config.id || id,
+      createdAt: Date.now(),
+      path: instancePath
+    };
+    this.saveInstanceConfig(instancePath, instanceConfig);
+    return instanceConfig;
+  }
+  /**
+   * Genera un ID para la instancia basado en el nombre
+   */
+  generateInstanceId(name) {
+    return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+  }
+  /**
+   * Crea la estructura de carpetas necesaria para una instancia de Minecraft
+   * @param instancePath Ruta de la instancia
+   */
+  createInstanceStructure(instancePath) {
+    const requiredFolders = [
+      "mods",
+      // Mods de juego
+      "resourcepacks",
+      // Paquetes de recursos
+      "shaderpacks",
+      // Shaders (para OptiFine/Iris)
+      "config",
+      // Configuración de mods y loader
+      "saves",
+      // Mundos guardados
+      "logs",
+      // Registros del cliente
+      "assets",
+      // Assets del juego (texturas, sonidos, etc.)
+      "natives"
+      // Bibliotecas nativas
+    ];
+    requiredFolders.forEach((folder) => {
+      const folderPath = import_node_path7.default.join(instancePath, folder);
+      this.ensureDir(folderPath);
+    });
+  }
+  /**
+   * Asegura que un directorio exista, creándolo si es necesario
+   * @param dir Directorio a asegurar
+   */
+  ensureDir(dir) {
+    if (!import_node_fs6.default.existsSync(dir)) {
+      import_node_fs6.default.mkdirSync(dir, { recursive: true });
+    }
+  }
+  /**
+   * Guarda la configuración de la instancia
+   */
+  saveInstanceConfig(instancePath, config) {
+    const configPath = import_node_path7.default.join(instancePath, "instance.json");
+    import_node_fs6.default.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  }
+  /**
+   * Verifica si una instancia está lista para ejecutarse
+   * @param instancePath Ruta de la instancia
+   * @returns true si la instancia tiene los archivos necesarios
+   */
+  isInstanceReady(instancePath) {
+    const clientJarPath = import_node_path7.default.join(instancePath, "client.jar");
+    if (!import_node_fs6.default.existsSync(clientJarPath)) {
+      console.log(`client.jar no encontrado en ${clientJarPath}`);
+      try {
+        const files = import_node_fs6.default.readdirSync(instancePath);
+        console.log(`Archivos en la instancia:`, files.join(", "));
+      } catch (dirError) {
+        console.log(`No se pudo leer el directorio de la instancia:`, dirError);
+      }
+      return false;
+    }
+    let clientJarStats;
+    try {
+      clientJarStats = import_node_fs6.default.statSync(clientJarPath);
+    } catch (statError) {
+      console.log(`No se pudo acceder al archivo client.jar: ${statError}`);
+      return false;
+    }
+    if (clientJarStats.size < 1024 * 1024) {
+      console.log(`client.jar es demasiado peque\xF1o (${clientJarStats.size} bytes), probablemente no est\xE9 completamente descargado`);
+      return false;
+    }
+    console.log(`client.jar encontrado y v\xE1lido: ${clientJarPath} (${clientJarStats.size} bytes)`);
+    const launcherPath = getLauncherDataPath();
+    const launcherAssetsPath = import_node_path7.default.join(launcherPath, "assets");
+    if (!import_node_fs6.default.existsSync(launcherAssetsPath)) {
+      console.log(`No se encontr\xF3 la carpeta de assets compartida en (${launcherAssetsPath})`);
+      return false;
+    }
+    const requiredFolders = ["mods", "config", "saves", "logs"];
+    for (const folder of requiredFolders) {
+      const folderPath = import_node_path7.default.join(instancePath, folder);
+      if (!import_node_fs6.default.existsSync(folderPath)) {
+        try {
+          import_node_fs6.default.mkdirSync(folderPath, { recursive: true });
+          console.log(`Carpeta creada: ${folderPath}`);
+        } catch (mkdirErr) {
+          console.log(`No se pudo crear carpeta ${folder}:`, mkdirErr);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  /**
+   * Genera el comando de ejecución para la instancia
+   * @param instancePath Ruta de la instancia
+   * @param javaPath Ruta al ejecutable de Java
+   * @param maxMemory Memoria máxima en MB
+   * @returns Comando de ejecución completo
+   */
+  buildGameCommand(instancePath, javaPath, maxMemory) {
+    const jvmArgs = [
+      `-Xmx${maxMemory}M`,
+      // Límite de RAM (Ej. 4096M)
+      `-Dminecraft.client.dir=${instancePath}`,
+      // CRUCIAL: Le dice al juego dónde está la carpeta de trabajo
+      "-jar",
+      import_node_path7.default.join(instancePath, "client.jar")
+      // Apunta al archivo que inicia el proceso de juego/loader
+    ];
+    const fullCommand = `${javaPath} ${jvmArgs.join(" ")}`;
+    console.log("Comando a ejecutar:", fullCommand);
+    return fullCommand;
+  }
+  /**
+   * Obtiene la configuración de una instancia desde su archivo
+   * @param instancePath Ruta de la instancia
+   * @returns Configuración de la instancia o null si no existe
+   */
+  getInstanceConfig(instancePath) {
+    const configPath = import_node_path7.default.join(instancePath, "instance.json");
+    if (!import_node_fs6.default.existsSync(configPath)) {
+      return null;
+    }
+    try {
+      const configContent = import_node_fs6.default.readFileSync(configPath, "utf-8");
+      return JSON.parse(configContent);
+    } catch (error) {
+      console.error(`Error al leer la configuraci\xF3n de la instancia: ${error}`);
+      return null;
+    }
+  }
+  /**
+   * Actualiza la configuración de la instancia
+   * @param instancePath Ruta de la instancia
+   * @param updates Actualizaciones a aplicar
+   */
+  updateInstanceConfig(instancePath, updates) {
+    const config = this.getInstanceConfig(instancePath);
+    if (!config) {
+      throw new Error(`No se encontr\xF3 la configuraci\xF3n de la instancia: ${instancePath}`);
+    }
+    const updatedConfig = { ...config, ...updates };
+    this.saveInstanceConfig(instancePath, updatedConfig);
+  }
+};
+var instanceService = new InstanceService();
+
+// src/services/instanceCreationService.ts
+var import_node_path9 = __toESM(require("node:path"), 1);
+var import_node_fs8 = __toESM(require("node:fs"), 1);
 
 // src/services/modrinthDownloadService.ts
 var import_node_path8 = __toESM(require("node:path"), 1);
@@ -8244,9 +8249,10 @@ var GameLaunchService = class {
         const libraryJars = [];
         if (versionData.libraries && Array.isArray(versionData.libraries)) {
           for (const lib of versionData.libraries) {
+            let allowed2 = true;
+            let appliesToOS = true;
             if (lib.rules) {
-              let allowed2 = false;
-              let appliesToOS = true;
+              allowed2 = false;
               for (const rule of lib.rules) {
                 if (rule.os && rule.os.name) {
                   const osName = this.getOSName();
@@ -8268,8 +8274,6 @@ var GameLaunchService = class {
               }
               if (!appliesToOS && lib.rules.some((r) => r.os?.name)) continue;
               if (!allowed2 && lib.rules.some((r) => r.action === "disallow")) continue;
-            } else {
-              allowed = true;
             }
             if (lib.downloads && lib.downloads.artifact) {
               let libPath;
@@ -8976,8 +8980,39 @@ import_electron2.ipcMain.handle("game:launch", async (_e, p) => {
     const windowHeight = instanceConfig?.windowHeight || 720;
     const jvmArgs = instanceConfig?.jvmArgs || [];
     let finalJavaPath = javaPath;
+    const getJavaVersionFromPath = (path15) => {
+      const match = path15.match(/java(\d+)/i);
+      if (match && match[1]) {
+        return parseInt(match[1], 10);
+      }
+      return null;
+    };
     if (!javaPath || javaPath === "java") {
       finalJavaPath = await javaDownloadService.getJavaForMinecraftVersion(i.version);
+    } else {
+      const recommendedJavaPath = await javaDownloadService.getJavaForMinecraftVersion(i.version);
+      const currentVersion = getJavaVersionFromPath(javaPath);
+      const recommendedVersion = getJavaVersionFromPath(recommendedJavaPath);
+      if (currentVersion !== null && recommendedVersion !== null) {
+        if (recommendedVersion > currentVersion) {
+          logProgressService.info(`Versi\xF3n de Java actual (${currentVersion}) es menor que la recomendada (${recommendedVersion}) para Minecraft ${i.version}, actualizando...`, {
+            currentVersion,
+            recommendedVersion
+          });
+          finalJavaPath = recommendedJavaPath;
+        } else {
+          logProgressService.info(`Versi\xF3n de Java actual (${currentVersion}) es adecuada para Minecraft ${i.version}`, {
+            currentVersion,
+            recommendedVersion
+          });
+        }
+      } else {
+        finalJavaPath = recommendedJavaPath;
+        logProgressService.warning(`No se pudo determinar la versi\xF3n de Java, usando recomendada`, {
+          javaPath,
+          recommendedJavaPath
+        });
+      }
     }
     logProgressService.info(`Usando Java en: ${finalJavaPath}`, { javaPath: finalJavaPath });
     const childProcess = await gameLaunchService.launchGame({
@@ -9223,6 +9258,14 @@ import_electron2.ipcMain.handle("java:test", async (_event, javaPath) => {
 });
 import_electron2.ipcMain.handle("java:get-compatibility", async (_event, minecraftVersion) => {
   return javaService_default.getMinecraftJavaCompatibility(minecraftVersion);
+});
+import_electron2.ipcMain.handle("java:getJavaForMinecraftVersion", async (_event, minecraftVersion) => {
+  try {
+    return await javaService_default.getJavaForMinecraftVersion(minecraftVersion);
+  } catch (error) {
+    console.error("Error getting Java for Minecraft version:", error);
+    throw error;
+  }
 });
 import_electron2.ipcMain.handle("java:explore", async () => {
   const { dialog } = require("electron");

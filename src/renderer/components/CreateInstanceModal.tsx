@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { integratedDownloadService } from '../services/integratedDownloadService';
+import { profileService } from '../services/profileService';
+import { instanceProfileService } from '../services/instanceProfileService';
 import '../components/slider.css';
 
 interface CreateInstanceModalProps {
@@ -27,7 +29,7 @@ interface ProgressStatus {
   details?: string;
 }
 
-const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClose }) => {
+const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClose, onCreated }) => {
   const [instanceName, setInstanceName] = useState('');
   const [loaderType, setLoaderType] = useState<'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'>('vanilla');
   const [mcVersion, setMcVersion] = useState('');
@@ -104,6 +106,23 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
       setLoading(false);
     }
   };
+
+  // Actualizar la versión de Java cuando se cambia la versión de Minecraft (solo visualmente, sin descargar)
+  useEffect(() => {
+    if (mcVersion) {
+      // Fallback: usar lógica local simple para mostrar la versión recomendada
+      const majorVersion = parseInt(mcVersion.split('.')[1] || '0', 10);
+      if (majorVersion >= 21) {
+        setJavaVersion('21');
+      } else if (majorVersion >= 17) {
+        setJavaVersion('17');
+      } else if (majorVersion >= 16) {
+        setJavaVersion('16');
+      } else {
+        setJavaVersion('8');
+      }
+    }
+  }, [mcVersion]);
 
   // Cargar versiones específicas del loader cuando se selecciona una versión de MC
   useEffect(() => {
@@ -564,7 +583,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                               >
                                 <option value="8">Java 8</option>
                                 <option value="11">Java 11</option>
-                                <option value="17" selected>Java 17</option>
+                                <option value="17">Java 17</option>
                                 <option value="21">Java 21</option>
                               </select>
                             </div>

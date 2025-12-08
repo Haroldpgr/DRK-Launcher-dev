@@ -53,10 +53,10 @@ export const instanceProfileService = {
     const links = getLinks();
     const initialLength = links.length;
     const updatedLinks = links.filter(link => link.instanceId !== instanceId);
-    
+
     if (updatedLinks.length !== initialLength) {
       saveLinks(updatedLinks);
-      
+
       // Remueve la instancia de todos los perfiles que la tenían
       const profiles = profileService.getAllProfiles();
       profiles.forEach(profile => {
@@ -65,11 +65,43 @@ export const instanceProfileService = {
           profileService.updateProfile(profile.username, { ...profile, instances: updatedInstances });
         }
       });
-      
+
       return true;
     }
-    
+
     return false;
+  },
+
+  // Desvincula una instancia de un perfil específico
+  unlinkInstanceFromProfile(instanceId: string, profileUsername: string): boolean {
+    const links = getLinks();
+    const initialLength = links.length;
+    const updatedLinks = links.filter(link =>
+      !(link.instanceId === instanceId && link.profileUsername === profileUsername)
+    );
+
+    if (updatedLinks.length !== initialLength) {
+      saveLinks(updatedLinks);
+
+      // Remueve la instancia del perfil específico
+      const profile = profileService.getProfileByUsername(profileUsername);
+      if (profile && profile.instances && profile.instances.includes(instanceId)) {
+        const updatedInstances = profile.instances.filter(id => id !== instanceId);
+        profileService.updateProfile(profileUsername, { ...profile, instances: updatedInstances });
+      }
+
+      return true;
+    }
+
+    return false;
+  },
+
+  // Verifica si una instancia está vinculada a un perfil específico
+  isInstanceLinkedToProfile(instanceId: string, profileUsername: string): boolean {
+    const links = getLinks();
+    return links.some(link =>
+      link.instanceId === instanceId && link.profileUsername === profileUsername
+    );
   },
 
   // Obtiene el perfil asociado a una instancia

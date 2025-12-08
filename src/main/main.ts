@@ -401,10 +401,51 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
     const windowHeight = instanceConfig?.windowHeight || 720;
     const jvmArgs = instanceConfig?.jvmArgs || [];
 
-    // Obtener el JRE recomendado para esta versión de Minecraft si no se ha especificado uno
+    // Obtener el JRE recomendado para esta versión de Minecraft
     let finalJavaPath = javaPath;
+
+    // Función auxiliar para extraer la versión de Java de una ruta
+    const getJavaVersionFromPath = (path: string): number | null => {
+      // Buscar patrones como java8, java17, java21 en la ruta
+      const match = path.match(/java(\d+)/i);
+      if (match && match[1]) {
+        return parseInt(match[1], 10);
+      }
+      return null;
+    };
+
+    // Si no hay javaPath o es 'java', usar la versión recomendada
     if (!javaPath || javaPath === 'java') {
       finalJavaPath = await javaDownloadService.getJavaForMinecraftVersion(i.version);
+    } else {
+      // Si ya hay un javaPath, verificar si es compatible con la versión de Minecraft
+      const recommendedJavaPath = await javaDownloadService.getJavaForMinecraftVersion(i.version);
+
+      const currentVersion = getJavaVersionFromPath(javaPath);
+      const recommendedVersion = getJavaVersionFromPath(recommendedJavaPath);
+
+      if (currentVersion !== null && recommendedVersion !== null) {
+        // Si la versión recomendada es mayor que la actual, usar la recomendada
+        if (recommendedVersion > currentVersion) {
+          logProgressService.info(`Versión de Java actual (${currentVersion}) es menor que la recomendada (${recommendedVersion}) para Minecraft ${i.version}, actualizando...`, {
+            currentVersion,
+            recommendedVersion
+          });
+          finalJavaPath = recommendedJavaPath;
+        } else {
+          logProgressService.info(`Versión de Java actual (${currentVersion}) es adecuada para Minecraft ${i.version}`, {
+            currentVersion,
+            recommendedVersion
+          });
+        }
+      } else {
+        // Si no podemos determinar la versión, usar la recomendada
+        finalJavaPath = recommendedJavaPath;
+        logProgressService.warning(`No se pudo determinar la versión de Java, usando recomendada`, {
+          javaPath,
+          recommendedJavaPath
+        });
+      }
     }
 
     logProgressService.info(`Usando Java en: ${finalJavaPath}`, { javaPath: finalJavaPath });
@@ -732,6 +773,15 @@ ipcMain.handle('java:test', async (_event, javaPath: string) => {
 
 ipcMain.handle('java:get-compatibility', async (_event, minecraftVersion: string) => {
   return javaService.getMinecraftJavaCompatibility(minecraftVersion);
+});
+
+ipcMain.handle('java:getJavaForMinecraftVersion', async (_event, minecraftVersion: string) => {
+  try {
+    return await javaService.getJavaForMinecraftVersion(minecraftVersion);
+  } catch (error) {
+    console.error('Error getting Java for Minecraft version:', error);
+    throw error;
+  }
 });
 
 ipcMain.handle('java:explore', async () => {

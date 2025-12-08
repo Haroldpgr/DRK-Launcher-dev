@@ -1,6 +1,7 @@
 // src/main/javaService.ts
 import { JavaDetector } from './javaDetector';
 import type { JavaInfo } from '../renderer/types/java.d';
+import { javaDownloadService } from '../services/javaDownloadService';
 
 class JavaService {
   private detector: JavaDetector;
@@ -62,6 +63,10 @@ class JavaService {
 
     this.saveConfig();
     return this.installedJavas.length < initialLength;
+  }
+
+  async getJavaForMinecraftVersion(minecraftVersion: string): Promise<string> {
+    return await javaDownloadService.getJavaForMinecraftVersion(minecraftVersion);
   }
 
   getMinecraftJavaCompatibility(minecraftVersion: string): { recommended: string; latest: string } {
