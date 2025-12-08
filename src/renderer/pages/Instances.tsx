@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Profile, profileService } from '../services/profileService'
 import { instanceProfileService } from '../services/instanceProfileService'
 import CreateInstanceModal from '../components/CreateInstanceModal'
+import InstanceEditModal from '../components/InstanceEditModal'
 
 type InstanceType = 'owned' | 'imported' | 'shared';
 
@@ -17,131 +18,7 @@ type Instance = {
   totalTimePlayed?: number // en milisegundos
   type: InstanceType; // Tipo de instancia: owned (creada), imported (importada), shared (compartida)
   source?: string; // Origen de la instancia (path, url, etc.) para las importadas/compartidas
-}
-
-interface InstanceCardProps {
-  instance: Instance
-  onPlay: (id: string) => void
-  onOpenFolder: (id: string) => void
-  onEdit: (instance: Instance) => void
-  onDelete: (id: string) => void
-  onViewDetails: (instance: Instance) => void
-  isReady?: (instance: Instance) => boolean
-}
-
-const InstanceCard: React.FC<InstanceCardProps> = ({ instance, onPlay, onOpenFolder, onEdit, onDelete, onViewDetails, isReady }) => {
-  const formatTime = (milliseconds: number | undefined) => {
-    if (!milliseconds) return '0 min';
-    const minutes = Math.floor(milliseconds / (1000 * 60));
-    if (minutes < 60) {
-      return `${minutes} min`;
-    } else if (minutes < 1440) { // menos de un día
-      const hours = Math.floor(minutes / 60);
-      const mins = minutes % 60;
-      return `${hours}h ${mins}min`;
-    } else {
-      const days = Math.floor(minutes / 1440);
-      const hours = Math.floor((minutes % 1440) / 60);
-      return `${days}d ${hours}h`;
-    }
-  };
-
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      whileHover={{ y: -5 }}
-      className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 transition-all duration-300 hover:bg-gray-800/70 hover:border-gray-600/50"
-    >
-      <div className="flex justify-between items-start">
-        <div>
-          <h3 className="text-lg font-bold text-white truncate max-w-[70%]">{instance.name}</h3>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs bg-gray-700/50 text-gray-300 px-2 py-1 rounded-full">
-              {instance.version}
-            </span>
-            {instance.loader && (
-              <span className="text-xs bg-blue-900/50 text-blue-300 px-2 py-1 rounded-full">
-                {instance.loader}
-              </span>
-            )}
-            <span className={`text-xs px-2 py-1 rounded-full ${
-              instance.type === 'owned'
-                ? 'bg-green-900/50 text-green-300'
-                : instance.type === 'imported'
-                  ? 'bg-yellow-900/50 text-yellow-300'
-                  : 'bg-purple-900/50 text-purple-300'
-            }`}>
-              {instance.type === 'owned'
-                ? 'Creada'
-                : instance.type === 'imported'
-                  ? 'Importada'
-                  : 'Compartida'}
-            </span>
-          </div>
-        </div>
-        <div className="text-xs text-gray-400">
-          {formatDate(instance.createdAt)}
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between">
-        <div className="text-sm text-gray-400">
-          <div>Jugado: {instance.lastPlayed ? formatDate(instance.lastPlayed) : 'Nunca'}</div>
-          <div>Tiempo total: {formatTime(instance.totalTimePlayed)}</div>
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          onClick={() => onPlay(instance.id)}
-          className="flex-1 min-w-[70px] px-3 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors text-sm"
-        >
-          Jugar
-        </button>
-        <button
-          onClick={() => onOpenFolder(instance.id)}
-          className="flex-1 min-w-[70px] px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm"
-        >
-          Carpeta
-        </button>
-        <button
-          onClick={() => onViewDetails(instance)}
-          className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
-        <button
-          onClick={() => onEdit(instance)}
-          className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-          </svg>
-        </button>
-        <button
-          onClick={() => onDelete(instance.id)}
-          className="px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </button>
-      </div>
-    </motion.div>
-  )
+  ready?: boolean; // Indica si la instancia está lista para jugar
 }
 
 type InstancesProps = {
@@ -155,6 +32,7 @@ export default function Instances({ onPlay }: InstancesProps) {
   const [sharedInstances, setSharedInstances] = useState<Instance[]>([])
   const [activeTab, setActiveTab] = useState<'all' | 'owned' | 'imported' | 'shared'>('all')
   const [editing, setEditing] = useState<Instance | null>(null)
+  const [editingFull, setEditingFull] = useState<any | null>(null) // Para el nuevo modal de edición completa
   const [newName, setNewName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -178,63 +56,7 @@ export default function Instances({ onPlay }: InstancesProps) {
     return instance.path && instance.path.length > 0;
   };
 
-  // Función para refrescar la lista de instancias
-  const refreshInstances = async () => {
-    if (!selectedProfile) return;
-
-    // Asegurarse de que window.api y window.api.instances estén disponibles
-    if (!window.api?.instances) {
-      setError('Servicio de instancias no disponible aún. Esperando inicialización...');
-      return;
-    }
-
-    try {
-      const allInstances = await window.api.instances.list();
-
-      // Filtrar instancias que pertenecen al perfil seleccionado
-      const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile);
-      const profileInstances = allInstances.filter(instance =>
-        profileInstanceIds.includes(instance.id)
-      );
-
-      // Determinar el tipo de instancia
-      const classifiedInstances = profileInstances.map(instance => {
-        // Si la instancia tiene una propiedad que indica que fue importada o compartida
-        // o si tiene una URL o path externo, se clasifica como importada
-        let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
-
-        // Si la instancia fue creada a través de importación o compartición
-        if (instance.source) {
-          if (instance.source.startsWith('http')) {
-            // Si el origen es una URL, probablemente sea importada o compartida
-            type = 'imported';
-          } else if (instance.source.includes('\\') || instance.source.includes('/')) {
-            // Si el origen es una ruta de archivo, podría ser importada
-            type = 'imported';
-          }
-        } else {
-          // Si no tiene origen definido, probablemente sea una instancia creada localmente
-          type = 'owned';
-        }
-
-        const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile);
-        return {
-          ...instance,
-          totalTimePlayed: timePlayed,
-          type: type
-        };
-      });
-
-      setInstances(classifiedInstances);
-      classifyInstances(classifiedInstances);
-      setError(null); // Limpiar error si todo funciona
-    } catch (err) {
-      console.error('Error al cargar las instancias:', err);
-      setError(`Error al cargar las instancias: ${(err as Error).message || 'Error desconocido'}`);
-    }
-  };
-
-  // Cargar perfiles y validar instancias
+  // Cargar perfiles
   useEffect(() => {
     try {
       const allProfiles = profileService.getAllProfiles()
@@ -254,6 +76,17 @@ export default function Instances({ onPlay }: InstancesProps) {
     }
   }, [])
 
+  // Clasificar instancias por tipo
+  const classifyInstances = (instances: Instance[]) => {
+    const owned = instances.filter(instance => instance.type === 'owned');
+    const imported = instances.filter(instance => instance.type === 'imported');
+    const shared = instances.filter(instance => instance.type === 'shared');
+
+    setOwnedInstances(owned);
+    setImportedInstances(imported);
+    setSharedInstances(shared);
+  };
+
   // Función para auto-detectar y validar instancias existentes
   const autoDetectInstances = async () => {
     if (!window.api?.instances || !selectedProfile) return;
@@ -271,11 +104,11 @@ export default function Instances({ onPlay }: InstancesProps) {
 
       // Obtener todas las instancias existentes en el sistema (después del escaneo)
       const allSystemInstances = await window.api.instances.list();
-
+      
       // Verificar si hay instancias en el directorio de instancias que no están registradas
       // Esto ayuda a detectar instancias que pudieron haber sido creadas anteriormente
       // pero no registradas en el perfil actual
-
+      
       // Para cada instancia del sistema, verificar si está asociada a este perfil
       // y si no lo está, preguntar al usuario si quiere asociarlas
       for (const instance of allSystemInstances) {
@@ -335,24 +168,6 @@ export default function Instances({ onPlay }: InstancesProps) {
     }
   };
 
-  // Ejecutar auto-detección cuando se selecciona un perfil
-  useEffect(() => {
-    if (selectedProfile) {
-      autoDetectInstances();
-    }
-  }, [selectedProfile]); // Solo se ejecuta cuando selectedProfile cambia
-
-  // Clasificar instancias por tipo
-  const classifyInstances = (instances: Instance[]) => {
-    const owned = instances.filter(instance => instance.type === 'owned');
-    const imported = instances.filter(instance => instance.type === 'imported');
-    const shared = instances.filter(instance => instance.type === 'shared');
-
-    setOwnedInstances(owned);
-    setImportedInstances(imported);
-    setSharedInstances(shared);
-  };
-
   // Cargar instancias cuando se seleccione un perfil
   useEffect(() => {
     if (!selectedProfile) {
@@ -363,64 +178,7 @@ export default function Instances({ onPlay }: InstancesProps) {
       return;
     }
 
-    const fetchInstances = async () => {
-      // Asegurarse de que window.api y window.api.instances estén disponibles
-      if (!window.api?.instances) {
-        setError('Servicio de instancias no disponible aún. Esperando inicialización...');
-        // Reintentar después de un corto periodo
-        setTimeout(() => {
-          if (selectedProfile) fetchInstances();
-        }, 1000);
-        return;
-      }
-
-      try {
-        const allInstances = await window.api.instances.list();
-
-        // Filtrar instancias que pertenecen al perfil seleccionado
-        const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile);
-        const profileInstances = allInstances.filter(instance =>
-          profileInstanceIds.includes(instance.id)
-        );
-
-        // Determinar el tipo de instancia
-        const classifiedInstances = profileInstances.map(instance => {
-          // Si la instancia tiene una propiedad que indica que fue importada o compartida
-          // o si tiene una URL o path externo, se clasifica como importada
-          let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
-
-          // Si la instancia fue creada a través de importación o compartición
-          if (instance.source) {
-            if (instance.source.startsWith('http')) {
-              // Si el origen es una URL, probablemente sea importada o compartida
-              type = 'imported';
-            } else if (instance.source.includes('\\') || instance.source.includes('/')) {
-              // Si el origen es una ruta de archivo, podría ser importada
-              type = 'imported';
-            }
-          } else {
-            // Si no tiene origen definido, probablemente sea una instancia creada localmente
-            type = 'owned';
-          }
-
-          const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile);
-          return {
-            ...instance,
-            totalTimePlayed: timePlayed,
-            type: type
-          };
-        });
-
-        setInstances(classifiedInstances);
-        classifyInstances(classifiedInstances);
-        setError(null); // Limpiar error si todo funciona
-      } catch (err) {
-        console.error('Error al cargar las instancias:', err);
-        setError(`Error al cargar las instancias: ${(err as Error).message || 'Error desconocido'}`);
-      }
-    };
-
-    fetchInstances();
+    autoDetectInstances();
   }, [selectedProfile]);
 
   const remove = async (id: string) => {
@@ -435,41 +193,7 @@ export default function Instances({ onPlay }: InstancesProps) {
       instanceProfileService.unlinkInstance(id)
 
       await window.api.instances.delete(id)
-      const updatedList = await window.api.instances.list()
-      // Filtrar instancias que pertenecen al perfil seleccionado
-      const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile || '')
-      const profileInstances = updatedList.filter(instance =>
-        profileInstanceIds.includes(instance.id)
-      )
-
-      // Determinar el tipo de instancia y actualizar las listas
-      const classifiedInstances = profileInstances.map(instance => {
-        let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
-
-        // Si la instancia fue creada a través de importación o compartición
-        if (instance.source) {
-          if (instance.source.startsWith('http')) {
-            // Si el origen es una URL, probablemente sea importada o compartida
-            type = 'imported';
-          } else if (instance.source.includes('\\') || instance.source.includes('/')) {
-            // Si el origen es una ruta de archivo, podría ser importada
-            type = 'imported';
-          }
-        } else {
-          // Si no tiene origen definido, probablemente sea una instancia creada localmente
-          type = 'owned';
-        }
-
-        const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile || '');
-        return {
-          ...instance,
-          totalTimePlayed: timePlayed,
-          type: type
-        };
-      });
-
-      setInstances(classifiedInstances);
-      classifyInstances(classifiedInstances);
+      autoDetectInstances(); // Recargar instancias después de eliminar
     } catch (err) {
       console.error('Error al eliminar instancia:', err)
       setError(`Error al eliminar instancia: ${(err as Error).message || 'Error desconocido'}`)
@@ -497,8 +221,40 @@ export default function Instances({ onPlay }: InstancesProps) {
   }
 
   const startEdit = (instance: Instance) => {
-    setEditing(instance)
-    setNewName(instance.name)
+    setEditingFull(instance)
+  }
+
+  const closeEdit = () => {
+    setEditingFull(null)
+  }
+
+  const handleSaveEdit = async (updatedInstance: any) => {
+    try {
+      // Actualizar la instancia en el backend
+      if (window.api?.instances?.update) {
+        await window.api.instances.update({ 
+          id: updatedInstance.id, 
+          patch: {
+            name: updatedInstance.name,
+            version: updatedInstance.version,
+            loader: updatedInstance.loader,
+            ramMb: updatedInstance.maxMemory,
+            javaPath: updatedInstance.javaPath,
+            windowWidth: updatedInstance.windowWidth,
+            windowHeight: updatedInstance.windowHeight,
+            jvmArgs: updatedInstance.jvmArgs
+          }
+        })
+      }
+
+      // Actualizar la lista de instancias
+      autoDetectInstances(); // Recargar instancias después de guardar
+      
+      closeEdit();
+    } catch (err) {
+      console.error('Error al guardar edición:', err)
+      setError(`Error al guardar edición: ${(err as Error).message || 'Error desconocido'}`)
+    }
   }
 
   const viewInstanceDetails = (instance: Instance) => {
@@ -530,41 +286,7 @@ export default function Instances({ onPlay }: InstancesProps) {
       }
 
       // Actualizar la lista de instancias
-      const updatedList = await window.api.instances.list();
-      // Filtrar instancias que pertenecen al perfil seleccionado
-      const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile || '');
-      const profileInstances = updatedList.filter(instance =>
-        profileInstanceIds.includes(instance.id)
-      );
-
-      // Determinar el tipo de instancia y actualizar las listas
-      const classifiedInstances = profileInstances.map(instance => {
-        let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
-
-        // Si la instancia fue creada a través de importación o compartición
-        if (instance.source) {
-          if (instance.source.startsWith('http')) {
-            // Si el origen es una URL, probablemente sea importada o compartida
-            type = 'imported';
-          } else if (instance.source.includes('\\') || instance.source.includes('/')) {
-            // Si el origen es una ruta de archivo, podría ser importada
-            type = 'imported';
-          }
-        } else {
-          // Si no tiene origen definido, probablemente sea una instancia creada localmente
-          type = 'owned';
-        }
-
-        const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile || '');
-        return {
-          ...instance,
-          totalTimePlayed: timePlayed,
-          type: type
-        };
-      });
-
-      setInstances(classifiedInstances);
-      classifyInstances(classifiedInstances);
+      autoDetectInstances(); // Recargar instancias después de importar
 
     } catch (err) {
       console.error('Error al importar instancia:', err);
@@ -581,42 +303,7 @@ export default function Instances({ onPlay }: InstancesProps) {
 
     try {
       await window.api.instances.update({ id, patch: { name: newName } })
-      const updatedList = await window.api.instances.list()
-
-      // Filtrar instancias que pertenecen al perfil seleccionado
-      const profileInstanceIds = instanceProfileService.getInstancesForProfile(selectedProfile || '')
-      const profileInstances = updatedList.filter(instance =>
-        profileInstanceIds.includes(instance.id)
-      )
-
-      // Determinar el tipo de instancia y actualizar las listas
-      const classifiedInstances = profileInstances.map(instance => {
-        let type: InstanceType = 'owned'; // Por defecto, asumimos que es propia
-
-        // Si la instancia fue creada a través de importación o compartición
-        if (instance.source) {
-          if (instance.source.startsWith('http')) {
-            // Si el origen es una URL, probablemente sea importada o compartida
-            type = 'imported';
-          } else if (instance.source.includes('\\') || instance.source.includes('/')) {
-            // Si el origen es una ruta de archivo, podría ser importada
-            type = 'imported';
-          }
-        } else {
-          // Si no tiene origen definido, probablemente sea una instancia creada localmente
-          type = 'owned';
-        }
-
-        const timePlayed = instanceProfileService.getPlayTime(instance.id, selectedProfile || '');
-        return {
-          ...instance,
-          totalTimePlayed: timePlayed,
-          type: type
-        };
-      });
-
-      setInstances(classifiedInstances);
-      classifyInstances(classifiedInstances);
+      autoDetectInstances(); // Recargar instancias después de editar
       setEditing(null)
       setNewName('')
     } catch (err) {
@@ -664,6 +351,7 @@ export default function Instances({ onPlay }: InstancesProps) {
   }
 
   return (
+    <>
     <div className="p-6">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">Instancias de Minecraft</h1>
@@ -778,48 +466,6 @@ export default function Instances({ onPlay }: InstancesProps) {
         </button>
       </div>
 
-      {/* Modal de edición */}
-      <AnimatePresence>
-        {editing && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 20 }}
-              className="bg-gray-800/90 border border-gray-700/50 rounded-xl p-6 w-full max-w-md"
-            >
-              <h3 className="text-xl font-bold text-white mb-4">Editar Instancia</h3>
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="w-full p-3 bg-gray-700/50 border border-gray-600/50 rounded-xl text-white mb-4"
-                placeholder="Nombre de la instancia"
-              />
-              <div className="flex gap-3 justify-end">
-                <button
-                  onClick={() => setEditing(null)}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => saveEdit(editing.id)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-                >
-                  Guardar
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Lista de instancias */}
       {filteredInstances.length === 0 ? (
         <div className="text-center py-12">
@@ -830,143 +476,267 @@ export default function Instances({ onPlay }: InstancesProps) {
           </div>
           <h3 className="text-xl font-semibold text-gray-300 mb-2">No hay instancias</h3>
           <p className="text-gray-500">Crea una nueva instancia para comenzar a jugar</p>
-          <button className="mt-4 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl transition-all duration-300">
+          <button 
+            onClick={() => setShowCreateModal(true)}
+            className="mt-4 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl transition-all duration-300"
+          >
             Crear Primera Instancia
           </button>
         </div>
       ) : (
-        <motion.div 
+        <motion.div
           layout
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
         >
-          <AnimatePresence>
-            {filteredInstances.map(instance => (
-              <InstanceCard
-                key={instance.id}
-                instance={instance}
-                onPlay={handlePlay}
-                onOpenFolder={open}
-                onEdit={startEdit}
-                onDelete={remove}
-                onViewDetails={viewInstanceDetails}
-                isReady={checkInstanceReady}
-              />
-            ))}
-          </AnimatePresence>
+          {filteredInstances.map(instance => (
+            <motion.div
+              key={instance.id}
+              layout
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              whileHover={{ y: -5 }}
+              className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 transition-all duration-300 hover:bg-gray-800/70 hover:border-gray-600/50"
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-lg font-bold text-white truncate max-w-[70%]">{instance.name}</h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs bg-gray-700/50 text-gray-300 px-2 py-1 rounded-full">
+                      {instance.version}
+                    </span>
+                    {instance.loader && (
+                      <span className="text-xs bg-blue-900/50 text-blue-300 px-2 py-1 rounded-full">
+                        {instance.loader}
+                      </span>
+                    )}
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      instance.type === 'owned'
+                        ? 'bg-green-900/50 text-green-300'
+                        : instance.type === 'imported'
+                          ? 'bg-yellow-900/50 text-yellow-300'
+                          : 'bg-purple-900/50 text-purple-300'
+                    }`}>
+                      {instance.type === 'owned'
+                        ? 'Creada'
+                        : instance.type === 'imported'
+                          ? 'Importada'
+                          : 'Compartida'}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-400">
+                  {new Date(instance.createdAt).toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between">
+                <div className="text-sm text-gray-400">
+                  <div>Jugado: {instance.lastPlayed ? new Date(instance.lastPlayed).toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                  }) : 'Nunca'}</div>
+                  <div>Tiempo total: {instance.totalTimePlayed ? (
+                    (() => {
+                      const minutes = Math.floor(instance.totalTimePlayed / (1000 * 60));
+                      if (minutes < 60) {
+                        return `${minutes} min`;
+                      } else if (minutes < 1440) { // menos de un día
+                        const hours = Math.floor(minutes / 60);
+                        const mins = minutes % 60;
+                        return `${hours}h ${mins}min`;
+                      } else {
+                        const days = Math.floor(minutes / 1440);
+                        const hours = Math.floor((minutes % 1440) / 60);
+                        return `${days}d ${hours}h`;
+                      }
+                    })()
+                  ) : '0 min'}</div>
+                </div>
+                {!checkInstanceReady(instance) && (
+                  <div className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-1 rounded-full">
+                    Pendiente
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => handlePlay(instance.id)}
+                  className={`flex-1 min-w-[70px] px-3 py-2 rounded-lg transition-colors text-sm ${
+                    checkInstanceReady(instance)
+                      ? 'bg-green-600 hover:bg-green-500 text-white' 
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-400 cursor-not-allowed'
+                  }`}
+                  disabled={!checkInstanceReady(instance)}
+                >
+                  {checkInstanceReady(instance) ? 'Jugar' : 'Pendiente'}
+                </button>
+                <button
+                  onClick={() => open(instance.id)}
+                  className="flex-1 min-w-[70px] px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm"
+                >
+                  Carpeta
+                </button>
+                <button
+                  onClick={() => startEdit(instance)}
+                  className="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-lg transition-colors text-sm"
+                  title="Editar Instancia"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => viewInstanceDetails(instance)}
+                  className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => remove(instance.id)}
+                  className="px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </motion.div>
+          ))}
         </motion.div>
       )}
 
       <div className="mt-8 text-center text-gray-500 text-sm">
         <p>{filteredInstances.length} instancia{filteredInstances.length !== 1 ? 's' : ''} encontrada{filteredInstances.length !== 1 ? 's' : ''}</p>
       </div>
-
-      <InstanceDetailsModal
-        instance={selectedInstance}
-        isOpen={showInstanceDetails}
-        onClose={() => setShowInstanceDetails(false)}
-        onPlay={handlePlay}
-        onOpenFolder={open}
-      />
-
-      {/* Modal para importar instancias */}
-      <AnimatePresence>
-        {showImportModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 20 }}
-              className="bg-gray-800/90 border border-gray-700/50 rounded-xl p-6 w-full max-w-md"
-            >
-              <h3 className="text-xl font-bold text-white mb-4">Importar Instancia</h3>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">Tipo de importación</label>
-                <div className="flex gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setImportType('link')}
-                    className={`flex-1 py-2 rounded-lg border ${
-                      importType === 'link'
-                        ? 'bg-blue-600 border-blue-500 text-white'
-                        : 'bg-gray-700/50 border-gray-600 text-gray-300'
-                    }`}
-                  >
-                    Link
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setImportType('folder')}
-                    className={`flex-1 py-2 rounded-lg border ${
-                      importType === 'folder'
-                        ? 'bg-blue-600 border-blue-500 text-white'
-                        : 'bg-gray-700/50 border-gray-600 text-gray-300'
-                    }`}
-                  >
-                    Carpeta
-                  </button>
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  {importType === 'link' ? 'URL de la instancia' : 'Ruta de la carpeta'}
-                </label>
-                <input
-                  type="text"
-                  value={importSource}
-                  onChange={(e) => setImportSource(e.target.value)}
-                  placeholder={importType === 'link' ? 'https://ejemplo.com/instancia.zip' : 'C:/ruta/a/la/carpeta'}
-                  className="w-full p-3 bg-gray-700/50 border border-gray-600/50 rounded-xl text-white"
-                />
-              </div>
-
-              <div className="flex gap-3 justify-end">
-                <button
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setImportSource('');
-                  }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!importSource.trim()) {
-                      setError('Por favor, introduce una URL o ruta válida');
-                      return;
-                    }
-
-                    await importInstance(importSource);
-                    setShowImportModal(false);
-                    setImportSource('');
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-                >
-                  Importar
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Modal para crear instancias */}
-      <CreateInstanceModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onCreated={() => {
-          // Refrescar la lista de instancias después de crear una nueva
-          refreshInstances();
-        }}
-      />
     </div>
+
+    <InstanceDetailsModal
+      instance={selectedInstance}
+      isOpen={showInstanceDetails}
+      onClose={() => setShowInstanceDetails(false)}
+      onPlay={handlePlay}
+      onOpenFolder={open}
+    />
+
+    {/* Modal para importar instancias */}
+    <AnimatePresence>
+      {showImportModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 20 }}
+            className="bg-gray-800/90 border border-gray-700/50 rounded-xl p-6 w-full max-w-md"
+          >
+            <h3 className="text-xl font-bold text-white mb-4">Importar Instancia</h3>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-300 mb-2">Tipo de importación</label>
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={() => setImportType('link')}
+                  className={`flex-1 py-2 rounded-lg border ${
+                    importType === 'link'
+                      ? 'bg-blue-600 border-blue-500 text-white'
+                      : 'bg-gray-700/50 border-gray-600 text-gray-300'
+                  }`}
+                >
+                  Link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportType('folder')}
+                  className={`flex-1 py-2 rounded-lg border ${
+                    importType === 'folder'
+                      ? 'bg-blue-600 border-blue-500 text-white'
+                      : 'bg-gray-700/50 border-gray-600 text-gray-300'
+                  }`}
+                >
+                  Carpeta
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                {importType === 'link' ? 'URL de la instancia' : 'Ruta de la carpeta'}
+              </label>
+              <input
+                type="text"
+                value={importSource}
+                onChange={(e) => setImportSource(e.target.value)}
+                placeholder={importType === 'link' ? 'https://ejemplo.com/instancia.zip' : 'C:/ruta/a/la/carpeta'}
+                className="w-full p-3 bg-gray-700/50 border border-gray-600/50 rounded-xl text-white"
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportSource('');
+                }}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!importSource.trim()) {
+                    setError('Por favor, introduce una URL o ruta válida');
+                    return;
+                  }
+
+                  await importInstance(importSource);
+                  setShowImportModal(false);
+                  setImportSource('');
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+              >
+                Importar
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Modal para crear instancias */}
+    <CreateInstanceModal
+      isOpen={showCreateModal}
+      onClose={() => setShowCreateModal(false)}
+      onCreated={() => {
+        // Refrescar la lista de instancias después de crear una nueva
+        autoDetectInstances();
+      }}
+    />
+
+    {/* Modal de edición de instancia avanzado */}
+    {editingFull && (
+      <InstanceEditModal
+        instance={editingFull}
+        isOpen={!!editingFull}
+        onClose={closeEdit}
+        onSave={handleSaveEdit}
+        onDelete={remove}
+      />
+    )}
+    </>
   )
 }
 
@@ -979,6 +749,16 @@ const InstanceDetailsModal: React.FC<{
   onOpenFolder: (id: string) => void;
 }> = ({ instance, isOpen, onClose, onPlay, onOpenFolder }) => {
   if (!isOpen || !instance) return null;
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
 
   const formatTime = (milliseconds: number | undefined) => {
     if (!milliseconds) return '0 min';
@@ -994,16 +774,6 @@ const InstanceDetailsModal: React.FC<{
       const hours = Math.floor((minutes % 1440) / 60);
       return `${days}d ${hours}h`;
     }
-  };
-
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
   };
 
   return (
