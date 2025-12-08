@@ -29,6 +29,206 @@ export type LaunchOptions = {
  */
 export class GameLaunchService {
   /**
+   * Valida que todos los archivos necesarios estén presentes antes de lanzar el juego
+   */
+  async validateInstanceFiles(opts: LaunchOptions): Promise<void> {
+    logProgressService.info(`Validando archivos para la instancia ${opts.instanceConfig.name}`, {
+      instance: opts.instanceConfig.name,
+      version: opts.mcVersion
+    });
+
+    // Validar que exista el archivo client.jar
+    const clientJarPath = path.join(opts.instancePath, 'client.jar');
+    if (!fs.existsSync(clientJarPath)) {
+      throw new Error(`client.jar no encontrado en ${clientJarPath}`);
+    }
+
+    // Validar el tamaño del client.jar (debe ser mayor a 1MB)
+    const clientStats = fs.statSync(clientJarPath);
+    if (clientStats.size < 1024 * 1024) { // 1MB
+      throw new Error(`client.jar tiene tamaño muy pequeño (${clientStats.size} bytes), probablemente incompleto`);
+    }
+
+    // Validar que exista el directorio de assets compartido
+    const assetsDir = path.join(getLauncherDataPath(), 'assets');
+    if (!fs.existsSync(assetsDir)) {
+      throw new Error(`Directorio de assets no encontrado: ${assetsDir}`);
+    }
+
+    // Validar que exista el archivo de índice de assets para esta versión
+    const launcherVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    if (!fs.existsSync(launcherVersionJsonPath)) {
+      throw new Error(`Archivo de metadatos de versión no encontrado: ${launcherVersionJsonPath}`);
+    }
+
+    // Cargar el archivo de metadatos para verificar los assets
+    const versionData = JSON.parse(fs.readFileSync(launcherVersionJsonPath, 'utf-8'));
+    const assetIndexId = versionData.assetIndex?.id || opts.mcVersion;
+    const assetIndexPath = path.join(getLauncherDataPath(), 'assets', 'indexes', `${assetIndexId}.json`);
+
+    if (!fs.existsSync(assetIndexPath)) {
+      throw new Error(`Índice de assets no encontrado: ${assetIndexPath}`);
+    }
+
+    // Validar y descargar completamente librerías si es necesario
+    if (versionData.libraries && Array.isArray(versionData.libraries)) {
+      const totalLibraries = versionData.libraries.length;
+      let validatedLibraries = 0;
+
+      for (const lib of versionData.libraries) {
+        // Verificar reglas de aplicabilidad
+        let libraryAllowed = true;
+        if (lib.rules) {
+          libraryAllowed = false;
+          const osName = this.getOSName();
+          for (const rule of lib.rules) {
+            if (rule.action === 'allow') {
+              if (!rule.os || rule.os.name === osName) {
+                libraryAllowed = true;
+              }
+            } else if (rule.action === 'disallow') {
+              if (rule.os && rule.os.name === osName) {
+                libraryAllowed = false;
+                break;
+              }
+            }
+          }
+        }
+
+        if (libraryAllowed && lib.downloads && lib.downloads.artifact) {
+          let libPath;
+          if (lib.downloads.artifact.path) {
+            libPath = path.join(getLauncherDataPath(), 'libraries', lib.downloads.artifact.path);
+          } else {
+            // Construir ruta de librería usando el formato antiguo
+            const nameParts = lib.name.split(':');
+            const [group, artifact, version] = nameParts;
+            const parts = group.split('.');
+            libPath = path.join(getLauncherDataPath(), 'libraries', ...parts, artifact, version, `${artifact}-${version}.jar`);
+          }
+
+          // Verificar si la librería existe, tiene el tamaño correcto y hash correcto
+          if (!fs.existsSync(libPath)) {
+            logProgressService.info(`Descargando librería faltante: ${lib.name}`, {
+              path: libPath,
+              library: lib.name
+            });
+
+            // Crear directorio si no existe
+            this.ensureDir(path.dirname(libPath));
+
+            try {
+              // Descargar la librería
+              await this.downloadLibrary(lib.downloads.artifact.url, libPath);
+              logProgressService.info(`Librería descargada: ${lib.name}`, { library: lib.name });
+              validatedLibraries++;
+            } catch (downloadError) {
+              logProgressService.error(`Error al descargar librería ${lib.name}: ${downloadError.message}`, {
+                library: lib.name,
+                error: downloadError.message
+              });
+            }
+          } else {
+            // Si el archivo existe, verificar su integridad si es posible
+            try {
+              const libStats = fs.statSync(libPath);
+              if (lib.downloads.artifact.size && libStats.size !== lib.downloads.artifact.size) {
+                logProgressService.warning(`Librería tiene tamaño incorrecto, descargando: ${lib.name}`, {
+                  path: libPath,
+                  library: lib.name
+                });
+
+                try {
+                  await this.downloadLibrary(lib.downloads.artifact.url, libPath);
+                  validatedLibraries++;
+                } catch (downloadError) {
+                  logProgressService.error(`Error al descargar librería ${lib.name}: ${downloadError.message}`, {
+                    library: lib.name,
+                    error: downloadError.message
+                  });
+                }
+              } else {
+                validatedLibraries++;
+              }
+            } catch (statError) {
+              logProgressService.error(`Error al verificar librería ${lib.name}: ${statError.message}`, {
+                library: lib.name,
+                error: statError.message
+              });
+            }
+          }
+        }
+      }
+
+      logProgressService.info(`Validación de librerías completada: ${validatedLibraries}/${totalLibraries} librerías procesadas`, {
+        validated: validatedLibraries,
+        total: totalLibraries
+      });
+    }
+
+    // Validar y descargar assets faltantes para la versión de Minecraft
+    try {
+      logProgressService.info(`Iniciando validación y descarga completa de assets para la versión ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion
+      });
+
+      await minecraftDownloadService.validateAndDownloadAssets(opts.mcVersion);
+      logProgressService.info(`Assets validados y completados para la versión ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion
+      });
+
+      // Asegurar que assets críticos como los de idioma estén presentes
+      await minecraftDownloadService.ensureCriticalAssets(opts.mcVersion);
+      logProgressService.info(`Assets críticos asegurados para la versión ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion
+      });
+    } catch (assetsError) {
+      logProgressService.error(`Error al validar assets para la versión ${opts.mcVersion}: ${assetsError.message}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion,
+        error: assetsError.message
+      });
+      throw assetsError;
+    }
+
+    logProgressService.success(`Validación completa de archivos exitosa para la instancia ${opts.instanceConfig.name}`, {
+      instance: opts.instanceConfig.name,
+      version: opts.mcVersion
+    });
+  }
+
+  /**
+   * Asegura que un directorio exista
+   */
+  private ensureDir(dir: string): void {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  /**
+   * Descarga una librería desde una URL
+   */
+  private async downloadLibrary(url: string, outputPath: string): Promise<boolean> {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(outputPath, buffer);
+      return true;
+    } catch (error) {
+      logProgressService.error(`Error downloading library from ${url} to ${outputPath}: ${error}`);
+      return false;
+    }
+  }
+
+  /**
    * Lanza el juego Minecraft con todas las configuraciones apropiadas
    */
   async launchGame(opts: LaunchOptions): Promise<ChildProcess> {
@@ -39,9 +239,12 @@ export class GameLaunchService {
         ram: opts.ramMb
       });
 
+      // Validar los archivos antes de lanzar el juego
+      await this.validateInstanceFiles(opts);
+
       // Construir los argumentos para lanzar el juego
       const args = await this.buildLaunchArguments(opts);
-      
+
       logProgressService.info(`Argumentos de lanzamiento construidos (${args.length} argumentos)`, {
         javaPath: opts.javaPath,
         classpathLength: args.filter(arg => arg.startsWith('-cp')).length > 0 ? 'class' : 'jar'
@@ -59,18 +262,22 @@ export class GameLaunchService {
       // Manejar la salida del proceso
       child.stdout.on('data', (data) => {
         const output = data.toString();
+        // Registrar la salida en un archivo de log específico de la instancia
+        this.logOutputToFile(opts.instanceConfig.name, `[OUT] ${output}`);
         logProgressService.info(`[Minecraft-OUT] ${output}`, { instance: opts.instanceConfig.name });
         opts.onData?.(output);
       });
 
       child.stderr.on('data', (data) => {
         const output = data.toString();
+        // Registrar los errores en un archivo de log específico de la instancia
+        this.logOutputToFile(opts.instanceConfig.name, `[ERROR] ${output}`);
         logProgressService.error(`[Minecraft-ERR] ${output}`, { instance: opts.instanceConfig.name });
         opts.onData?.(output);
       });
 
       child.on('close', (code) => {
-        logProgressService.info(`Minecraft cerrado con código: ${code}`, { 
+        logProgressService.info(`Minecraft cerrado con código: ${code}`, {
           instance: opts.instanceConfig.name,
           exitCode: code
         });
@@ -78,7 +285,7 @@ export class GameLaunchService {
       });
 
       child.on('error', (error) => {
-        logProgressService.error(`Error al lanzar Minecraft: ${error.message}`, { 
+        logProgressService.error(`Error al lanzar Minecraft: ${error.message}`, {
           instance: opts.instanceConfig.name,
           error: error.message
         });
@@ -357,11 +564,11 @@ export class GameLaunchService {
 
     // Obtener el ID real del assetIndex del archivo version.json
     let assetIndexId = opts.mcVersion; // Por defecto usar la versión de Minecraft
-    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    const moddedVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
 
-    if (fs.existsSync(versionJsonPath)) {
+    if (fs.existsSync(moddedVersionJsonPath)) {
       try {
-        const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        const versionData = JSON.parse(fs.readFileSync(moddedVersionJsonPath, 'utf-8'));
         if (versionData.assetIndex && versionData.assetIndex.id) {
           assetIndexId = versionData.assetIndex.id;
         }
@@ -431,7 +638,7 @@ export class GameLaunchService {
     ];
 
     const launcherPath = getLauncherDataPath();
-    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    const forgeVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
 
     // Determinar la configuración según el loader
     let mainClass = '';
@@ -557,11 +764,11 @@ export class GameLaunchService {
 
     // Obtener el ID real del assetIndex del archivo version.json
     let assetIndexId = opts.mcVersion; // Por defecto usar la versión de Minecraft
-    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    const loaderVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
 
-    if (fs.existsSync(versionJsonPath)) {
+    if (fs.existsSync(loaderVersionJsonPath)) {
       try {
-        const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        const versionData = JSON.parse(fs.readFileSync(loaderVersionJsonPath, 'utf-8'));
         if (versionData.assetIndex && versionData.assetIndex.id) {
           assetIndexId = versionData.assetIndex.id;
         }
@@ -600,6 +807,34 @@ export class GameLaunchService {
   }
 
   /**
+   * Registra la salida del juego en un archivo de log específico de la instancia
+   */
+  private logOutputToFile(instanceName: string, output: string): void {
+    try {
+      const launcherPath = getLauncherDataPath();
+      const logsDir = path.join(launcherPath, 'logs', 'games');
+      fs.mkdirSync(logsDir, { recursive: true });
+
+      // Crear un nombre de archivo seguro basado en el nombre de la instancia
+      const safeInstanceName = instanceName
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Eliminar tildes
+        .replace(/[^\w\s-]/g, '') // Eliminar caracteres especiales
+        .replace(/\s+/g, '-') // Reemplazar espacios con guiones
+        .replace(/-+/g, '-') // Eliminar múltiples guiones seguidos
+        .trim(); // Eliminar espacios al inicio y final
+
+      const logFilePath = path.join(logsDir, `${safeInstanceName}_${new Date().toISOString().split('T')[0]}.log`);
+
+      const timestamp = new Date().toISOString();
+      const logEntry = `[${timestamp}] ${output}\n`;
+
+      fs.appendFileSync(logFilePath, logEntry);
+    } catch (error) {
+      console.error('Error al escribir log al archivo:', error);
+    }
+  }
+
+  /**
    * Función auxiliar para obtener el nombre del sistema operativo
    */
   private getOSName(): string {
@@ -623,21 +858,6 @@ export class GameLaunchService {
   /**
    * Función auxiliar para descargar una librería
    */
-  private async downloadLibrary(url: string, outputPath: string): Promise<boolean> {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const buffer = await response.buffer();
-      fs.writeFileSync(outputPath, buffer);
-      return true;
-    } catch (error) {
-      logProgressService.error(`Error downloading library from ${url} to ${outputPath}: ${error}`);
-      return false;
-    }
-  }
 
   /**
    * Función auxiliar para encontrar el JAR del loader

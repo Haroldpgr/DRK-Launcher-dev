@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { pipeline } from 'node:stream';
 import { promisify } from 'node:util';
 import fetch from 'node-fetch';
+import crypto from 'node:crypto';
 import { getLauncherDataPath } from '../utils/paths';
 import { downloadQueueService } from './downloadQueueService';
 
@@ -40,6 +41,209 @@ export class MinecraftDownloadService {
   private ensureDir(dir: string): void {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  /**
+   * Valida y descarga los assets faltantes para una versión específica de Minecraft
+   * @param version Versión de Minecraft (por ejemplo, '1.21.1')
+   * @returns Promise<boolean> Verdadero si todos los assets están presentes o se descargaron exitosamente
+   */
+  public async validateAndDownloadAssets(version: string): Promise<boolean> {
+    try {
+      const versionJsonPath = await this.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+
+      // Obtener el índice de assets
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        console.log(`No se encontró asset index para la versión ${version}, omitiendo validación...`);
+        return true;
+      }
+
+      const assetIndexUrl = assetIndex.url;
+      const assetIndexPath = path.join(this.indexesPath, `${assetIndex.id}.json`);
+
+      // Asegurar que el archivo de índice exista
+      if (!fs.existsSync(assetIndexPath)) {
+        console.log(`Descargando índice de assets para ${version}...`);
+        await this.downloadFile(assetIndexUrl, assetIndexPath);
+      }
+
+      // Cargar el índice de assets
+      const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
+      const assetsObjects = assetIndexData.objects;
+      const totalAssets = Object.keys(assetsObjects).length;
+
+      console.log(`Validando ${totalAssets} assets para la versión ${version}...`);
+
+      // Contar assets faltantes
+      let missingAssets = 0;
+      const assetsToDownload = [];
+
+      for (const [assetName, assetInfo] of Object.entries(assetsObjects as any)) {
+        const hash = (assetInfo as any).hash;
+        const size = (assetInfo as any).size;
+
+        // Crear la ruta del asset basada en el hash (primeros 2 dígitos como subcarpeta)
+        const assetDir = path.join(this.objectsPath, hash.substring(0, 2));
+        const assetPath = path.join(assetDir, hash);
+
+        // Verificar si el asset existe y tiene el tamaño correcto
+        if (!fs.existsSync(assetPath)) {
+          missingAssets++;
+          assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+        } else {
+          const stats = fs.statSync(assetPath);
+          if (stats.size !== size) {
+            console.log(`Asset tiene tamaño incorrecto, se volverá a descargar: ${assetName}`);
+            missingAssets++;
+            assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+          } else {
+            // Verificar el hash del archivo para asegurar la integridad
+            try {
+              const fileBuffer = fs.readFileSync(assetPath);
+              const calculatedHash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+
+              if (calculatedHash !== hash) {
+                console.log(`Asset tiene hash incorrecto, se volverá a descargar: ${assetName}`);
+                missingAssets++;
+                assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+              }
+            } catch (hashError) {
+              console.warn(`No se pudo verificar el hash del asset ${assetName}:`, hashError.message);
+              // Si no podemos verificar el hash, asumimos que está bien para no re-descargar todo
+            }
+          }
+        }
+      }
+
+      if (missingAssets > 0) {
+        console.log(`Encontrados ${missingAssets} assets faltantes o incorrectos para la versión ${version}. Iniciando descarga...`);
+
+        // Descargar assets faltantes
+        let downloadedCount = 0;
+        for (const assetData of assetsToDownload) {
+          const { assetPath, hash, size, assetName } = assetData;
+          const assetDir = path.dirname(assetPath);
+
+          this.ensureDir(assetDir);
+
+          // URL del asset: https://resources.download.minecraft.net/[first_2_chars_of_hash]/[full_hash]
+          const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+
+          try {
+            await this.downloadFile(assetUrl, assetPath, hash, 'sha1');
+
+            // Verificar que el archivo descargado tenga el hash correcto
+            const fileBuffer = fs.readFileSync(assetPath);
+            const calculatedHash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+
+            if (calculatedHash === hash) {
+              downloadedCount++;
+              console.log(`Asset descargado y verificado: ${assetName} (${Math.floor((downloadedCount) / assetsToDownload.length * 100)}%)`);
+            } else {
+              console.error(`El asset descargado tiene hash incorrecto: ${assetName} (esperado: ${hash}, obtenido: ${calculatedHash})`);
+              // Eliminar archivo con hash incorrecto
+              fs.unlinkSync(assetPath);
+            }
+          } catch (downloadError) {
+            console.error(`Error al descargar asset ${assetName}:`, downloadError);
+            // No lanzar error aquí para continuar con otros assets
+          }
+        }
+
+        console.log(`Descarga de assets completada para la versión ${version}: ${downloadedCount}/${assetsToDownload.length} assets nuevos descargados`);
+      } else {
+        console.log(`Todos los assets están presentes y correctos para la versión ${version}`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`Error al validar y descargar assets para la versión ${version}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Asegura que archivos críticos como los de idioma estén presentes para una versión
+   * @param version Versión de Minecraft
+   */
+  public async ensureCriticalAssets(version: string): Promise<void> {
+    try {
+      const versionJsonPath = await this.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+
+      // Obtener el índice de assets
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        console.log(`No se encontró asset index para la versión ${version}, omitiendo verificación de assets críticos...`);
+        return;
+      }
+
+      const assetIndexPath = path.join(this.indexesPath, `${assetIndex.id}.json`);
+
+      // Asegurar que el archivo de índice exista
+      if (!fs.existsSync(assetIndexPath)) {
+        console.log(`Descargando índice de assets para ${version}...`);
+        const assetIndexUrl = assetIndex.url;
+        await this.downloadFile(assetIndexUrl, assetIndexPath);
+      }
+
+      // Cargar el índice de assets
+      const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
+      const assetsObjects = assetIndexData.objects;
+
+      // Buscar archivos de idioma (archivos que contienen 'lang' en su nombre)
+      const languageAssets = Object.keys(assetsObjects)
+        .filter(assetName =>
+          assetName.includes('lang') &&
+          (assetName.endsWith('.json') || assetName.endsWith('.lang'))
+        );
+
+      console.log(`Verificando ${languageAssets.length} assets de idioma para la versión ${version}...`);
+
+      // Verificar que cada asset de idioma esté presente
+      for (const assetName of languageAssets) {
+        const assetInfo = assetsObjects[assetName];
+        const hash = assetInfo.hash;
+        const size = assetInfo.size;
+
+        // Crear la ruta del asset basada en el hash (primeros 2 dígitos como subcarpeta)
+        const assetDir = path.join(this.objectsPath, hash.substring(0, 2));
+        const assetPath = path.join(assetDir, hash);
+
+        // Verificar si el asset existe y tiene el tamaño correcto
+        if (!fs.existsSync(assetPath)) {
+          console.log(`Descargando asset de idioma faltante: ${assetName}`);
+          this.ensureDir(assetDir);
+
+          // URL del asset: https://resources.download.minecraft.net/[first_2_chars_of_hash]/[full_hash]
+          const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+
+          try {
+            await this.downloadFile(assetUrl, assetPath, hash, 'sha1');
+
+            // Verificar que el archivo descargado tenga el hash correcto
+            const fileBuffer = fs.readFileSync(assetPath);
+            const calculatedHash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+
+            if (calculatedHash === hash) {
+              console.log(`Asset de idioma descargado y verificado: ${assetName}`);
+            } else {
+              console.error(`El asset de idioma descargado tiene hash incorrecto: ${assetName}`);
+              fs.unlinkSync(assetPath);
+            }
+          } catch (downloadError) {
+            console.error(`Error al descargar asset de idioma ${assetName}:`, downloadError);
+          }
+        }
+      }
+
+      console.log(`Verificación de assets de idioma completada para la versión ${version}`);
+    } catch (error) {
+      console.error(`Error al asegurar assets críticos para la versión ${version}:`, error);
+      throw error;
     }
   }
 

@@ -3252,11 +3252,11 @@ var init_downloadQueueService = __esm({
        * Calcula el hash de un archivo
        */
       async calculateFileHash(filePath, algorithm) {
-        const crypto = await import("node:crypto");
+        const crypto2 = await import("node:crypto");
         const fs14 = await import("node:fs");
         const stream = await import("node:stream");
         return new Promise((resolve, reject) => {
-          const hash = crypto.createHash(algorithm);
+          const hash = crypto2.createHash(algorithm);
           const input = fs14.createReadStream(filePath);
           input.on("error", reject);
           input.on("data", (chunk) => hash.update(chunk));
@@ -4587,6 +4587,7 @@ var import_node_fs3 = __toESM(require("node:fs"), 1);
 var import_node_stream2 = require("node:stream");
 var import_node_util2 = require("node:util");
 var import_node_fetch2 = __toESM(require_lib2(), 1);
+var import_node_crypto = __toESM(require("node:crypto"), 1);
 init_downloadQueueService();
 var pipelineAsync2 = (0, import_node_util2.promisify)(import_node_stream2.pipeline);
 var MinecraftDownloadService = class {
@@ -4618,6 +4619,150 @@ var MinecraftDownloadService = class {
     }
   }
   /**
+   * Valida y descarga los assets faltantes para una versión específica de Minecraft
+   * @param version Versión de Minecraft (por ejemplo, '1.21.1')
+   * @returns Promise<boolean> Verdadero si todos los assets están presentes o se descargaron exitosamente
+   */
+  async validateAndDownloadAssets(version) {
+    try {
+      const versionJsonPath2 = await this.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        console.log(`No se encontr\xF3 asset index para la versi\xF3n ${version}, omitiendo validaci\xF3n...`);
+        return true;
+      }
+      const assetIndexUrl = assetIndex.url;
+      const assetIndexPath = import_node_path4.default.join(this.indexesPath, `${assetIndex.id}.json`);
+      if (!import_node_fs3.default.existsSync(assetIndexPath)) {
+        console.log(`Descargando \xEDndice de assets para ${version}...`);
+        await this.downloadFile(assetIndexUrl, assetIndexPath);
+      }
+      const assetIndexData = JSON.parse(import_node_fs3.default.readFileSync(assetIndexPath, "utf-8"));
+      const assetsObjects = assetIndexData.objects;
+      const totalAssets = Object.keys(assetsObjects).length;
+      console.log(`Validando ${totalAssets} assets para la versi\xF3n ${version}...`);
+      let missingAssets = 0;
+      const assetsToDownload = [];
+      for (const [assetName, assetInfo] of Object.entries(assetsObjects)) {
+        const hash = assetInfo.hash;
+        const size = assetInfo.size;
+        const assetDir = import_node_path4.default.join(this.objectsPath, hash.substring(0, 2));
+        const assetPath = import_node_path4.default.join(assetDir, hash);
+        if (!import_node_fs3.default.existsSync(assetPath)) {
+          missingAssets++;
+          assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+        } else {
+          const stats = import_node_fs3.default.statSync(assetPath);
+          if (stats.size !== size) {
+            console.log(`Asset tiene tama\xF1o incorrecto, se volver\xE1 a descargar: ${assetName}`);
+            missingAssets++;
+            assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+          } else {
+            try {
+              const fileBuffer = import_node_fs3.default.readFileSync(assetPath);
+              const calculatedHash = import_node_crypto.default.createHash("sha1").update(fileBuffer).digest("hex");
+              if (calculatedHash !== hash) {
+                console.log(`Asset tiene hash incorrecto, se volver\xE1 a descargar: ${assetName}`);
+                missingAssets++;
+                assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+              }
+            } catch (hashError) {
+              console.warn(`No se pudo verificar el hash del asset ${assetName}:`, hashError.message);
+            }
+          }
+        }
+      }
+      if (missingAssets > 0) {
+        console.log(`Encontrados ${missingAssets} assets faltantes o incorrectos para la versi\xF3n ${version}. Iniciando descarga...`);
+        let downloadedCount = 0;
+        for (const assetData of assetsToDownload) {
+          const { assetPath, hash, size, assetName } = assetData;
+          const assetDir = import_node_path4.default.dirname(assetPath);
+          this.ensureDir(assetDir);
+          const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+          try {
+            await this.downloadFile(assetUrl, assetPath, hash, "sha1");
+            const fileBuffer = import_node_fs3.default.readFileSync(assetPath);
+            const calculatedHash = import_node_crypto.default.createHash("sha1").update(fileBuffer).digest("hex");
+            if (calculatedHash === hash) {
+              downloadedCount++;
+              console.log(`Asset descargado y verificado: ${assetName} (${Math.floor(downloadedCount / assetsToDownload.length * 100)}%)`);
+            } else {
+              console.error(`El asset descargado tiene hash incorrecto: ${assetName} (esperado: ${hash}, obtenido: ${calculatedHash})`);
+              import_node_fs3.default.unlinkSync(assetPath);
+            }
+          } catch (downloadError) {
+            console.error(`Error al descargar asset ${assetName}:`, downloadError);
+          }
+        }
+        console.log(`Descarga de assets completada para la versi\xF3n ${version}: ${downloadedCount}/${assetsToDownload.length} assets nuevos descargados`);
+      } else {
+        console.log(`Todos los assets est\xE1n presentes y correctos para la versi\xF3n ${version}`);
+      }
+      return true;
+    } catch (error) {
+      console.error(`Error al validar y descargar assets para la versi\xF3n ${version}:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Asegura que archivos críticos como los de idioma estén presentes para una versión
+   * @param version Versión de Minecraft
+   */
+  async ensureCriticalAssets(version) {
+    try {
+      const versionJsonPath2 = await this.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
+      const assetIndex = versionMetadata.assetIndex;
+      if (!assetIndex) {
+        console.log(`No se encontr\xF3 asset index para la versi\xF3n ${version}, omitiendo verificaci\xF3n de assets cr\xEDticos...`);
+        return;
+      }
+      const assetIndexPath = import_node_path4.default.join(this.indexesPath, `${assetIndex.id}.json`);
+      if (!import_node_fs3.default.existsSync(assetIndexPath)) {
+        console.log(`Descargando \xEDndice de assets para ${version}...`);
+        const assetIndexUrl = assetIndex.url;
+        await this.downloadFile(assetIndexUrl, assetIndexPath);
+      }
+      const assetIndexData = JSON.parse(import_node_fs3.default.readFileSync(assetIndexPath, "utf-8"));
+      const assetsObjects = assetIndexData.objects;
+      const languageAssets = Object.keys(assetsObjects).filter(
+        (assetName) => assetName.includes("lang") && (assetName.endsWith(".json") || assetName.endsWith(".lang"))
+      );
+      console.log(`Verificando ${languageAssets.length} assets de idioma para la versi\xF3n ${version}...`);
+      for (const assetName of languageAssets) {
+        const assetInfo = assetsObjects[assetName];
+        const hash = assetInfo.hash;
+        const size = assetInfo.size;
+        const assetDir = import_node_path4.default.join(this.objectsPath, hash.substring(0, 2));
+        const assetPath = import_node_path4.default.join(assetDir, hash);
+        if (!import_node_fs3.default.existsSync(assetPath)) {
+          console.log(`Descargando asset de idioma faltante: ${assetName}`);
+          this.ensureDir(assetDir);
+          const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
+          try {
+            await this.downloadFile(assetUrl, assetPath, hash, "sha1");
+            const fileBuffer = import_node_fs3.default.readFileSync(assetPath);
+            const calculatedHash = import_node_crypto.default.createHash("sha1").update(fileBuffer).digest("hex");
+            if (calculatedHash === hash) {
+              console.log(`Asset de idioma descargado y verificado: ${assetName}`);
+            } else {
+              console.error(`El asset de idioma descargado tiene hash incorrecto: ${assetName}`);
+              import_node_fs3.default.unlinkSync(assetPath);
+            }
+          } catch (downloadError) {
+            console.error(`Error al descargar asset de idioma ${assetName}:`, downloadError);
+          }
+        }
+      }
+      console.log(`Verificaci\xF3n de assets de idioma completada para la versi\xF3n ${version}`);
+    } catch (error) {
+      console.error(`Error al asegurar assets cr\xEDticos para la versi\xF3n ${version}:`, error);
+      throw error;
+    }
+  }
+  /**
    * Descarga la metadata de una versión específica de Minecraft
    * @param version Versión de Minecraft (por ejemplo, '1.20.1')
    * @returns Ruta al archivo version.json
@@ -4625,10 +4770,10 @@ var MinecraftDownloadService = class {
   async downloadVersionMetadata(version) {
     const versionDir = import_node_path4.default.join(this.versionsPath, version);
     this.ensureDir(versionDir);
-    const versionJsonPath = import_node_path4.default.join(versionDir, "version.json");
-    if (import_node_fs3.default.existsSync(versionJsonPath)) {
+    const versionJsonPath2 = import_node_path4.default.join(versionDir, "version.json");
+    if (import_node_fs3.default.existsSync(versionJsonPath2)) {
       console.log(`Metadata de la versi\xF3n ${version} ya existe`);
-      return versionJsonPath;
+      return versionJsonPath2;
     }
     try {
       const manifestResponse = await (0, import_node_fetch2.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
@@ -4639,9 +4784,9 @@ var MinecraftDownloadService = class {
       }
       const versionMetadataResponse = await (0, import_node_fetch2.default)(versionInfo.url);
       const versionMetadata = await versionMetadataResponse.json();
-      import_node_fs3.default.writeFileSync(versionJsonPath, JSON.stringify(versionMetadata, null, 2));
+      import_node_fs3.default.writeFileSync(versionJsonPath2, JSON.stringify(versionMetadata, null, 2));
       console.log(`Metadata de la versi\xF3n ${version} descargada`);
-      return versionJsonPath;
+      return versionJsonPath2;
     } catch (error) {
       console.error(`Error al descargar metadata de la versi\xF3n ${version}:`, error);
       throw error;
@@ -4652,8 +4797,8 @@ var MinecraftDownloadService = class {
    * @param version Versión de Minecraft
    */
   async downloadVersionLibraries(version) {
-    const versionJsonPath = await this.downloadVersionMetadata(version);
-    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionJsonPath2 = await this.downloadVersionMetadata(version);
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
     const libraries = versionMetadata.libraries || [];
     console.log(`Descargando ${libraries.length} librer\xEDas para la versi\xF3n ${version}...`);
     for (const library of libraries) {
@@ -4776,15 +4921,15 @@ var MinecraftDownloadService = class {
       return clientJarPath;
     }
     this.ensureDir(instancePath);
-    const versionJsonPath = await this.downloadVersionMetadata(version);
-    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionJsonPath2 = await this.downloadVersionMetadata(version);
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
     const clientDownloadUrl = versionMetadata.downloads?.client?.url;
     if (!clientDownloadUrl) {
       throw new Error(`No se encontr\xF3 URL de descarga para client.jar de la versi\xF3n ${version}`);
     }
     try {
-      const versionJsonPath2 = await this.downloadVersionMetadata(version);
-      const versionMetadata2 = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
+      const versionJsonPath3 = await this.downloadVersionMetadata(version);
+      const versionMetadata2 = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath3, "utf-8"));
       const expectedHash = versionMetadata2.downloads?.client?.sha1;
       await this.downloadFile(clientDownloadUrl, clientJarPath, expectedHash, "sha1");
       if (!import_node_fs3.default.existsSync(clientJarPath)) {
@@ -4813,21 +4958,21 @@ var MinecraftDownloadService = class {
    */
   async downloadCompleteVersion(version, instancePath) {
     console.log(`Descargando versi\xF3n completa de Minecraft ${version}...`);
-    const versionJsonPath = await this.downloadVersionMetadata(version);
+    const versionJsonPath2 = await this.downloadVersionMetadata(version);
     await this.downloadVersionLibraries(version);
     await this.downloadClientJar(version, instancePath);
     console.log(`Iniciando descarga de assets para la versi\xF3n ${version}...`);
     await this.downloadVersionAssets(version);
     console.log(`Descarga de assets completada para la versi\xF3n ${version}`);
-    await this.ensureCriticalFiles(version, instancePath, versionJsonPath);
+    await this.ensureCriticalFiles(version, instancePath, versionJsonPath2);
     await this.ensureAssetsForInstance(version, instancePath);
-    await this.verifyCompleteDownload(version, instancePath, versionJsonPath);
+    await this.verifyCompleteDownload(version, instancePath, versionJsonPath2);
     console.log(`Versi\xF3n completa de Minecraft ${version} descargada`);
   }
   /**
    * Verifica que todos los archivos necesarios estén completamente descargados
    */
-  async verifyCompleteDownload(version, instancePath, versionJsonPath) {
+  async verifyCompleteDownload(version, instancePath, versionJsonPath2) {
     console.log(`Verificando completitud de la descarga para la versi\xF3n ${version}...`);
     const clientJarPath = import_node_path4.default.join(instancePath, "client.jar");
     if (!import_node_fs3.default.existsSync(clientJarPath)) {
@@ -4837,7 +4982,7 @@ var MinecraftDownloadService = class {
     if (clientStats.size < 1024 * 1024) {
       throw new Error(`client.jar tiene tama\xF1o inusualmente peque\xF1o: ${clientStats.size} bytes`);
     }
-    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
     const assetIndexId = versionMetadata.assetIndex?.id;
     if (assetIndexId) {
       const assetIndexPath = import_node_path4.default.join(this.assetsPath, "indexes", `${assetIndexId}.json`);
@@ -4866,9 +5011,9 @@ var MinecraftDownloadService = class {
   /**
    * Asegura que todos los archivos críticos necesarios estén presentes en la instancia
    */
-  async ensureCriticalFiles(version, instancePath, versionJsonPath) {
+  async ensureCriticalFiles(version, instancePath, versionJsonPath2) {
     console.log(`Asegurando archivos cr\xEDticos para la versi\xF3n ${version}...`);
-    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
     const clientJarPath = import_node_path4.default.join(instancePath, "client.jar");
     if (!import_node_fs3.default.existsSync(clientJarPath) || import_node_fs3.default.statSync(clientJarPath).size < 1024 * 1024) {
       if (versionMetadata.downloads?.client?.url) {
@@ -4901,8 +5046,8 @@ var MinecraftDownloadService = class {
    * @param version Versión de Minecraft
    */
   async downloadVersionAssets(version) {
-    const versionJsonPath = await this.downloadVersionMetadata(version);
-    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionJsonPath2 = await this.downloadVersionMetadata(version);
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
     const assetIndex = versionMetadata.assetIndex;
     if (!assetIndex) {
       console.log(`No se encontr\xF3 asset index para la versi\xF3n ${version}, omitiendo assets...`);
@@ -5002,8 +5147,8 @@ var MinecraftDownloadService = class {
       return false;
     }
     try {
-      const crypto = await import("node:crypto");
-      const hash = crypto.createHash(algorithm);
+      const crypto2 = await import("node:crypto");
+      const hash = crypto2.createHash(algorithm);
       const stream = import_node_fs3.default.createReadStream(filePath);
       return new Promise((resolve, reject) => {
         stream.on("data", (data) => hash.update(data));
@@ -5024,11 +5169,11 @@ var MinecraftDownloadService = class {
    */
   getAssetsDownloadProgress(version) {
     try {
-      const versionJsonPath = import_node_path4.default.join(this.versionsPath, version, `${version}.json`);
-      if (!import_node_fs3.default.existsSync(versionJsonPath)) {
+      const versionJsonPath2 = import_node_path4.default.join(this.versionsPath, version, `${version}.json`);
+      if (!import_node_fs3.default.existsSync(versionJsonPath2)) {
         return { downloaded: 0, total: 0, percentage: 0 };
       }
-      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
       const assetIndex = versionMetadata.assetIndex;
       if (!assetIndex) {
         return { downloaded: 0, total: 0, percentage: 0 };
@@ -5063,11 +5208,11 @@ var MinecraftDownloadService = class {
    */
   getLibrariesDownloadProgress(version) {
     try {
-      const versionJsonPath = import_node_path4.default.join(this.versionsPath, version, `${version}.json`);
-      if (!import_node_fs3.default.existsSync(versionJsonPath)) {
+      const versionJsonPath2 = import_node_path4.default.join(this.versionsPath, version, `${version}.json`);
+      if (!import_node_fs3.default.existsSync(versionJsonPath2)) {
         return { downloaded: 0, total: 0, percentage: 0 };
       }
-      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+      const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
       const libraries = versionMetadata.libraries || [];
       const totalLibraries = libraries.length;
       let downloadedLibraries = 0;
@@ -5104,8 +5249,8 @@ var MinecraftDownloadService = class {
    */
   async ensureAssetsForInstance(version, instancePath) {
     console.log(`Asegurando assets para la instancia de ${version} en ${instancePath}`);
-    const versionJsonPath = await this.downloadVersionMetadata(version);
-    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionJsonPath2 = await this.downloadVersionMetadata(version);
+    const versionMetadata = JSON.parse(import_node_fs3.default.readFileSync(versionJsonPath2, "utf-8"));
     const assetIndexId = versionMetadata.assetIndex?.id;
     if (!assetIndexId) {
       console.log(`No se encontr\xF3 ID del asset index para la versi\xF3n ${version}`);
@@ -5232,8 +5377,8 @@ function isInstanceReady(instancePath) {
 }
 function areAssetsReadyForVersion(instancePath, mcVersion) {
   try {
-    const versionJsonPath = import_node_path5.default.join(getLauncherDataPath2(), "versions", mcVersion, `${mcVersion}.json`);
-    if (!import_node_fs4.default.existsSync(versionJsonPath)) {
+    const versionJsonPath2 = import_node_path5.default.join(getLauncherDataPath2(), "versions", mcVersion, `${mcVersion}.json`);
+    if (!import_node_fs4.default.existsSync(versionJsonPath2)) {
       console.log(`Metadata de versi\xF3n ${mcVersion} no encontrada, verificando carpeta de assets compartida...`);
       const launcherAssetsPath = import_node_path5.default.join(getLauncherDataPath2(), "assets");
       if (import_node_fs4.default.existsSync(launcherAssetsPath)) {
@@ -5249,7 +5394,7 @@ function areAssetsReadyForVersion(instancePath, mcVersion) {
       }
       return false;
     }
-    const versionData = JSON.parse(import_node_fs4.default.readFileSync(versionJsonPath, "utf-8"));
+    const versionData = JSON.parse(import_node_fs4.default.readFileSync(versionJsonPath2, "utf-8"));
     const assetIndexId = versionData.assetIndex?.id;
     if (assetIndexId) {
       const assetIndexFile = import_node_path5.default.join(getLauncherDataPath2(), "assets", "indexes", `${assetIndexId}.json`);
@@ -6963,8 +7108,8 @@ var InstanceCreationService = class {
   async ensureAssetsAvailability(version) {
     console.log(`Asegurando disponibilidad de assets para Minecraft ${version}...`);
     try {
-      const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(version);
-      const versionMetadata = JSON.parse(import_node_fs8.default.readFileSync(versionJsonPath, "utf-8"));
+      const versionJsonPath2 = await minecraftDownloadService.downloadVersionMetadata(version);
+      const versionMetadata = JSON.parse(import_node_fs8.default.readFileSync(versionJsonPath2, "utf-8"));
       const assetIndex = versionMetadata.assetIndex;
       if (!assetIndex) {
         console.log(`No se encontr\xF3 informaci\xF3n de asset index para la versi\xF3n ${version}, omitiendo assets...`);
@@ -7000,8 +7145,8 @@ var InstanceCreationService = class {
   async validateAssetsConfiguration(instancePath, version) {
     console.log(`Validando configuraci\xF3n de assets para instancia en ${instancePath}...`);
     try {
-      const versionJsonPath = import_node_path9.default.join(getLauncherDataPath(), "versions", version, `${version}.json`);
-      if (!import_node_fs8.default.existsSync(versionJsonPath)) {
+      const versionJsonPath2 = import_node_path9.default.join(getLauncherDataPath(), "versions", version, `${version}.json`);
+      if (!import_node_fs8.default.existsSync(versionJsonPath2)) {
         throw new Error(`Metadata de la versi\xF3n ${version} no encontrado`);
       }
       const launcherAssetsPath = import_node_path9.default.join(getLauncherDataPath(), "assets");
@@ -7566,8 +7711,10 @@ var EnhancedInstanceCreationService = class {
       if (this.isCancelled(progressId)) {
         throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
       }
-      this.updateProgress(progressId, "downloading_assets" /* DOWNLOADING_ASSETS */, 6, 10, "Descargando assets del juego");
-      await minecraftDownloadService.downloadVersionAssets(config.version);
+      this.updateProgress(progressId, "downloading_assets" /* DOWNLOADING_ASSETS */, 6, 10, "Descargando y validando assets del juego");
+      await minecraftDownloadService.validateAndDownloadAssets(config.version);
+      this.updateProgress(progressId, "downloading_assets" /* DOWNLOADING_ASSETS */, 6.5, 10, "Asegurando assets cr\xEDticos (idiomas, texturas, etc.)");
+      await minecraftDownloadService.ensureCriticalAssets(config.version);
       if (this.isCancelled(progressId)) {
         throw new Error("Creaci\xF3n de instancia cancelada por el usuario");
       }
@@ -8137,6 +8284,170 @@ var import_node_path13 = __toESM(require("node:path"), 1);
 var import_node_fs12 = __toESM(require("node:fs"), 1);
 var GameLaunchService = class {
   /**
+   * Valida que todos los archivos necesarios estén presentes antes de lanzar el juego
+   */
+  async validateInstanceFiles(opts) {
+    logProgressService.info(`Validando archivos para la instancia ${opts.instanceConfig.name}`, {
+      instance: opts.instanceConfig.name,
+      version: opts.mcVersion
+    });
+    const clientJarPath = import_node_path13.default.join(opts.instancePath, "client.jar");
+    if (!import_node_fs12.default.existsSync(clientJarPath)) {
+      throw new Error(`client.jar no encontrado en ${clientJarPath}`);
+    }
+    const clientStats = import_node_fs12.default.statSync(clientJarPath);
+    if (clientStats.size < 1024 * 1024) {
+      throw new Error(`client.jar tiene tama\xF1o muy peque\xF1o (${clientStats.size} bytes), probablemente incompleto`);
+    }
+    const assetsDir = import_node_path13.default.join(getLauncherDataPath(), "assets");
+    if (!import_node_fs12.default.existsSync(assetsDir)) {
+      throw new Error(`Directorio de assets no encontrado: ${assetsDir}`);
+    }
+    const launcherVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    if (!import_node_fs12.default.existsSync(launcherVersionJsonPath)) {
+      throw new Error(`Archivo de metadatos de versi\xF3n no encontrado: ${launcherVersionJsonPath}`);
+    }
+    const versionData = JSON.parse(import_node_fs12.default.readFileSync(launcherVersionJsonPath, "utf-8"));
+    const assetIndexId = versionData.assetIndex?.id || opts.mcVersion;
+    const assetIndexPath = import_node_path13.default.join(getLauncherDataPath(), "assets", "indexes", `${assetIndexId}.json`);
+    if (!import_node_fs12.default.existsSync(assetIndexPath)) {
+      throw new Error(`\xCDndice de assets no encontrado: ${assetIndexPath}`);
+    }
+    if (versionData.libraries && Array.isArray(versionData.libraries)) {
+      const totalLibraries = versionData.libraries.length;
+      let validatedLibraries = 0;
+      for (const lib of versionData.libraries) {
+        let libraryAllowed = true;
+        if (lib.rules) {
+          libraryAllowed = false;
+          const osName = this.getOSName();
+          for (const rule of lib.rules) {
+            if (rule.action === "allow") {
+              if (!rule.os || rule.os.name === osName) {
+                libraryAllowed = true;
+              }
+            } else if (rule.action === "disallow") {
+              if (rule.os && rule.os.name === osName) {
+                libraryAllowed = false;
+                break;
+              }
+            }
+          }
+        }
+        if (libraryAllowed && lib.downloads && lib.downloads.artifact) {
+          let libPath;
+          if (lib.downloads.artifact.path) {
+            libPath = import_node_path13.default.join(getLauncherDataPath(), "libraries", lib.downloads.artifact.path);
+          } else {
+            const nameParts = lib.name.split(":");
+            const [group, artifact, version] = nameParts;
+            const parts = group.split(".");
+            libPath = import_node_path13.default.join(getLauncherDataPath(), "libraries", ...parts, artifact, version, `${artifact}-${version}.jar`);
+          }
+          if (!import_node_fs12.default.existsSync(libPath)) {
+            logProgressService.info(`Descargando librer\xEDa faltante: ${lib.name}`, {
+              path: libPath,
+              library: lib.name
+            });
+            this.ensureDir(import_node_path13.default.dirname(libPath));
+            try {
+              await this.downloadLibrary(lib.downloads.artifact.url, libPath);
+              logProgressService.info(`Librer\xEDa descargada: ${lib.name}`, { library: lib.name });
+              validatedLibraries++;
+            } catch (downloadError) {
+              logProgressService.error(`Error al descargar librer\xEDa ${lib.name}: ${downloadError.message}`, {
+                library: lib.name,
+                error: downloadError.message
+              });
+            }
+          } else {
+            try {
+              const libStats = import_node_fs12.default.statSync(libPath);
+              if (lib.downloads.artifact.size && libStats.size !== lib.downloads.artifact.size) {
+                logProgressService.warning(`Librer\xEDa tiene tama\xF1o incorrecto, descargando: ${lib.name}`, {
+                  path: libPath,
+                  library: lib.name
+                });
+                try {
+                  await this.downloadLibrary(lib.downloads.artifact.url, libPath);
+                  validatedLibraries++;
+                } catch (downloadError) {
+                  logProgressService.error(`Error al descargar librer\xEDa ${lib.name}: ${downloadError.message}`, {
+                    library: lib.name,
+                    error: downloadError.message
+                  });
+                }
+              } else {
+                validatedLibraries++;
+              }
+            } catch (statError) {
+              logProgressService.error(`Error al verificar librer\xEDa ${lib.name}: ${statError.message}`, {
+                library: lib.name,
+                error: statError.message
+              });
+            }
+          }
+        }
+      }
+      logProgressService.info(`Validaci\xF3n de librer\xEDas completada: ${validatedLibraries}/${totalLibraries} librer\xEDas procesadas`, {
+        validated: validatedLibraries,
+        total: totalLibraries
+      });
+    }
+    try {
+      logProgressService.info(`Iniciando validaci\xF3n y descarga completa de assets para la versi\xF3n ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion
+      });
+      await minecraftDownloadService.validateAndDownloadAssets(opts.mcVersion);
+      logProgressService.info(`Assets validados y completados para la versi\xF3n ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion
+      });
+      await minecraftDownloadService.ensureCriticalAssets(opts.mcVersion);
+      logProgressService.info(`Assets cr\xEDticos asegurados para la versi\xF3n ${opts.mcVersion}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion
+      });
+    } catch (assetsError) {
+      logProgressService.error(`Error al validar assets para la versi\xF3n ${opts.mcVersion}: ${assetsError.message}`, {
+        instance: opts.instanceConfig.name,
+        version: opts.mcVersion,
+        error: assetsError.message
+      });
+      throw assetsError;
+    }
+    logProgressService.success(`Validaci\xF3n completa de archivos exitosa para la instancia ${opts.instanceConfig.name}`, {
+      instance: opts.instanceConfig.name,
+      version: opts.mcVersion
+    });
+  }
+  /**
+   * Asegura que un directorio exista
+   */
+  ensureDir(dir) {
+    if (!import_node_fs12.default.existsSync(dir)) {
+      import_node_fs12.default.mkdirSync(dir, { recursive: true });
+    }
+  }
+  /**
+   * Descarga una librería desde una URL
+   */
+  async downloadLibrary(url, outputPath) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      import_node_fs12.default.writeFileSync(outputPath, buffer);
+      return true;
+    } catch (error) {
+      logProgressService.error(`Error downloading library from ${url} to ${outputPath}: ${error}`);
+      return false;
+    }
+  }
+  /**
    * Lanza el juego Minecraft con todas las configuraciones apropiadas
    */
   async launchGame(opts) {
@@ -8146,6 +8457,7 @@ var GameLaunchService = class {
         javaPath: opts.javaPath,
         ram: opts.ramMb
       });
+      await this.validateInstanceFiles(opts);
       const args = await this.buildLaunchArguments(opts);
       logProgressService.info(`Argumentos de lanzamiento construidos (${args.length} argumentos)`, {
         javaPath: opts.javaPath,
@@ -8160,11 +8472,13 @@ var GameLaunchService = class {
       });
       child.stdout.on("data", (data) => {
         const output = data.toString();
+        this.logOutputToFile(opts.instanceConfig.name, `[OUT] ${output}`);
         logProgressService.info(`[Minecraft-OUT] ${output}`, { instance: opts.instanceConfig.name });
         opts.onData?.(output);
       });
       child.stderr.on("data", (data) => {
         const output = data.toString();
+        this.logOutputToFile(opts.instanceConfig.name, `[ERROR] ${output}`);
         logProgressService.error(`[Minecraft-ERR] ${output}`, { instance: opts.instanceConfig.name });
         opts.onData?.(output);
       });
@@ -8237,12 +8551,12 @@ var GameLaunchService = class {
    * Construye argumentos para lanzar Minecraft vanilla
    */
   async buildArgumentsForVanilla(opts, jvmArgs) {
-    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    const versionJsonPath2 = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
     let classpath = import_node_path13.default.join(opts.instancePath, "client.jar");
     let mainClass = "net.minecraft.client.main.Main";
-    if (import_node_fs12.default.existsSync(versionJsonPath)) {
+    if (import_node_fs12.default.existsSync(versionJsonPath2)) {
       try {
-        const versionData = JSON.parse(import_node_fs12.default.readFileSync(versionJsonPath, "utf-8"));
+        const versionData = JSON.parse(import_node_fs12.default.readFileSync(versionJsonPath2, "utf-8"));
         if (versionData.mainClass) {
           mainClass = versionData.mainClass;
         }
@@ -8369,7 +8683,7 @@ var GameLaunchService = class {
         mainClass = "net.minecraft.client.main.Main";
       }
     } else {
-      logProgressService.warning(`No se encontr\xF3 el archivo de versi\xF3n ${versionJsonPath}, usando configuraci\xF3n m\xEDnima`);
+      logProgressService.warning(`No se encontr\xF3 el archivo de versi\xF3n ${versionJsonPath2}, usando configuraci\xF3n m\xEDnima`);
       const commonLibs = [
         "net.sf.jopt-simple:jopt-simple:5.0.4",
         "com.google.code.gson:gson:2.8.9",
@@ -8401,7 +8715,19 @@ var GameLaunchService = class {
         classpath = [import_node_path13.default.join(opts.instancePath, "client.jar"), ...libraryJars].join(import_node_path13.default.delimiter);
       }
     }
-    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+    let assetIndexId = opts.mcVersion;
+    const moddedVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    if (import_node_fs12.default.existsSync(moddedVersionJsonPath)) {
+      try {
+        const versionData = JSON.parse(import_node_fs12.default.readFileSync(moddedVersionJsonPath, "utf-8"));
+        if (versionData.assetIndex && versionData.assetIndex.id) {
+          assetIndexId = versionData.assetIndex.id;
+        }
+      } catch (error) {
+        logProgressService.warning(`No se pudo leer el archivo version.json para obtener el assetIndex: ${error}`);
+      }
+    }
     const gameArgs = [
       "--username",
       opts.userProfile?.username || "Player",
@@ -8413,8 +8739,8 @@ var GameLaunchService = class {
       import_node_path13.default.join(getLauncherDataPath(), "assets"),
       // Usar assets compartidos
       "--assetIndex",
-      opts.mcVersion,
-      // Nombre del índice de assets
+      assetIndexId,
+      // Usar el ID real del assetIndex
       "--uuid",
       fakeUUID,
       "--accessToken",
@@ -8469,7 +8795,7 @@ var GameLaunchService = class {
       ...opts.jvmArgs || []
     ];
     const launcherPath = getLauncherDataPath();
-    const versionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    const forgeVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
     let mainClass = "";
     let additionalJvmArgs = [];
     let additionalGameArgs = [];
@@ -8578,7 +8904,19 @@ var GameLaunchService = class {
       }
     }
     const classpath = libraryJars.join(import_node_path13.default.delimiter);
-    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+    let assetIndexId = opts.mcVersion;
+    const loaderVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
+    if (import_node_fs12.default.existsSync(loaderVersionJsonPath)) {
+      try {
+        const versionData = JSON.parse(import_node_fs12.default.readFileSync(loaderVersionJsonPath, "utf-8"));
+        if (versionData.assetIndex && versionData.assetIndex.id) {
+          assetIndexId = versionData.assetIndex.id;
+        }
+      } catch (error) {
+        logProgressService.warning(`No se pudo leer el archivo version.json para obtener el assetIndex: ${error}`);
+      }
+    }
     const baseGameArgs = [
       "--username",
       opts.userProfile?.username || "Player",
@@ -8590,8 +8928,8 @@ var GameLaunchService = class {
       import_node_path13.default.join(getLauncherDataPath(), "assets"),
       // Usar assets compartidos
       "--assetIndex",
-      opts.mcVersion,
-      // Nombre del índice de assets
+      assetIndexId,
+      // Usar el ID real del assetIndex
       "--uuid",
       fakeUUID,
       "--accessToken",
@@ -8620,6 +8958,24 @@ var GameLaunchService = class {
     ];
   }
   /**
+   * Registra la salida del juego en un archivo de log específico de la instancia
+   */
+  logOutputToFile(instanceName, output) {
+    try {
+      const launcherPath = getLauncherDataPath();
+      const logsDir = import_node_path13.default.join(launcherPath, "logs", "games");
+      import_node_fs12.default.mkdirSync(logsDir, { recursive: true });
+      const safeInstanceName = instanceName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+      const logFilePath = import_node_path13.default.join(logsDir, `${safeInstanceName}_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.log`);
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+      const logEntry = `[${timestamp}] ${output}
+`;
+      import_node_fs12.default.appendFileSync(logFilePath, logEntry);
+    } catch (error) {
+      console.error("Error al escribir log al archivo:", error);
+    }
+  }
+  /**
    * Función auxiliar para obtener el nombre del sistema operativo
    */
   getOSName() {
@@ -8645,20 +9001,6 @@ var GameLaunchService = class {
   /**
    * Función auxiliar para descargar una librería
    */
-  async downloadLibrary(url, outputPath) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const buffer = await response.buffer();
-      import_node_fs12.default.writeFileSync(outputPath, buffer);
-      return true;
-    } catch (error) {
-      logProgressService.error(`Error downloading library from ${url} to ${outputPath}: ${error}`);
-      return false;
-    }
-  }
   /**
    * Función auxiliar para encontrar el JAR del loader
    */

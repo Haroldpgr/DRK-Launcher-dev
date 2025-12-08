@@ -205,9 +205,14 @@ export class EnhancedInstanceCreationService {
       }
 
       // PASO 6: Descargar assets
-      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6, 10, 'Descargando assets del juego');
-      await minecraftDownloadService.downloadVersionAssets(config.version);
-      
+      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6, 10, 'Descargando y validando assets del juego');
+      // Usar la nueva función que valida y descarga assets faltantes
+      await minecraftDownloadService.validateAndDownloadAssets(config.version);
+
+      // Asegurar que assets críticos como los de idioma estén presentes
+      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6.5, 10, 'Asegurando assets críticos (idiomas, texturas, etc.)');
+      await minecraftDownloadService.ensureCriticalAssets(config.version);
+
       if (this.isCancelled(progressId)) {
         throw new Error('Creación de instancia cancelada por el usuario');
       }
