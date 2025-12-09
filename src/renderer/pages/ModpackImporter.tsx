@@ -5,6 +5,8 @@ import { Instance } from './Instances';
 import { notificationService } from '../services/notificationService';
 import { modpackImportService } from '../services/modpackImportService';
 
+type ExportType = 'mod' | 'mods' | 'resourcepack' | 'shaderpack' | 'datapack' | 'instance' | 'custom';
+
 // Definir tipos para el modpack
 interface ModpackMetadata {
   id: string;
@@ -40,6 +42,10 @@ export default function ModpackImporter() {
   const [currentStep, setCurrentStep] = useState<'import' | 'select' | 'compatibility' | 'importing'>('import');
   const [dragActive, setDragActive] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+
+  // Estado para exportación
+  const [exportType, setExportType] = useState<ExportType>('mods');
+  const [exportPath, setExportPath] = useState('');
 
   // Cargar instancias
   useEffect(() => {
@@ -113,14 +119,16 @@ export default function ModpackImporter() {
 
   // Generar URL temporal
   const generateTemporaryUrl = async () => {
-    if (!source) {
-      notificationService.error('Por favor introduce una URL o selecciona un archivo');
+    const pathToUse = exportPath || source; // Priorizar exportPath si está definido
+
+    if (!pathToUse) {
+      notificationService.error('Por favor selecciona una carpeta o archivo para exportar');
       return;
     }
 
     setIsGeneratingUrl(true);
     try {
-      const tempUrl = await modpackImportService.generateTemporaryUrl(source);
+      const tempUrl = await modpackImportService.generateTemporaryUrl(pathToUse);
       setGeneratedUrl(tempUrl);
       notificationService.success('URL generada exitosamente');
     } catch (error) {
@@ -162,6 +170,22 @@ export default function ModpackImporter() {
       const filePath = (file as any).path || URL.createObjectURL(file);
       setSource(filePath);
       analyzeModpack(filePath);
+    }
+  };
+
+  // Manejar selección de carpeta/archivo para exportar
+  const browseExportPath = async () => {
+    if (window.api?.dialog?.showOpenDialog) {
+      const result = await window.api.dialog.showOpenDialog({
+        properties: exportType === 'mod' || exportType === 'resourcepack' || exportType === 'shaderpack' || exportType === 'datapack'
+          ? ['openFile']
+          : ['openDirectory'],
+        filters: exportType === 'mod' ? [{ name: 'Mods', extensions: ['jar', 'zip'] }] : undefined
+      });
+
+      if (!result.canceled && result.filePaths.length > 0) {
+        setExportPath(result.filePaths[0]);
+      }
     }
   };
 
@@ -272,7 +296,7 @@ export default function ModpackImporter() {
                 </svg>
                 <div className="text-lg font-medium text-white">Arrastra un modpack aquí</div>
                 <div className="text-gray-400 mt-2">o haz clic para seleccionar un archivo</div>
-                <div className="text-sm text-gray-500 mt-2">ZIP, MRPACK (MAX. 100MB)</div>
+                <div className="text-sm text-gray-500 mt-2">ZIP, MRPACK (MAX. 500MB)</div>
               </label>
             </div>
           ) : (
@@ -299,26 +323,57 @@ export default function ModpackImporter() {
             </div>
           )}
 
-          {/* Sección de exportación */}
+          {/* Sección de exportación mejorada */}
           <div className="mt-8 p-6 bg-gray-800/30 rounded-xl border border-gray-700">
-            <h3 className="text-lg font-semibold text-white mb-4">Exportar modpack</h3>
-            <p className="text-gray-400 mb-4">Genera una URL temporal para compartir tu modpack con otros</p>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="url"
-                value={source}
-                onChange={e => setSource(e.target.value)}
-                placeholder="URL del modpack (opcional)"
-                className="flex-1 p-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <Button
-                onClick={generateTemporaryUrl}
-                disabled={isGeneratingUrl || !source}
-                variant="secondary"
-              >
-                {isGeneratingUrl ? 'Generando...' : 'Generar URL temporal'}
-              </Button>
+            <h3 className="text-lg font-semibold text-white mb-4">Exportar contenido</h3>
+            <p className="text-gray-400 mb-4">Selecciona mods, carpetas o archivos para compartir con otros</p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Tipo de contenido a exportar</label>
+                <select
+                  value={exportType}
+                  onChange={(e) => setExportType(e.target.value as ExportType)}
+                  className="w-full p-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="mod">Mods individuales</option>
+                  <option value="mods">Carpeta completa de mods</option>
+                  <option value="resourcepack">Resourcepacks</option>
+                  <option value="shaderpack">Shaderpacks</option>
+                  <option value="datapack">Datapacks</option>
+                  <option value="instance">Instancia completa</option>
+                  <option value="custom">Carpeta personalizada</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  value={exportPath}
+                  onChange={e => setExportPath(e.target.value)}
+                  placeholder="Ruta de la carpeta o archivo a exportar"
+                  className="flex-1 p-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <Button
+                  onClick={browseExportPath}
+                  variant="secondary"
+                >
+                  Explorar
+                </Button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                  onClick={generateTemporaryUrl}
+                  disabled={isGeneratingUrl || !exportPath}
+                  variant="secondary"
+                  className="w-full sm:w-auto"
+                >
+                  {isGeneratingUrl ? 'Generando...' : `Generar URL temporal (${exportPath ? '500MB+' : '0MB'})`}
+                </Button>
+              </div>
             </div>
+
             {generatedUrl && (
               <div className="mt-4 p-3 bg-gray-700/50 rounded-lg">
                 <div className="flex items-center justify-between">
@@ -330,7 +385,9 @@ export default function ModpackImporter() {
                     Copiar
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">Esta URL expirará en 24 horas</p>
+                <p className="text-xs text-gray-500 mt-2">
+                  Esta URL expirará en 24 horas • Soporta archivos de hasta 5GB
+                </p>
               </div>
             )}
           </div>

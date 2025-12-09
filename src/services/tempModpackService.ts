@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { createHash } from 'crypto';
 import { getLauncherDataPath } from '../utils/paths';
+import archiver from 'archiver';
 
 // Interfaz para el modpack temporal
 interface TemporaryModpack {
@@ -36,17 +37,29 @@ class TemporaryModpackService {
   public async createTemporaryModpack(originalPath: string): Promise<string> {
     // Generar un ID único para el modpack temporal
     const id = this.generateId();
-    
-    // Copiar el archivo a la carpeta de modpacks temporales
-    const extension = path.extname(originalPath);
-    const tempPath = path.join(this.dataPath, `${id}${extension}`);
-    
-    // Copiar archivo original al temporal
-    await fs.promises.copyFile(originalPath, tempPath);
-    
+
+    // Verificar si es un archivo o directorio
+    const stats = await fs.promises.stat(originalPath);
+
+    let tempPath: string;
+
+    if (stats.isDirectory()) {
+      // Si es un directorio, comprimirlo en un archivo .zip
+      const archivePath = path.join(this.dataPath, `${id}.zip`);
+      await this.compressDirectory(originalPath, archivePath);
+      tempPath = archivePath;
+    } else {
+      // Si es un archivo, copiarlo directamente
+      const extension = path.extname(originalPath);
+      tempPath = path.join(this.dataPath, `${id}${extension}`);
+
+      // Copiar archivo original al temporal (con soporte para archivos grandes)
+      await this.copyLargeFile(originalPath, tempPath);
+    }
+
     // Crear registro del modpack temporal
     const expirationDate = Date.now() + (24 * 60 * 60 * 1000); // 24 horas
-    
+
     const tempModpack: TemporaryModpack = {
       id,
       originalPath,
@@ -56,12 +69,56 @@ class TemporaryModpackService {
       downloadCount: 0,
       maxDownloads: 100 // Límite máximo de descargas
     };
-    
+
     this.tempModpacks.set(id, tempModpack);
     this.saveTempModpacks();
-    
+
     // Devolver URL para compartir
     return `https://drklauncher.local/modpack/${id}`;
+  }
+
+  /**
+   * Copia un archivo grande usando streams para evitar problemas de memoria
+   */
+  private async copyLargeFile(source: string, destination: string): Promise<void> {
+    const fsPromises = require('fs').promises;
+    const { pipeline } = require('stream');
+    const { promisify } = require('util');
+    const fs = require('fs');
+
+    const pipelineAsync = promisify(pipeline);
+
+    // Usar streams para copiar archivos grandes
+    const readStream = fs.createReadStream(source);
+    const writeStream = fs.createWriteStream(destination);
+
+    await pipelineAsync(readStream, writeStream);
+  }
+
+  /**
+   * Comprime un directorio en un archivo zip
+   */
+  private async compressDirectory(sourceDir: string, destinationPath: string): Promise<void> {
+    const fs = require('fs');
+
+    return new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(destinationPath);
+      const archive = archiver('zip', {
+        zlib: { level: 6 } // Nivel de compresión
+      });
+
+      output.on('close', () => {
+        resolve();
+      });
+
+      archive.on('error', (err: Error) => {
+        reject(err);
+      });
+
+      archive.pipe(output);
+      archive.directory(sourceDir, false);
+      archive.finalize();
+    });
   }
 
   /**

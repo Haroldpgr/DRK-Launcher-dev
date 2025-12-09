@@ -119,13 +119,14 @@ export class ModpackImportService {
   }
 
   /**
-   * Genera una URL temporal para compartir un modpack
+   * Genera una URL temporal para compartir un modpack o carpeta
    */
   public async generateTemporaryUrl(filePath: string): Promise<string> {
     if (!window.api?.modpack) {
       throw new Error('API de modpacks no disponible');
     }
-    
+
+    // Enviar la solicitud al proceso principal para manejar archivos grandes
     return await window.api.modpack.createTemporary(filePath);
   }
 
