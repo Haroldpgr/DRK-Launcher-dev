@@ -2794,12 +2794,12 @@ var require_lib2 = __commonJS({
       const dest = new URL$1(destination).protocol;
       return orig === dest;
     };
-    function fetch9(url, opts) {
-      if (!fetch9.Promise) {
+    function fetch10(url, opts) {
+      if (!fetch10.Promise) {
         throw new Error("native promise missing, set fetch.Promise to your favorite alternative");
       }
-      Body.Promise = fetch9.Promise;
-      return new fetch9.Promise(function(resolve, reject) {
+      Body.Promise = fetch10.Promise;
+      return new fetch10.Promise(function(resolve, reject) {
         const request = new Request(url, opts);
         const options = getNodeRequestOptions(request);
         const send = (options.protocol === "https:" ? https : http).request;
@@ -2870,7 +2870,7 @@ var require_lib2 = __commonJS({
         req.on("response", function(res) {
           clearTimeout(reqTimeout);
           const headers = createHeadersLenient(res.headers);
-          if (fetch9.isRedirect(res.statusCode)) {
+          if (fetch10.isRedirect(res.statusCode)) {
             const location = headers.get("Location");
             let locationURL = null;
             try {
@@ -2932,7 +2932,7 @@ var require_lib2 = __commonJS({
                   requestOpts.body = void 0;
                   requestOpts.headers.delete("content-length");
                 }
-                resolve(fetch9(new Request(locationURL, requestOpts)));
+                resolve(fetch10(new Request(locationURL, requestOpts)));
                 finalize();
                 return;
             }
@@ -3024,11 +3024,11 @@ var require_lib2 = __commonJS({
         stream.end();
       }
     }
-    fetch9.isRedirect = function(code) {
+    fetch10.isRedirect = function(code) {
       return code === 301 || code === 302 || code === 303 || code === 307 || code === 308;
     };
-    fetch9.Promise = global.Promise;
-    module2.exports = exports2 = fetch9;
+    fetch10.Promise = global.Promise;
+    module2.exports = exports2 = fetch10;
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.default = exports2;
     exports2.Headers = Headers;
@@ -6558,7 +6558,7 @@ var javaService = new JavaService();
 var javaService_default = javaService;
 
 // src/main/main.ts
-var import_node_fetch7 = __toESM(require_lib2(), 1);
+var import_node_fetch8 = __toESM(require_lib2(), 1);
 
 // src/services/instanceService.ts
 var import_node_path7 = __toESM(require("node:path"), 1);
@@ -7469,6 +7469,176 @@ var InstanceCreationService = class {
 };
 var instanceCreationService = new InstanceCreationService();
 
+// src/services/curseforgeService.ts
+var import_node_fetch6 = __toESM(require_lib2(), 1);
+var CURSEFORGE_API_KEY = "$2a$10$8qrneNohy/pV0jJKZVbUuu.kXuDwlRmfhnf4o.7VGEN/bEjXTOPWC";
+var CURSEFORGE_API_URL = "https://api.curseforge.com/v1";
+var curseForgeCategoryIds = {
+  modpacks: 4471,
+  // Modpacks
+  mods: 6,
+  // Minecraft Mods
+  resourcepacks: 12,
+  // Resource Packs
+  datapacks: 5269,
+  // Data Packs
+  shaders: 6552
+  // Shaders
+};
+var CurseForgeService = class {
+  headers = {
+    "X-API-Key": CURSEFORGE_API_KEY,
+    "Content-Type": "application/json",
+    "User-Agent": "DRK-Launcher/1.0 (contacto@drklauncher.com)"
+  };
+  async searchContent(contentType, search = "") {
+    try {
+      const categoryId = curseForgeCategoryIds[contentType];
+      if (!categoryId) {
+        console.error("Invalid content type for CurseForge:", contentType);
+        return [];
+      }
+      const allResults = [];
+      const PAGE_SIZE = 50;
+      let index = 0;
+      const maxResults = 1e3;
+      const firstPageParams = new URLSearchParams({
+        gameId: "432",
+        // Minecraft game ID for CurseForge API
+        classId: categoryId.toString(),
+        searchFilter: search || "",
+        sortField: (search ? 2 : 3).toString(),
+        // Sort by relevance if searching, otherwise by download count
+        sortOrder: "2",
+        // Descending order
+        index: index.toString(),
+        pageSize: PAGE_SIZE.toString()
+      });
+      const firstPageUrl = `${CURSEFORGE_API_URL}/mods/search?${firstPageParams}`;
+      console.log("Searching CurseForge first page:", firstPageUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15e3);
+      const firstResponse = await (0, import_node_fetch6.default)(firstPageUrl, {
+        method: "GET",
+        headers: this.headers,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (!firstResponse.ok) {
+        const errorBody = await firstResponse.text();
+        console.error(`Error fetching from CurseForge: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
+        throw new Error(`Error from CurseForge API: ${firstResponse.statusText}`);
+      }
+      const firstJson = await firstResponse.json();
+      console.log("CurseForge first page response:", firstJson);
+      let firstPageItems = [];
+      if (firstJson && firstJson.data && Array.isArray(firstJson.data)) {
+        firstPageItems = firstJson.data;
+      } else if (firstJson && firstJson.data && firstJson.data.data && Array.isArray(firstJson.data.data)) {
+        firstPageItems = firstJson.data.data;
+      } else if (Array.isArray(firstJson)) {
+        firstPageItems = firstJson;
+      }
+      allResults.push(...firstPageItems);
+      while (allResults.length < maxResults && firstPageItems.length === PAGE_SIZE) {
+        index += PAGE_SIZE;
+        if (allResults.length >= maxResults) break;
+        const nextParams = new URLSearchParams({
+          gameId: "432",
+          // Minecraft game ID for CurseForge API
+          classId: categoryId.toString(),
+          searchFilter: search || "",
+          sortField: (search ? 2 : 3).toString(),
+          // Sort by relevance if searching, otherwise by download count
+          sortOrder: "2",
+          // Descending order
+          index: index.toString(),
+          pageSize: PAGE_SIZE.toString()
+        });
+        const nextUrl = `${CURSEFORGE_API_URL}/mods/search?${nextParams}`;
+        console.log(`Searching CurseForge page ${index / PAGE_SIZE + 1}:`, nextUrl);
+        const nextController = new AbortController();
+        const nextTimeoutId = setTimeout(() => nextController.abort(), 15e3);
+        const nextResponse = await (0, import_node_fetch6.default)(nextUrl, {
+          method: "GET",
+          headers: this.headers,
+          signal: nextController.signal
+        });
+        clearTimeout(nextTimeoutId);
+        if (!nextResponse.ok) {
+          const errorBody = await nextResponse.text();
+          console.error(`Error fetching from CurseForge: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
+          break;
+        }
+        const nextJson = await nextResponse.json();
+        console.log(`CurseForge page ${index / PAGE_SIZE + 1} response:`, nextJson);
+        let nextPageItems = [];
+        if (nextJson && nextJson.data && Array.isArray(nextJson.data)) {
+          nextPageItems = nextJson.data;
+        } else if (nextJson && nextJson.data && nextJson.data.data && Array.isArray(nextJson.data.data)) {
+          nextPageItems = nextJson.data.data;
+        } else if (Array.isArray(nextJson)) {
+          nextPageItems = nextJson;
+        }
+        if (nextPageItems.length === 0) {
+          break;
+        }
+        allResults.push(...nextPageItems);
+        if (nextPageItems.length < PAGE_SIZE) {
+          break;
+        }
+      }
+      const finalResults = allResults.slice(0, maxResults);
+      return finalResults.map((item) => ({
+        id: item.id ? item.id.toString() : Math.random().toString(36).substr(2, 9),
+        // Convert to string to match our existing format
+        title: item.name || item.title || "Unknown Title",
+        description: item.summary || item.description || "No description available",
+        author: item.authors && item.authors.length > 0 ? item.authors[0].name : item.author || "Unknown",
+        downloads: item.downloadCount || item.downloads || 0,
+        lastUpdated: item.dateModified || item.lastUpdated || (/* @__PURE__ */ new Date()).toISOString(),
+        minecraftVersions: item.gameVersionLatestFiles ? item.gameVersionLatestFiles.map((f) => f.gameVersion) : item.gameVersions ? item.gameVersions : [],
+        categories: item.categories ? item.categories.map((c) => c.name) : item.categorySection?.name ? [item.categorySection.name] : [],
+        imageUrl: this.getBestImageUrl(item),
+        // Use a dedicated method to get the best image
+        type: contentType,
+        version: item.latestFiles && item.latestFiles.length > 0 ? item.latestFiles[0].fileName || item.version : item.file?.fileName || item.version || "N/A",
+        downloadUrl: item.latestFiles && item.latestFiles.length > 0 ? item.latestFiles[0].downloadUrl : item.downloadUrl || void 0
+      }));
+    } catch (error) {
+      if (error.name === "AbortError") {
+        console.error("CurseForge request timed out:", error);
+        throw new Error("CurseForge request timed out");
+      }
+      console.error("Error fetching content from CurseForge:", error);
+      return [];
+    }
+  }
+  // Method to get the best available image URL
+  getBestImageUrl(item) {
+    const imageUrl = item.logo?.url || item.logo?.thumbnailUrl || item.logo?.imageUrl || item.primaryScreenshot?.url || (item.screenshots && item.screenshots.length > 0 ? item.screenshots[0]?.url : null) || item.thumbnailUrl || item.thumbnail?.url || item.imageUrl || "https://via.placeholder.com/400x200";
+    return imageUrl;
+  }
+  // Get compatible versions for a specific project
+  async getCompatibleVersions(projectId, mcVersion, loader) {
+    try {
+      const response = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files`, {
+        headers: this.headers
+      });
+      if (!response.ok) {
+        throw new Error(`Error fetching files for project ${projectId}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      console.log("CurseForge files response:", data);
+      return [];
+    } catch (error) {
+      console.error(`Error getting compatible versions for project ${projectId}:`, error);
+      return [];
+    }
+  }
+};
+var curseforgeService = new CurseForgeService();
+
 // src/main/main.ts
 init_downloadQueueService();
 
@@ -7479,7 +7649,7 @@ var import_node_fs10 = __toESM(require("node:fs"), 1);
 // src/services/versionService.ts
 var import_node_path10 = __toESM(require("node:path"), 1);
 var import_node_fs9 = __toESM(require("node:fs"), 1);
-var import_node_fetch6 = __toESM(require_lib2(), 1);
+var import_node_fetch7 = __toESM(require_lib2(), 1);
 var VersionService = class {
   versionsCachePath;
   cacheTimeout = 1e3 * 60 * 60;
@@ -7528,7 +7698,7 @@ var VersionService = class {
    */
   async downloadMinecraftVersions() {
     try {
-      const response = await (0, import_node_fetch6.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json", {
+      const response = await (0, import_node_fetch7.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json", {
         headers: {
           "User-Agent": "DRK-Launcher/1.0 (compatible; Fetch)"
         }
@@ -7591,7 +7761,7 @@ var VersionService = class {
    */
   async getVersionDetails(version) {
     try {
-      const response = await (0, import_node_fetch6.default)(version.url);
+      const response = await (0, import_node_fetch7.default)(version.url);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -9222,7 +9392,7 @@ function deleteInstance(id) {
   if (item && import_node_fs13.default.existsSync(item.path)) import_node_fs13.default.rmSync(item.path, { recursive: true, force: true });
 }
 async function mojangVersions() {
-  const res = await (0, import_node_fetch7.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
+  const res = await (0, import_node_fetch8.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
   const json = await res.json();
   return json.versions;
 }
@@ -9719,7 +9889,7 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
   const fileDir = import_node_path14.default.dirname(filePath);
   ensureDir2(fileDir);
   try {
-    const response = await (0, import_node_fetch7.default)(url);
+    const response = await (0, import_node_fetch8.default)(url);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -9773,20 +9943,24 @@ async function fetchModrinthContent(contentType, search) {
     return [];
   }
   try {
-    const searchParams = new URLSearchParams({
+    const allResults = [];
+    const PAGE_SIZE = 100;
+    let offset = 0;
+    const maxResults = 200;
+    const firstSearchParams = new URLSearchParams({
       query: search || "",
       // Puede ser vacío para obtener resultados generales
       facets: JSON.stringify(facets),
-      limit: "100",
-      // Aumentar a 100 resultados por página
+      limit: PAGE_SIZE.toString(),
+      offset: offset.toString(),
       index: search ? "relevance" : "downloads"
       // Ordenar por descargas si no hay búsqueda específica
     });
-    const url = `${MODRINTH_API_URL}/search?${searchParams}`;
-    console.log("Buscando en Modrinth:", url);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15e3);
-    const response = await (0, import_node_fetch7.default)(url, {
+    const firstUrl = `${MODRINTH_API_URL}/search?${firstSearchParams}`;
+    console.log("Buscando en Modrinth (p\xE1gina 1):", firstUrl);
+    const firstController = new AbortController();
+    const firstTimeoutId = setTimeout(() => firstController.abort(), 15e3);
+    const firstResponse = await (0, import_node_fetch8.default)(firstUrl, {
       method: "GET",
       headers: {
         "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
@@ -9794,21 +9968,68 @@ async function fetchModrinthContent(contentType, search) {
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive"
       },
-      signal: controller.signal
+      signal: firstController.signal
     });
-    clearTimeout(timeoutId);
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`Error al buscar en Modrinth: ${response.status} ${response.statusText}`, errorBody);
-      throw new Error(`Error de la API de Modrinth: ${response.statusText}`);
+    clearTimeout(firstTimeoutId);
+    if (!firstResponse.ok) {
+      const errorBody = await firstResponse.text();
+      console.error(`Error al buscar en Modrinth: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
+      throw new Error(`Error de la API de Modrinth: ${firstResponse.statusText}`);
     }
-    const json = await response.json();
-    console.log("Respuesta de Modrinth:", json);
-    if (!json || !json.hits || !Array.isArray(json.hits)) {
-      console.warn("La respuesta de Modrinth no contiene resultados v\xE1lidos:", json);
+    const firstJson = await firstResponse.json();
+    console.log("Primera respuesta de Modrinth:", firstJson);
+    if (!firstJson || !firstJson.hits || !Array.isArray(firstJson.hits)) {
+      console.warn("La respuesta de Modrinth no contiene resultados v\xE1lidos:", firstJson);
       return [];
     }
-    return json.hits.map((item) => ({
+    allResults.push(...firstJson.hits);
+    while (allResults.length < maxResults && firstJson.hits.length === PAGE_SIZE) {
+      offset += PAGE_SIZE;
+      const nextSearchParams = new URLSearchParams({
+        query: search || "",
+        // Puede ser vacío para obtener resultados generales
+        facets: JSON.stringify(facets),
+        limit: PAGE_SIZE.toString(),
+        offset: offset.toString(),
+        index: search ? "relevance" : "downloads"
+        // Ordenar por descargas si no hay búsqueda específica
+      });
+      const nextUrl = `${MODRINTH_API_URL}/search?${nextSearchParams}`;
+      console.log(`Buscando en Modrinth (p\xE1gina ${offset / PAGE_SIZE + 1}):`, nextUrl);
+      const nextController = new AbortController();
+      const nextTimeoutId = setTimeout(() => nextController.abort(), 15e3);
+      const nextResponse = await (0, import_node_fetch8.default)(nextUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
+          "Accept": "application/json",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Connection": "keep-alive"
+        },
+        signal: nextController.signal
+      });
+      clearTimeout(nextTimeoutId);
+      if (!nextResponse.ok) {
+        const errorBody = await nextResponse.text();
+        console.error(`Error al buscar en Modrinth: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
+        break;
+      }
+      const nextJson = await nextResponse.json();
+      console.log(`Respuesta de Modrinth p\xE1gina ${offset / PAGE_SIZE + 1}:`, nextJson);
+      if (!nextJson || !nextJson.hits || !Array.isArray(nextJson.hits)) {
+        console.warn("La respuesta de Modrinth no contiene resultados v\xE1lidos:", nextJson);
+        break;
+      }
+      if (nextJson.hits.length === 0) {
+        break;
+      }
+      allResults.push(...nextJson.hits);
+      if (nextJson.hits.length < PAGE_SIZE) {
+        break;
+      }
+    }
+    const finalResults = allResults.slice(0, maxResults);
+    return finalResults.map((item) => ({
       id: item.project_id || item.id,
       title: item.title,
       description: item.description,
@@ -9817,7 +10038,7 @@ async function fetchModrinthContent(contentType, search) {
       lastUpdated: item.date_modified || item.updated,
       minecraftVersions: item.versions || [],
       categories: item.categories || [],
-      imageUrl: item.icon_url || "https://via.placeholder.com/400x200",
+      imageUrl: item.icon_url || item.url || item.logo_url || "https://via.placeholder.com/400x200",
       type: contentType,
       version: item.versions && item.versions.length > 0 ? item.versions[0] : "N/A",
       downloadUrl: item.project_id && item.versions && item.versions.length > 0 ? `${MODRINTH_API_URL}/project/${item.project_id}/version/${item.versions[0]}` : null
@@ -9833,6 +10054,16 @@ async function fetchModrinthContent(contentType, search) {
 }
 import_electron2.ipcMain.handle("modrinth:search", async (_event, { contentType, search }) => {
   return fetchModrinthContent(contentType, search);
+});
+import_electron2.ipcMain.handle("curseforge:search", async (_event, { contentType, search }) => {
+  return curseforgeService.searchContent(contentType, search);
+});
+import_electron2.ipcMain.handle("curseforge:get-compatible-versions", async (_event, payload) => {
+  return await curseforgeService.getCompatibleVersions(
+    payload.projectId,
+    payload.mcVersion,
+    payload.loader
+  );
 });
 import_electron2.ipcMain.handle("download:cancel", async (_event, downloadId) => {
   const { downloadQueueService: downloadQueueService2 } = await Promise.resolve().then(() => (init_downloadQueueService(), downloadQueueService_exports));

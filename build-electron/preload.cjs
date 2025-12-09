@@ -9,6 +9,13 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     },
     getCompatibleVersions: (payload) => import_electron.ipcRenderer.invoke("modrinth:get-compatible-versions", payload)
   },
+  curseforge: {
+    search: (options) => {
+      console.log("Buscando en CurseForge:", options);
+      return import_electron.ipcRenderer.invoke("curseforge:search", options);
+    },
+    getCompatibleVersions: (payload) => import_electron.ipcRenderer.invoke("curseforge:get-compatible-versions", payload)
+  },
   // Métodos de descarga
   download: {
     start: (data) => import_electron.ipcRenderer.send("download:start", data),

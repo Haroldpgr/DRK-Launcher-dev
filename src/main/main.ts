@@ -14,6 +14,7 @@ import { ensureValidUUID } from '../utils/uuid';
 import { instanceService, InstanceConfig } from '../services/instanceService';
 import { instanceCreationService } from '../services/instanceCreationService';
 import { modrinthDownloadService } from '../services/modrinthDownloadService';
+import { curseforgeService } from '../services/curseforgeService';
 import { downloadQueueService } from '../services/downloadQueueService';
 import { enhancedInstanceCreationService } from '../services/enhancedInstanceCreationService';
 import { versionService } from '../services/versionService';
@@ -1002,22 +1003,29 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
   }
 
   try {
-    // Si no hay término de búsqueda, obtener contenido popular por tipo
-    const searchParams = new URLSearchParams({
+    // Fetch multiple pages to get more results (up to 200 total) since Modrinth API has a max of 100 per request
+    const allResults: any[] = [];
+    const PAGE_SIZE = 100; // Modrinth API maximum per request
+    let offset = 0;
+    const maxResults = 200; // Maximum results to fetch
+
+    // First, make the initial request with offset 0
+    const firstSearchParams = new URLSearchParams({
       query: search || '', // Puede ser vacío para obtener resultados generales
       facets: JSON.stringify(facets),
-      limit: '100', // Aumentar a 100 resultados por página
+      limit: PAGE_SIZE.toString(),
+      offset: offset.toString(),
       index: search ? 'relevance' : 'downloads' // Ordenar por descargas si no hay búsqueda específica
     });
 
-    const url = `${MODRINTH_API_URL}/search?${searchParams}`;
-    console.log('Buscando en Modrinth:', url);
+    const firstUrl = `${MODRINTH_API_URL}/search?${firstSearchParams}`;
+    console.log('Buscando en Modrinth (página 1):', firstUrl);
 
     // Aumentar el timeout de la solicitud
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos de timeout
+    const firstController = new AbortController();
+    const firstTimeoutId = setTimeout(() => firstController.abort(), 15000); // 15 segundos de timeout
 
-    const response = await fetch(url, {
+    const firstResponse = await fetch(firstUrl, {
       method: 'GET',
       headers: {
         'User-Agent': 'DRKLauncher/1.0 (haroldpgr@gmail.com)',
@@ -1025,28 +1033,93 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive'
       },
-      signal: controller.signal
+      signal: firstController.signal
     });
 
-    clearTimeout(timeoutId);
+    clearTimeout(firstTimeoutId);
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`Error al buscar en Modrinth: ${response.status} ${response.statusText}`, errorBody);
-      throw new Error(`Error de la API de Modrinth: ${response.statusText}`);
+    if (!firstResponse.ok) {
+      const errorBody = await firstResponse.text();
+      console.error(`Error al buscar en Modrinth: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
+      throw new Error(`Error de la API de Modrinth: ${firstResponse.statusText}`);
     }
 
-    const json = await response.json();
-    console.log('Respuesta de Modrinth:', json); // Debug log
+    const firstJson = await firstResponse.json();
+    console.log('Primera respuesta de Modrinth:', firstJson); // Debug log
 
     // Verificar si hay resultados válidos
-    if (!json || !json.hits || !Array.isArray(json.hits)) {
-      console.warn('La respuesta de Modrinth no contiene resultados válidos:', json);
+    if (!firstJson || !firstJson.hits || !Array.isArray(firstJson.hits)) {
+      console.warn('La respuesta de Modrinth no contiene resultados válidos:', firstJson);
       return [];
     }
 
+    allResults.push(...firstJson.hits);
+
+    // If we got less than PAGE_SIZE results, there are no more pages
+    // Otherwise, continue to fetch the next page
+    while (allResults.length < maxResults && firstJson.hits.length === PAGE_SIZE) {
+      offset += PAGE_SIZE;
+
+      // Prepare the search parameters for the next page
+      const nextSearchParams = new URLSearchParams({
+        query: search || '', // Puede ser vacío para obtener resultados generales
+        facets: JSON.stringify(facets),
+        limit: PAGE_SIZE.toString(),
+        offset: offset.toString(),
+        index: search ? 'relevance' : 'downloads' // Ordenar por descargas si no hay búsqueda específica
+      });
+
+      const nextUrl = `${MODRINTH_API_URL}/search?${nextSearchParams}`;
+      console.log(`Buscando en Modrinth (página ${offset/PAGE_SIZE + 1}):`, nextUrl);
+
+      // Aumentar el timeout de la solicitud
+      const nextController = new AbortController();
+      const nextTimeoutId = setTimeout(() => nextController.abort(), 15000); // 15 segundos de timeout
+
+      const nextResponse = await fetch(nextUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'DRKLauncher/1.0 (haroldpgr@gmail.com)',
+          'Accept': 'application/json',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive'
+        },
+        signal: nextController.signal
+      });
+
+      clearTimeout(nextTimeoutId);
+
+      if (!nextResponse.ok) {
+        const errorBody = await nextResponse.text();
+        console.error(`Error al buscar en Modrinth: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
+        break; // Stop if there's an error
+      }
+
+      const nextJson = await nextResponse.json();
+      console.log(`Respuesta de Modrinth página ${offset/PAGE_SIZE + 1}:`, nextJson); // Debug log
+
+      // Verificar si hay resultados válidos
+      if (!nextJson || !nextJson.hits || !Array.isArray(nextJson.hits)) {
+        console.warn('La respuesta de Modrinth no contiene resultados válidos:', nextJson);
+        break; // No more results
+      }
+
+      if (nextJson.hits.length === 0) {
+        break; // No more results
+      }
+
+      allResults.push(...nextJson.hits);
+
+      if (nextJson.hits.length < PAGE_SIZE) {
+        break; // Last page
+      }
+    }
+
+    // Limit to maxResults if needed
+    const finalResults = allResults.slice(0, maxResults);
+
     // Mapear la respuesta de Modrinth a nuestro formato
-    return json.hits.map((item: any) => ({
+    return finalResults.map((item: any) => ({
       id: item.project_id || item.id,
       title: item.title,
       description: item.description,
@@ -1055,7 +1128,7 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
       lastUpdated: item.date_modified || item.updated,
       minecraftVersions: item.versions || [],
       categories: item.categories || [],
-      imageUrl: item.icon_url || 'https://via.placeholder.com/400x200',
+      imageUrl: item.icon_url || item.url || item.logo_url || 'https://via.placeholder.com/400x200',
       type: contentType,
       version: item.versions && item.versions.length > 0 ? item.versions[0] : 'N/A',
       downloadUrl: item.project_id && item.versions && item.versions.length > 0
@@ -1075,6 +1148,27 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
 // Manejador IPC para búsquedas de Modrinth
 ipcMain.handle('modrinth:search', async (_event, { contentType, search }) => {
   return fetchModrinthContent(contentType, search);
+});
+
+// --- CurseForge API Integration --- //
+const CURSEFORGE_API_URL = 'https://api.curseforge.com/v1';
+
+// Manejador IPC para búsquedas de CurseForge
+ipcMain.handle('curseforge:search', async (_event, { contentType, search }) => {
+  return curseforgeService.searchContent(contentType, search);
+});
+
+// Manejador para obtener versiones compatibles de CurseForge
+ipcMain.handle('curseforge:get-compatible-versions', async (_event, payload: {
+  projectId: string,
+  mcVersion: string,
+  loader?: string
+}) => {
+  return await curseforgeService.getCompatibleVersions(
+    payload.projectId,
+    payload.mcVersion,
+    payload.loader
+  );
 });
 
 // IPC Handlers para cancelación de descargas

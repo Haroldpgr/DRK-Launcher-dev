@@ -11,6 +11,14 @@ contextBridge.exposeInMainWorld('api', {
     getCompatibleVersions: (payload: { projectId: string, mcVersion: string, loader?: string }) =>
       ipcRenderer.invoke('modrinth:get-compatible-versions', payload)
   },
+  curseforge: {
+    search: (options: { contentType: string; search: string }) => {
+      console.log('Buscando en CurseForge:', options);
+      return ipcRenderer.invoke('curseforge:search', options);
+    },
+    getCompatibleVersions: (payload: { projectId: string, mcVersion: string, loader?: string }) =>
+      ipcRenderer.invoke('curseforge:get-compatible-versions', payload)
+  },
 
   // Métodos de descarga
   download: {
@@ -121,6 +129,10 @@ declare global {
   interface Window {
     api: {
       modrinth: {
+        search: (options: { contentType: string; search: string }) => Promise<any[]>;
+        getCompatibleVersions: (payload: { projectId: string, mcVersion: string, loader?: string }) => Promise<any[]>;
+      };
+      curseforge: {
         search: (options: { contentType: string; search: string }) => Promise<any[]>;
         getCompatibleVersions: (payload: { projectId: string, mcVersion: string, loader?: string }) => Promise<any[]>;
       };
