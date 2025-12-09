@@ -5291,6 +5291,36 @@ var MinecraftDownloadService = class {
 };
 var minecraftDownloadService = new MinecraftDownloadService();
 
+// src/utils/uuid.ts
+function isValidUUID(uuid) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(uuid);
+}
+function generateValidUUID() {
+  const randomHex = (count) => {
+    let result = "";
+    for (let i = 0; i < count; i++) {
+      result += Math.floor(Math.random() * 16).toString(16);
+    }
+    return result;
+  };
+  const part1 = randomHex(8);
+  const part2 = randomHex(4);
+  const part3 = `4${randomHex(3)}`;
+  const part4 = `${["8", "9", "a", "b"][Math.floor(Math.random() * 4)]}${randomHex(3)}`;
+  const part5 = randomHex(12);
+  return `${part1}-${part2}-${part3}-${part4}-${part5}`;
+}
+function ensureValidUUID(maybeUUID) {
+  if (!maybeUUID) {
+    return generateValidUUID();
+  }
+  if (isValidUUID(maybeUUID)) {
+    return maybeUUID;
+  }
+  return generateValidUUID();
+}
+
 // src/services/gameService.ts
 var import_node_fetch3 = __toESM(require_lib2(), 1);
 function isInstanceReady(instancePath) {
@@ -8715,7 +8745,7 @@ var GameLaunchService = class {
         classpath = [import_node_path13.default.join(opts.instancePath, "client.jar"), ...libraryJars].join(import_node_path13.default.delimiter);
       }
     }
-    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+    const fakeUUID = ensureValidUUID(opts.userProfile?.id);
     let assetIndexId = opts.mcVersion;
     const moddedVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
     if (import_node_fs12.default.existsSync(moddedVersionJsonPath)) {
@@ -8904,7 +8934,7 @@ var GameLaunchService = class {
       }
     }
     const classpath = libraryJars.join(import_node_path13.default.delimiter);
-    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+    const fakeUUID = ensureValidUUID(opts.userProfile?.id);
     let assetIndexId = opts.mcVersion;
     const loaderVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(opts.mcVersion);
     if (import_node_fs12.default.existsSync(loaderVersionJsonPath)) {
@@ -9357,13 +9387,20 @@ import_electron2.ipcMain.handle("game:launch", async (_e, p) => {
       }
     }
     logProgressService.info(`Usando Java en: ${finalJavaPath}`, { javaPath: finalJavaPath });
+    let validatedUserProfile = p.userProfile;
+    if (p.userProfile && p.userProfile.id) {
+      validatedUserProfile = {
+        ...p.userProfile,
+        id: ensureValidUUID(p.userProfile.id)
+      };
+    }
     const childProcess = await gameLaunchService.launchGame({
       javaPath: finalJavaPath,
       mcVersion: i.version,
       instancePath: i.path,
       ramMb,
       jvmArgs,
-      userProfile: p.userProfile,
+      userProfile: validatedUserProfile,
       windowSize: {
         width: windowWidth,
         height: windowHeight

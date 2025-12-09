@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import { Profile } from '../renderer/services/profileService'
 import { minecraftDownloadService } from './minecraftDownloadService'
 import { getLauncherDataPath } from '../utils/paths'
+import { ensureValidUUID } from '../utils/uuid';
 import fetch from 'node-fetch';
 
 export type LaunchOptions = {
@@ -487,7 +488,8 @@ export async function buildArgs(opts: LaunchOptions) {
 
     // Definir argumentos del juego (necesarios para Minecraft)
     // Crear un UUID falso para perfiles no premium, o usar el real si está disponible
-    const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+    // Asegurar que el UUID esté en formato válido
+    const fakeUUID = ensureValidUUID(opts.userProfile?.id);
 
     const gameArgs = [
       '--username', opts.userProfile?.username || 'Player',
@@ -713,7 +715,8 @@ async function buildArgsForModded(opts: LaunchOptions, loader: string) {
 
   // Definir argumentos del juego (necesarios para Minecraft)
   // Crear un UUID falso para perfiles no premium, o usar el real si está disponible
-  const fakeUUID = opts.userProfile?.id || `0${Math.random().toString(16).substr(2, 31)}`;
+  // Asegurar que el UUID esté en formato válido
+  const fakeUUID = ensureValidUUID(opts.userProfile?.id);
 
   const baseGameArgs = [
     '--username', opts.userProfile?.username || 'Player',

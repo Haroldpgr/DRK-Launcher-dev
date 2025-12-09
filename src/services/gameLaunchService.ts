@@ -6,6 +6,7 @@ import { minecraftDownloadService } from './minecraftDownloadService';
 import { getLauncherDataPath } from '../utils/paths';
 import { logProgressService } from './logProgressService';
 import { InstanceConfig } from './enhancedInstanceCreationService';
+import { ensureValidUUID } from '../utils/uuid';
 
 export type LaunchOptions = {
   javaPath: string;
@@ -559,8 +560,8 @@ export class GameLaunchService {
 
     // Definir argumentos del juego (necesarios para Minecraft)
     // Crear un UUID falso para perfiles no premium, o usar el real si está disponible
-    // Generar UUID en formato estándar (8-4-4-4-12 caracteres hexadecimales)
-    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+    // Asegurar que el UUID esté en formato válido
+    const fakeUUID = ensureValidUUID(opts.userProfile?.id);
 
     // Obtener el ID real del assetIndex del archivo version.json
     let assetIndexId = opts.mcVersion; // Por defecto usar la versión de Minecraft
@@ -759,8 +760,8 @@ export class GameLaunchService {
 
     // Definir argumentos del juego (necesarios para Minecraft)
     // Crear un UUID falso para perfiles no premium, o usar el real si está disponible
-    // Generar UUID en formato estándar (8-4-4-4-12 caracteres hexadecimales)
-    const fakeUUID = opts.userProfile?.id || `${Math.random().toString(16).substr(2, 8)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 4)}-${Math.random().toString(16).substr(2, 12)}`;
+    // Asegurar que el UUID esté en formato válido
+    const fakeUUID = ensureValidUUID(opts.userProfile?.id);
 
     // Obtener el ID real del assetIndex del archivo version.json
     let assetIndexId = opts.mcVersion; // Por defecto usar la versión de Minecraft

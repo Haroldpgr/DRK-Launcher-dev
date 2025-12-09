@@ -10,6 +10,7 @@ import { javaDetector } from './javaDetector'
 import javaService from './javaService';
 import fetch from 'node-fetch'; // Añadido para peticiones a la API
 import { getLauncherDataPath, ensureDir as ensureDirUtil } from '../utils/paths';
+import { ensureValidUUID } from '../utils/uuid';
 import { instanceService, InstanceConfig } from '../services/instanceService';
 import { instanceCreationService } from '../services/instanceCreationService';
 import { modrinthDownloadService } from '../services/modrinthDownloadService';
@@ -450,6 +451,15 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
 
     logProgressService.info(`Usando Java en: ${finalJavaPath}`, { javaPath: finalJavaPath });
 
+    // Asegurar que el UUID en el perfil de usuario sea válido antes de pasarlo al juego
+    let validatedUserProfile = p.userProfile;
+    if (p.userProfile && p.userProfile.id) {
+      validatedUserProfile = {
+        ...p.userProfile,
+        id: ensureValidUUID(p.userProfile.id)
+      };
+    }
+
     // Launch the game with all configurations using the enhanced service
     const childProcess = await gameLaunchService.launchGame({
       javaPath: finalJavaPath,
@@ -457,7 +467,7 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
       instancePath: i.path,
       ramMb: ramMb,
       jvmArgs: jvmArgs,
-      userProfile: p.userProfile,
+      userProfile: validatedUserProfile,
       windowSize: {
         width: windowWidth,
         height: windowHeight

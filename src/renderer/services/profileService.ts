@@ -1,6 +1,8 @@
 // src/renderer/services/profileService.ts
 // Este servicio gestionará la lógica de perfiles (premium y no-premium)
 
+import { generateValidUUID } from '../utils/uuid';
+
 export interface Profile {
   id: string;
   username: string;
@@ -44,7 +46,7 @@ export const profileService = {
       return updatedProfiles.find(p => p.username === username)!;
     }
     const newProfile: Profile = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: generateValidUUID(),
       username,
       type,
       lastUsed: Date.now(),
