@@ -54,7 +54,8 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   logs: {
     getRecent: (count) => import_electron.ipcRenderer.invoke("logs:get-recent", count),
     getByType: (payload) => import_electron.ipcRenderer.invoke("logs:get-by-type", payload),
-    getStats: () => import_electron.ipcRenderer.invoke("logs:get-stats")
+    getStats: () => import_electron.ipcRenderer.invoke("logs:get-stats"),
+    readLog: (logPath) => import_electron.ipcRenderer.invoke("logs:readLog", logPath)
   },
   progress: {
     getAllStatuses: () => import_electron.ipcRenderer.invoke("progress:get-all-statuses"),

@@ -63,7 +63,8 @@ contextBridge.exposeInMainWorld('api', {
   logs: {
     getRecent: (count: number) => ipcRenderer.invoke('logs:get-recent', count),
     getByType: (payload: { type: string, count: number }) => ipcRenderer.invoke('logs:get-by-type', payload),
-    getStats: () => ipcRenderer.invoke('logs:get-stats')
+    getStats: () => ipcRenderer.invoke('logs:get-stats'),
+    readLog: (logPath: string) => ipcRenderer.invoke('logs:readLog', logPath)
   },
 
   progress: {
@@ -136,6 +137,7 @@ declare global {
         getRecent: (count: number) => Promise<any[]>;
         getByType: (payload: { type: string, count: number }) => Promise<any[]>;
         getStats: () => Promise<any>;
+        readLog: (logPath: string) => Promise<string>;
       };
       progress: {
         getAllStatuses: () => Promise<any[]>;

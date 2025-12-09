@@ -330,6 +330,33 @@ ipcMain.handle('crash:analyze', async (_e, p: { instanceId: string; logPath?: st
 
 ipcMain.handle('crash:list', async () => listCrashes())
 
+// Nuevo handler para leer archivos de log
+ipcMain.handle('logs:readLog', async (_e, logPath: string) => {
+  try {
+    // Validar que la ruta del archivo esté dentro de directorios permitidos
+    const { data } = basePaths();
+    const instancesPath = path.join(data, 'instances');
+
+    // Asegurarse de que el path esté dentro del directorio de instancias
+    const resolvedPath = path.resolve(logPath);
+    const resolvedInstancesPath = path.resolve(instancesPath);
+
+    if (!resolvedPath.startsWith(resolvedInstancesPath)) {
+      throw new Error('Ruta de archivo no permitida');
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error('El archivo de log no existe');
+    }
+
+    const content = fs.readFileSync(resolvedPath, 'utf-8');
+    return content;
+  } catch (error) {
+    console.error('Error al leer archivo de log:', error);
+    throw error;
+  }
+})
+
 ipcMain.handle('servers:list', async () => {
   const { data } = basePaths()
   const file = path.join(data, 'servers.json')

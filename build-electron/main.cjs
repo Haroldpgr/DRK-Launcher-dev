@@ -9308,6 +9308,25 @@ import_electron2.ipcMain.handle("crash:analyze", async (_e, p) => {
   return rec;
 });
 import_electron2.ipcMain.handle("crash:list", async () => listCrashes());
+import_electron2.ipcMain.handle("logs:readLog", async (_e, logPath) => {
+  try {
+    const { data } = basePaths();
+    const instancesPath = import_node_path14.default.join(data, "instances");
+    const resolvedPath = import_node_path14.default.resolve(logPath);
+    const resolvedInstancesPath = import_node_path14.default.resolve(instancesPath);
+    if (!resolvedPath.startsWith(resolvedInstancesPath)) {
+      throw new Error("Ruta de archivo no permitida");
+    }
+    if (!import_node_fs13.default.existsSync(resolvedPath)) {
+      throw new Error("El archivo de log no existe");
+    }
+    const content = import_node_fs13.default.readFileSync(resolvedPath, "utf-8");
+    return content;
+  } catch (error) {
+    console.error("Error al leer archivo de log:", error);
+    throw error;
+  }
+});
 import_electron2.ipcMain.handle("servers:list", async () => {
   const { data } = basePaths();
   const file = import_node_path14.default.join(data, "servers.json");
