@@ -59,66 +59,18 @@ export class CurseForgeService {
         return [];
       }
 
-      // Fetch multiple pages to get more results (up to 1000 total, close to API limits)
-      const allResults: any[] = [];
+      // Fetch multiple pages concurrently to get more results (up to 1000 total) with reliable page size
       const PAGE_SIZE = 50; // Use page size that works reliably with CurseForge API
-      let index = 0;
-      const maxResults = 1000; // Maximum results to fetch (near API limits)
+      const maxResults = 1000; // Maximum results to fetch
 
-      // First, get the total count to determine how many pages to fetch
-      const firstPageParams = new URLSearchParams({
-        gameId: '432', // Minecraft game ID for CurseForge API
-        classId: categoryId.toString(),
-        searchFilter: search || '',
-        sortField: search ? '2' : '3', // Sort by relevance if searching, otherwise by download count
-        sortOrder: 'desc', // Descending order as string
-        index: index.toString(),
-        pageSize: PAGE_SIZE.toString()
-      });
+      // Calculate how many requests we'll need
+      const numRequests = Math.min(20, Math.ceil(maxResults / PAGE_SIZE)); // Maximum of 20 requests for 1000 results
 
-      const firstPageUrl = `${CURSEFORGE_API_URL}/mods/search?${firstPageParams}`;
-      console.log('Searching CurseForge first page:', firstPageUrl);
-
-      // Set up timeout for the request
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-      const firstResponse = await fetch(firstPageUrl, {
-        method: 'GET',
-        headers: this.headers,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!firstResponse.ok) {
-        const errorBody = await firstResponse.text();
-        console.error(`Error fetching from CurseForge: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
-        throw new Error(`Error from CurseForge API: ${firstResponse.statusText}`);
-      }
-
-      const firstJson: any = await firstResponse.json();
-      console.log('CurseForge first page response:', firstJson);
-
-      // Process the first page
-      let firstPageItems: any[] = [];
-      if (firstJson && firstJson.data && Array.isArray(firstJson.data)) {
-        firstPageItems = firstJson.data;
-      } else if (firstJson && firstJson.data && firstJson.data.data && Array.isArray(firstJson.data.data)) {
-        firstPageItems = firstJson.data.data;
-      } else if (Array.isArray(firstJson)) {
-        firstPageItems = firstJson;
-      }
-
-      allResults.push(...firstPageItems);
-
-      // Continue fetching pages until we have enough results or no more pages
-      while (allResults.length < maxResults && firstPageItems.length === PAGE_SIZE) {
-        index += PAGE_SIZE;
-        if (allResults.length >= maxResults) break;
-
-        // Prepare the search parameters for the next page
-        const nextParams = new URLSearchParams({
+      // Create all request promises
+      const requests = [];
+      for (let i = 0; i < numRequests; i++) {
+        const index = i * PAGE_SIZE;
+        const params = new URLSearchParams({
           gameId: '432', // Minecraft game ID for CurseForge API
           classId: categoryId.toString(),
           searchFilter: search || '',
@@ -128,45 +80,54 @@ export class CurseForgeService {
           pageSize: PAGE_SIZE.toString()
         });
 
-        const nextUrl = `${CURSEFORGE_API_URL}/mods/search?${nextParams}`;
-        console.log(`Searching CurseForge page ${index/PAGE_SIZE + 1}:`, nextUrl);
+        const url = `${CURSEFORGE_API_URL}/mods/search?${params}`;
+        console.log(`Preparando solicitud CurseForge ${i + 1}:`, url);
 
-        const nextController = new AbortController();
-        const nextTimeoutId = setTimeout(() => nextController.abort(), 15000); // 15 second timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-        const nextResponse = await fetch(nextUrl, {
-          method: 'GET',
-          headers: this.headers,
-          signal: nextController.signal
-        });
+        requests.push(
+          fetch(url, {
+            method: 'GET',
+            headers: this.headers,
+            signal: controller.signal
+          })
+        );
+      }
 
-        clearTimeout(nextTimeoutId);
+      // Execute all requests concurrently
+      const responses = await Promise.all(requests);
 
-        if (!nextResponse.ok) {
-          const errorBody = await nextResponse.text();
-          console.error(`Error fetching from CurseForge: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
-          break; // Stop if there's an error
+      // Process all responses
+      const allResults: any[] = [];
+      for (let i = 0; i < responses.length; i++) {
+        const response = responses[i];
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error(`Error fetching from CurseForge (request ${i + 1}): ${response.status} ${response.statusText}`, errorBody);
+          continue; // Continue with other responses
         }
 
-        const nextJson: any = await nextResponse.json();
-        console.log(`CurseForge page ${index/PAGE_SIZE + 1} response:`, nextJson);
+        const json: any = await response.json();
+        console.log(`Respuesta de CurseForge solicitud ${i + 1}:`, json);
 
-        let nextPageItems: any[] = [];
-        if (nextJson && nextJson.data && Array.isArray(nextJson.data)) {
-          nextPageItems = nextJson.data;
-        } else if (nextJson && nextJson.data && nextJson.data.data && Array.isArray(nextJson.data.data)) {
-          nextPageItems = nextJson.data.data;
-        } else if (Array.isArray(nextJson)) {
-          nextPageItems = nextJson;
+        // Process the response
+        let pageItems: any[] = [];
+        if (json && json.data && Array.isArray(json.data)) {
+          pageItems = json.data;
+        } else if (json && json.data && json.data.data && Array.isArray(json.data.data)) {
+          pageItems = json.data.data;
+        } else if (Array.isArray(json)) {
+          pageItems = json;
         }
 
-        if (nextPageItems.length === 0) {
+        if (pageItems.length === 0) {
           break; // No more results
         }
 
-        allResults.push(...nextPageItems);
+        allResults.push(...pageItems);
 
-        if (nextPageItems.length < PAGE_SIZE) {
+        if (pageItems.length < PAGE_SIZE) {
           break; // Last page
         }
       }

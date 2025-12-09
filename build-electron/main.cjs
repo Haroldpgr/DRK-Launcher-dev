@@ -7498,52 +7498,13 @@ var CurseForgeService = class {
         console.error("Invalid content type for CurseForge:", contentType);
         return [];
       }
-      const allResults = [];
       const PAGE_SIZE = 50;
-      let index = 0;
       const maxResults = 1e3;
-      const firstPageParams = new URLSearchParams({
-        gameId: "432",
-        // Minecraft game ID for CurseForge API
-        classId: categoryId.toString(),
-        searchFilter: search || "",
-        sortField: search ? "2" : "3",
-        // Sort by relevance if searching, otherwise by download count
-        sortOrder: "desc",
-        // Descending order as string
-        index: index.toString(),
-        pageSize: PAGE_SIZE.toString()
-      });
-      const firstPageUrl = `${CURSEFORGE_API_URL}/mods/search?${firstPageParams}`;
-      console.log("Searching CurseForge first page:", firstPageUrl);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15e3);
-      const firstResponse = await (0, import_node_fetch6.default)(firstPageUrl, {
-        method: "GET",
-        headers: this.headers,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (!firstResponse.ok) {
-        const errorBody = await firstResponse.text();
-        console.error(`Error fetching from CurseForge: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
-        throw new Error(`Error from CurseForge API: ${firstResponse.statusText}`);
-      }
-      const firstJson = await firstResponse.json();
-      console.log("CurseForge first page response:", firstJson);
-      let firstPageItems = [];
-      if (firstJson && firstJson.data && Array.isArray(firstJson.data)) {
-        firstPageItems = firstJson.data;
-      } else if (firstJson && firstJson.data && firstJson.data.data && Array.isArray(firstJson.data.data)) {
-        firstPageItems = firstJson.data.data;
-      } else if (Array.isArray(firstJson)) {
-        firstPageItems = firstJson;
-      }
-      allResults.push(...firstPageItems);
-      while (allResults.length < maxResults && firstPageItems.length === PAGE_SIZE) {
-        index += PAGE_SIZE;
-        if (allResults.length >= maxResults) break;
-        const nextParams = new URLSearchParams({
+      const numRequests = Math.min(20, Math.ceil(maxResults / PAGE_SIZE));
+      const requests = [];
+      for (let i = 0; i < numRequests; i++) {
+        const index = i * PAGE_SIZE;
+        const params = new URLSearchParams({
           gameId: "432",
           // Minecraft game ID for CurseForge API
           classId: categoryId.toString(),
@@ -7555,36 +7516,42 @@ var CurseForgeService = class {
           index: index.toString(),
           pageSize: PAGE_SIZE.toString()
         });
-        const nextUrl = `${CURSEFORGE_API_URL}/mods/search?${nextParams}`;
-        console.log(`Searching CurseForge page ${index / PAGE_SIZE + 1}:`, nextUrl);
-        const nextController = new AbortController();
-        const nextTimeoutId = setTimeout(() => nextController.abort(), 15e3);
-        const nextResponse = await (0, import_node_fetch6.default)(nextUrl, {
-          method: "GET",
-          headers: this.headers,
-          signal: nextController.signal
-        });
-        clearTimeout(nextTimeoutId);
-        if (!nextResponse.ok) {
-          const errorBody = await nextResponse.text();
-          console.error(`Error fetching from CurseForge: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
+        const url = `${CURSEFORGE_API_URL}/mods/search?${params}`;
+        console.log(`Preparando solicitud CurseForge ${i + 1}:`, url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15e3);
+        requests.push(
+          (0, import_node_fetch6.default)(url, {
+            method: "GET",
+            headers: this.headers,
+            signal: controller.signal
+          })
+        );
+      }
+      const responses = await Promise.all(requests);
+      const allResults = [];
+      for (let i = 0; i < responses.length; i++) {
+        const response = responses[i];
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error(`Error fetching from CurseForge (request ${i + 1}): ${response.status} ${response.statusText}`, errorBody);
+          continue;
+        }
+        const json = await response.json();
+        console.log(`Respuesta de CurseForge solicitud ${i + 1}:`, json);
+        let pageItems = [];
+        if (json && json.data && Array.isArray(json.data)) {
+          pageItems = json.data;
+        } else if (json && json.data && json.data.data && Array.isArray(json.data.data)) {
+          pageItems = json.data.data;
+        } else if (Array.isArray(json)) {
+          pageItems = json;
+        }
+        if (pageItems.length === 0) {
           break;
         }
-        const nextJson = await nextResponse.json();
-        console.log(`CurseForge page ${index / PAGE_SIZE + 1} response:`, nextJson);
-        let nextPageItems = [];
-        if (nextJson && nextJson.data && Array.isArray(nextJson.data)) {
-          nextPageItems = nextJson.data;
-        } else if (nextJson && nextJson.data && nextJson.data.data && Array.isArray(nextJson.data.data)) {
-          nextPageItems = nextJson.data.data;
-        } else if (Array.isArray(nextJson)) {
-          nextPageItems = nextJson;
-        }
-        if (nextPageItems.length === 0) {
-          break;
-        }
-        allResults.push(...nextPageItems);
-        if (nextPageItems.length < PAGE_SIZE) {
+        allResults.push(...pageItems);
+        if (pageItems.length < PAGE_SIZE) {
           break;
         }
       }
