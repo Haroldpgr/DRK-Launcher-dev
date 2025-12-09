@@ -9243,6 +9243,16 @@ function listCrashes() {
 function saveCrashes(list) {
   writeJSON(crashesFile(), list);
 }
+function deleteCrash(crashId) {
+  const crashes = listCrashes();
+  const initialLength = crashes.length;
+  const updatedCrashes = crashes.filter((crash) => crash.id !== crashId);
+  if (initialLength !== updatedCrashes.length) {
+    saveCrashes(updatedCrashes);
+    return true;
+  }
+  return false;
+}
 import_electron2.ipcMain.handle("settings:get", async () => settings());
 import_electron2.ipcMain.handle("settings:set", async (_e, s) => {
   saveSettings(s);
@@ -9308,6 +9318,20 @@ import_electron2.ipcMain.handle("crash:analyze", async (_e, p) => {
   return rec;
 });
 import_electron2.ipcMain.handle("crash:list", async () => listCrashes());
+import_electron2.ipcMain.handle("crash:delete", async (_, id) => {
+  const deleted = deleteCrash(id);
+  if (deleted) {
+    const crash = listCrashes().find((c) => c.id === id);
+    if (crash && crash.logPath && import_node_fs13.default.existsSync(crash.logPath)) {
+      try {
+        import_node_fs13.default.unlinkSync(crash.logPath);
+      } catch (error) {
+        console.error(`Error al eliminar archivo de log: ${crash.logPath}`, error);
+      }
+    }
+  }
+  return deleted;
+});
 import_electron2.ipcMain.handle("logs:readLog", async (_e, logPath) => {
   try {
     const { data } = basePaths();

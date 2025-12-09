@@ -75,7 +75,8 @@ contextBridge.exposeInMainWorld('api', {
 
   crash: {
     analyze: (p: unknown) => ipcRenderer.invoke('crash:analyze', p),
-    list: () => ipcRenderer.invoke('crash:list')
+    list: () => ipcRenderer.invoke('crash:list'),
+    delete: (id: string) => ipcRenderer.invoke('crash:delete', id)
   },
 
   servers: {
@@ -162,6 +163,7 @@ declare global {
       crash: {
         analyze: (p: unknown) => Promise<any>;
         list: () => Promise<any>;
+        delete: (id: string) => Promise<any>;
       };
       servers: {
         list: () => Promise<any>;

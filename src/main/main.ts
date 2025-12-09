@@ -284,6 +284,19 @@ function saveCrashes(list: CrashRecord[]) {
   writeJSON(crashesFile(), list)
 }
 
+function deleteCrash(crashId: string): boolean {
+  const crashes = listCrashes();
+  const initialLength = crashes.length;
+  const updatedCrashes = crashes.filter(crash => crash.id !== crashId);
+
+  if (initialLength !== updatedCrashes.length) {
+    saveCrashes(updatedCrashes);
+    return true; // Se eliminó correctamente
+  }
+
+  return false; // No se encontró el crash
+}
+
 
 ipcMain.handle('settings:get', async () => settings())
 ipcMain.handle('settings:set', async (_e, s: Settings) => { saveSettings(s); return s })
@@ -331,6 +344,26 @@ ipcMain.handle('crash:analyze', async (_e, p: { instanceId: string; logPath?: st
 })
 
 ipcMain.handle('crash:list', async () => listCrashes())
+
+ipcMain.handle('crash:delete', async (_, id: string) => {
+  // Intentar eliminar el crash
+  const deleted = deleteCrash(id);
+
+  // Si se eliminó con éxito, borrar también el archivo de log asociado si existe
+  if (deleted) {
+    const crash = listCrashes().find(c => c.id === id);
+    if (crash && crash.logPath && fs.existsSync(crash.logPath)) {
+      try {
+        fs.unlinkSync(crash.logPath); // Eliminar archivo físico del log
+      } catch (error) {
+        console.error(`Error al eliminar archivo de log: ${crash.logPath}`, error);
+        // Continuar igual, aunque no se pueda eliminar el archivo físico
+      }
+    }
+  }
+
+  return deleted;
+})
 
 // Nuevo handler para leer archivos de log
 ipcMain.handle('logs:readLog', async (_e, logPath: string) => {

@@ -64,7 +64,8 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   },
   crash: {
     analyze: (p) => import_electron.ipcRenderer.invoke("crash:analyze", p),
-    list: () => import_electron.ipcRenderer.invoke("crash:list")
+    list: () => import_electron.ipcRenderer.invoke("crash:list"),
+    delete: (id) => import_electron.ipcRenderer.invoke("crash:delete", id)
   },
   servers: {
     list: () => import_electron.ipcRenderer.invoke("servers:list"),

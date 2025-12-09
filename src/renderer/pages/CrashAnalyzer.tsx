@@ -157,32 +157,41 @@ export default function CrashAnalyzer() {
     });
   };
 
-  const confirmDeleteCrash = () => {
+  const confirmDeleteCrash = async () => {
     if (!deleteConfirmation.crashId) return;
 
-    // Eliminar el crash de la lista
-    const updatedRecords = crashRecords.filter(crash => crash.id !== deleteConfirmation.crashId);
-    setCrashRecords(updatedRecords);
+    try {
+      // Eliminar el crash tanto de la lista como del backend
+      await window.api.crash.delete(deleteConfirmation.crashId);
 
-    // Si se está eliminando el crash seleccionado, limpiar la selección
-    if (selectedCrash && selectedCrash.id === deleteConfirmation.crashId) {
-      setSelectedCrash(null);
-      setSelectedInstance(null);
+      // Eliminar el crash de la lista en memoria
+      const updatedRecords = crashRecords.filter(crash => crash.id !== deleteConfirmation.crashId);
+      setCrashRecords(updatedRecords);
+
+      // Si se está eliminando el crash seleccionado, limpiar la selección
+      if (selectedCrash && selectedCrash.id === deleteConfirmation.crashId) {
+        setSelectedCrash(null);
+        setSelectedInstance(null);
+      }
+
+      // Eliminar también el historial de chat asociado
+      setChatHistory(prev => {
+        const newHistory = { ...prev };
+        delete newHistory[deleteConfirmation.crashId!];
+        return newHistory;
+      });
+    } catch (error) {
+      console.error('Error al eliminar el archivo de crash:', error);
+      // Mostrar mensaje de error al usuario
+      alert('Error al eliminar el archivo de crash: ' + (error as Error).message);
+    } finally {
+      // Cerrar el modal
+      setDeleteConfirmation({
+        isOpen: false,
+        crashId: null,
+        crashName: null
+      });
     }
-
-    // Eliminar también el historial de chat asociado
-    setChatHistory(prev => {
-      const newHistory = { ...prev };
-      delete newHistory[deleteConfirmation.crashId!];
-      return newHistory;
-    });
-
-    // Cerrar el modal
-    setDeleteConfirmation({
-      isOpen: false,
-      crashId: null,
-      crashName: null
-    });
   };
 
   const cancelDeleteCrash = () => {
