@@ -82,6 +82,19 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   // API de diálogo del sistema
   dialog: {
     showOpenDialog: (options) => import_electron.ipcRenderer.invoke("dialog:showOpenDialog", options)
+  },
+  // API de modpacks
+  modpack: {
+    createTemporary: (originalPath) => import_electron.ipcRenderer.invoke("modpack:create-temporary", originalPath),
+    getTemporary: (id) => import_electron.ipcRenderer.invoke("modpack:get-temporary", id)
+  },
+  // API de análisis de modpacks
+  modpackImport: {
+    analyzeFile: (filePath) => import_electron.ipcRenderer.invoke("modpack-import:analyze-file", filePath),
+    analyzeUrl: (url) => import_electron.ipcRenderer.invoke("modpack-import:analyze-url", url),
+    extractAndInstall: (sourcePath, targetPath) => import_electron.ipcRenderer.invoke("modpack-import:extract-and-install", sourcePath, targetPath),
+    downloadModpackFromModrinth: (projectId, targetPath, mcVersion, loader) => import_electron.ipcRenderer.invoke("modpack-import:download-modpack-from-modrinth", projectId, targetPath, mcVersion, loader),
+    downloadAndExtractFromUrl: (url, targetPath) => import_electron.ipcRenderer.invoke("modpack-import:download-and-extract-from-url", url, targetPath)
   }
 });
 //# sourceMappingURL=preload.cjs.map

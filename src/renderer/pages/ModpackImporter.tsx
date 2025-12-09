@@ -3,6 +3,7 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import { Instance } from './Instances';
 import { notificationService } from '../services/notificationService';
+import { modpackImportService } from '../services/modpackImportService';
 
 // Definir tipos para el modpack
 interface ModpackMetadata {
@@ -38,6 +39,7 @@ export default function ModpackImporter() {
   const [generatedUrl, setGeneratedUrl] = useState('');
   const [currentStep, setCurrentStep] = useState<'import' | 'select' | 'compatibility' | 'importing'>('import');
   const [dragActive, setDragActive] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
 
   // Cargar instancias
   useEffect(() => {
@@ -56,69 +58,46 @@ export default function ModpackImporter() {
     }
   };
 
-  // Simular análisis del modpack
+  // Analizar el modpack desde archivo o URL
   const analyzeModpack = async (sourcePath: string) => {
-    // En una implementación real, esto leería el archivo modpack y extraería la metadata
-    // Por ahora simulamos con datos de ejemplo
-    const metadata: ModpackMetadata = {
-      id: 'example-modpack',
-      name: 'Ejemplo de Modpack',
-      version: '1.0.0',
-      description: 'Un modpack de ejemplo para demostrar la funcionalidad',
-      author: 'Autor del Modpack',
-      mcVersion: '1.20.1',
-      loader: 'fabric',
-      modCount: 50,
-      fileCount: 65
-    };
-    setModpackMetadata(metadata);
-    setCurrentStep('select');
+    try {
+      const metadata = await modpackImportService.analyzeModpack(sourcePath);
+      setModpackMetadata(metadata);
+      setCurrentStep('select');
+    } catch (error) {
+      console.error('Error al analizar modpack:', error);
+      notificationService.error('Error al analizar el modpack. Verifica que sea un archivo válido.');
+    }
   };
 
   // Verificar compatibilidad
   const checkCompatibility = () => {
     if (!modpackMetadata) return;
 
-    const compatibleInstances = instances.filter(instance =>
-      instance.version === modpackMetadata.mcVersion &&
-      instance.loader === modpackMetadata.loader
-    );
-
-    const incompatibleInstances = instances.filter(instance =>
-      instance.version !== modpackMetadata.mcVersion ||
-      instance.loader !== modpackMetadata.loader
-    );
-
-    const isCompatible = compatibleInstances.length > 0;
-
-    setCompatibility({
-      compatible: isCompatible,
-      message: isCompatible
-        ? 'Compatible con algunas instancias existentes'
-        : 'No compatible con ninguna instancia existente',
-      compatibleInstances,
-      incompatibleInstances
-    });
-
+    const result = modpackImportService.checkCompatibility(modpackMetadata, instances);
+    setCompatibility(result);
     setCurrentStep('compatibility');
   };
 
   // Importar modpack
   const importPack = async () => {
-    if (!selectedInstance) {
+    if (!selectedInstance || !modpackMetadata) {
       notificationService.error('Por favor selecciona una instancia');
       return;
     }
 
     setIsImporting(true);
     setCurrentStep('importing');
+    setImportProgress(0);
 
     try {
-      // En una implementación real, aquí se haría la importación real del modpack
-      // Simulamos el proceso
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await modpackImportService.importModpack(
+        source,
+        selectedInstance,
+        (progress) => setImportProgress(progress)
+      );
 
-      notificationService.success(`Modpack importado exitosamente a ${selectedInstance}`);
+      notificationService.success(`Modpack importado exitosamente a ${instances.find(i => i.id === selectedInstance)?.name}`);
       setCurrentStep('import');
       setSource('');
       setModpackMetadata(null);
@@ -126,7 +105,7 @@ export default function ModpackImporter() {
       setCompatibility(null);
     } catch (error) {
       console.error('Error al importar modpack:', error);
-      notificationService.error('Error al importar modpack');
+      notificationService.error(`Error al importar modpack: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setIsImporting(false);
     }
@@ -134,16 +113,19 @@ export default function ModpackImporter() {
 
   // Generar URL temporal
   const generateTemporaryUrl = async () => {
+    if (!source) {
+      notificationService.error('Por favor introduce una URL o selecciona un archivo');
+      return;
+    }
+
     setIsGeneratingUrl(true);
     try {
-      // En una implementación real, esto generaría una URL temporal para compartir
-      // Simulamos con una URL temporal
-      const tempUrl = `https://example.com/temp/${Date.now()}`;
+      const tempUrl = await modpackImportService.generateTemporaryUrl(source);
       setGeneratedUrl(tempUrl);
       notificationService.success('URL generada exitosamente');
     } catch (error) {
       console.error('Error al generar URL:', error);
-      notificationService.error('Error al generar URL');
+      notificationService.error(`Error al generar URL: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setIsGeneratingUrl(false);
     }
@@ -153,8 +135,9 @@ export default function ModpackImporter() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSource(file.path || file.name);
-      await analyzeModpack(file.path || file.name);
+      const filePath = (file as any).path || URL.createObjectURL(file);
+      setSource(filePath);
+      await analyzeModpack(filePath);
     }
   };
 
@@ -175,8 +158,10 @@ export default function ModpackImporter() {
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setSource(e.dataTransfer.files[0].name);
-      analyzeModpack(e.dataTransfer.files[0].name);
+      const file = e.dataTransfer.files[0];
+      const filePath = (file as any).path || URL.createObjectURL(file);
+      setSource(filePath);
+      analyzeModpack(filePath);
     }
   };
 
@@ -328,7 +313,7 @@ export default function ModpackImporter() {
               />
               <Button
                 onClick={generateTemporaryUrl}
-                disabled={isGeneratingUrl}
+                disabled={isGeneratingUrl || !source}
                 variant="secondary"
               >
                 {isGeneratingUrl ? 'Generando...' : 'Generar URL temporal'}
@@ -369,7 +354,9 @@ export default function ModpackImporter() {
                   <span className="px-2 py-1 bg-gray-700 text-gray-300 rounded-full text-xs">v{modpackMetadata.version}</span>
                   <span className="px-2 py-1 bg-blue-900/50 text-blue-300 rounded-full text-xs">{modpackMetadata.loader}</span>
                   <span className="px-2 py-1 bg-green-900/50 text-green-300 rounded-full text-xs">MC {modpackMetadata.mcVersion}</span>
-                  <span className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded-full text-xs">{modpackMetadata.modCount} mods</span>
+                  {modpackMetadata.modCount !== undefined && (
+                    <span className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded-full text-xs">{modpackMetadata.modCount} mods</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -501,10 +488,11 @@ export default function ModpackImporter() {
           <p className="text-gray-400 mt-2">Esto puede tardar varios minutos dependiendo del tamaño del modpack</p>
           <div className="mt-6 w-full bg-gray-700 rounded-full h-2.5">
             <div
-              className="bg-blue-600 h-2.5 rounded-full animate-pulse"
-              style={{ width: isImporting ? '75%' : '0%' }}
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${importProgress}%` }}
             ></div>
           </div>
+          <div className="text-sm text-gray-400 mt-2">{importProgress}% completado</div>
         </div>
       )}
     </Card>

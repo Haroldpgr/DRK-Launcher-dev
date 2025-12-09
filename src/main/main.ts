@@ -21,6 +21,8 @@ import { javaDownloadService } from '../services/javaDownloadService';
 import { loaderService } from '../services/loaderService';
 import { logProgressService } from '../services/logProgressService';
 import { gameLaunchService } from '../services/gameLaunchService';
+import { tempModpackService } from '../services/tempModpackService';
+import { fileAnalyzerService } from '../services/fileAnalyzerService';
 
 let win: BrowserWindow | null = null;
 

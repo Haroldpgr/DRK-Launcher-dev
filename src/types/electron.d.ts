@@ -66,6 +66,17 @@ declare global {
         onComplete: (callback: (event: any, data: { itemId: string; filePath: string }) => void) => void;
         onError: (callback: (event: any, error: { itemId: string; message: string }) => void) => void;
       };
+      modpack: {
+        createTemporary: (originalPath: string) => Promise<string>;
+        getTemporary: (id: string) => Promise<any>;
+      };
+      modpackImport: {
+        analyzeFile: (filePath: string) => Promise<any>;
+        analyzeUrl: (url: string) => Promise<any>;
+        extractAndInstall: (sourcePath: string, targetPath: string) => Promise<void>;
+        downloadModpackFromModrinth: (projectId: string, targetPath: string, mcVersion: string, loader: string) => Promise<void>;
+        downloadAndExtractFromUrl: (url: string, targetPath: string, onProgress?: (progress: number) => void) => Promise<void>;
+      };
     };
   }
 }
