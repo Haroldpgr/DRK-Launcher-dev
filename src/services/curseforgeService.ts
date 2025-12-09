@@ -61,7 +61,7 @@ export class CurseForgeService {
 
       // Fetch multiple pages to get more results (up to 1000 total, close to API limits)
       const allResults: any[] = [];
-      const PAGE_SIZE = 50; // Use a reasonable page size
+      const PAGE_SIZE = 50; // Use page size that works reliably with CurseForge API
       let index = 0;
       const maxResults = 1000; // Maximum results to fetch (near API limits)
 
@@ -70,8 +70,8 @@ export class CurseForgeService {
         gameId: '432', // Minecraft game ID for CurseForge API
         classId: categoryId.toString(),
         searchFilter: search || '',
-        sortField: (search ? 2 : 3).toString(), // Sort by relevance if searching, otherwise by download count
-        sortOrder: '2', // Descending order
+        sortField: search ? '2' : '3', // Sort by relevance if searching, otherwise by download count
+        sortOrder: 'desc', // Descending order as string
         index: index.toString(),
         pageSize: PAGE_SIZE.toString()
       });
@@ -122,8 +122,8 @@ export class CurseForgeService {
           gameId: '432', // Minecraft game ID for CurseForge API
           classId: categoryId.toString(),
           searchFilter: search || '',
-          sortField: (search ? 2 : 3).toString(), // Sort by relevance if searching, otherwise by download count
-          sortOrder: '2', // Descending order
+          sortField: search ? '2' : '3', // Sort by relevance if searching, otherwise by download count
+          sortOrder: 'desc', // Descending order as string
           index: index.toString(),
           pageSize: PAGE_SIZE.toString()
         });

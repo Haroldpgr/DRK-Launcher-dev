@@ -1003,65 +1003,18 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
   }
 
   try {
-    // Fetch multiple pages to get more results (up to 200 total) since Modrinth API has a max of 100 per request
-    const allResults: any[] = [];
+    // Fetch multiple pages concurrently to get more results (up to 1000 total) since Modrinth API has a max of 100 per request
     const PAGE_SIZE = 100; // Modrinth API maximum per request
-    let offset = 0;
-    const maxResults = 200; // Maximum results to fetch
+    const maxResults = 1000; // Maximum results to fetch (10 requests × 100)
 
-    // First, make the initial request with offset 0
-    const firstSearchParams = new URLSearchParams({
-      query: search || '', // Puede ser vacío para obtener resultados generales
-      facets: JSON.stringify(facets),
-      limit: PAGE_SIZE.toString(),
-      offset: offset.toString(),
-      index: search ? 'relevance' : 'downloads' // Ordenar por descargas si no hay búsqueda específica
-    });
+    // Calculate how many requests we'll need
+    const numRequests = Math.min(10, Math.ceil(maxResults / PAGE_SIZE)); // Maximum of 10 requests for 1000 results
 
-    const firstUrl = `${MODRINTH_API_URL}/search?${firstSearchParams}`;
-    console.log('Buscando en Modrinth (página 1):', firstUrl);
-
-    // Aumentar el timeout de la solicitud
-    const firstController = new AbortController();
-    const firstTimeoutId = setTimeout(() => firstController.abort(), 15000); // 15 segundos de timeout
-
-    const firstResponse = await fetch(firstUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'DRKLauncher/1.0 (haroldpgr@gmail.com)',
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive'
-      },
-      signal: firstController.signal
-    });
-
-    clearTimeout(firstTimeoutId);
-
-    if (!firstResponse.ok) {
-      const errorBody = await firstResponse.text();
-      console.error(`Error al buscar en Modrinth: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
-      throw new Error(`Error de la API de Modrinth: ${firstResponse.statusText}`);
-    }
-
-    const firstJson = await firstResponse.json();
-    console.log('Primera respuesta de Modrinth:', firstJson); // Debug log
-
-    // Verificar si hay resultados válidos
-    if (!firstJson || !firstJson.hits || !Array.isArray(firstJson.hits)) {
-      console.warn('La respuesta de Modrinth no contiene resultados válidos:', firstJson);
-      return [];
-    }
-
-    allResults.push(...firstJson.hits);
-
-    // If we got less than PAGE_SIZE results, there are no more pages
-    // Otherwise, continue to fetch the next page
-    while (allResults.length < maxResults && firstJson.hits.length === PAGE_SIZE) {
-      offset += PAGE_SIZE;
-
-      // Prepare the search parameters for the next page
-      const nextSearchParams = new URLSearchParams({
+    // Create all request promises
+    const requests = [];
+    for (let i = 0; i < numRequests; i++) {
+      const offset = i * PAGE_SIZE;
+      const searchParams = new URLSearchParams({
         query: search || '', // Puede ser vacío para obtener resultados generales
         facets: JSON.stringify(facets),
         limit: PAGE_SIZE.toString(),
@@ -1069,49 +1022,48 @@ async function fetchModrinthContent(contentType: keyof typeof modrinthProjectTyp
         index: search ? 'relevance' : 'downloads' // Ordenar por descargas si no hay búsqueda específica
       });
 
-      const nextUrl = `${MODRINTH_API_URL}/search?${nextSearchParams}`;
-      console.log(`Buscando en Modrinth (página ${offset/PAGE_SIZE + 1}):`, nextUrl);
+      const url = `${MODRINTH_API_URL}/search?${searchParams}`;
+      console.log(`Preparando solicitud Modrinth ${i + 1}:`, url);
 
-      // Aumentar el timeout de la solicitud
-      const nextController = new AbortController();
-      const nextTimeoutId = setTimeout(() => nextController.abort(), 15000); // 15 segundos de timeout
+      requests.push(
+        fetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'DRKLauncher/1.0 (haroldpgr@gmail.com)',
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+          }
+        })
+      );
+    }
 
-      const nextResponse = await fetch(nextUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'DRKLauncher/1.0 (haroldpgr@gmail.com)',
-          'Accept': 'application/json',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive'
-        },
-        signal: nextController.signal
-      });
+    // Execute all requests concurrently
+    const responses = await Promise.all(requests);
 
-      clearTimeout(nextTimeoutId);
-
-      if (!nextResponse.ok) {
-        const errorBody = await nextResponse.text();
-        console.error(`Error al buscar en Modrinth: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
-        break; // Stop if there's an error
+    // Process all responses
+    const allResults: any[] = [];
+    for (let i = 0; i < responses.length; i++) {
+      const response = responses[i];
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`Error al buscar en Modrinth (solicitud ${i + 1}): ${response.status} ${response.statusText}`, errorBody);
+        continue; // Continue with other responses
       }
 
-      const nextJson = await nextResponse.json();
-      console.log(`Respuesta de Modrinth página ${offset/PAGE_SIZE + 1}:`, nextJson); // Debug log
+      const json = await response.json();
+      console.log(`Respuesta de Modrinth solicitud ${i + 1}:`, json); // Debug log
 
       // Verificar si hay resultados válidos
-      if (!nextJson || !nextJson.hits || !Array.isArray(nextJson.hits)) {
-        console.warn('La respuesta de Modrinth no contiene resultados válidos:', nextJson);
-        break; // No more results
+      if (json && json.hits && Array.isArray(json.hits)) {
+        allResults.push(...json.hits);
+      } else {
+        console.warn(`La respuesta ${i + 1} de Modrinth no contiene resultados válidos:`, json);
       }
 
-      if (nextJson.hits.length === 0) {
-        break; // No more results
-      }
-
-      allResults.push(...nextJson.hits);
-
-      if (nextJson.hits.length < PAGE_SIZE) {
-        break; // Last page
+      // Break if we get fewer results than expected (last page)
+      if (json.hits && json.hits.length < PAGE_SIZE) {
+        break;
       }
     }
 

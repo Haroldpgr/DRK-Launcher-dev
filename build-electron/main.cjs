@@ -7507,10 +7507,10 @@ var CurseForgeService = class {
         // Minecraft game ID for CurseForge API
         classId: categoryId.toString(),
         searchFilter: search || "",
-        sortField: (search ? 2 : 3).toString(),
+        sortField: search ? "2" : "3",
         // Sort by relevance if searching, otherwise by download count
-        sortOrder: "2",
-        // Descending order
+        sortOrder: "desc",
+        // Descending order as string
         index: index.toString(),
         pageSize: PAGE_SIZE.toString()
       });
@@ -7548,10 +7548,10 @@ var CurseForgeService = class {
           // Minecraft game ID for CurseForge API
           classId: categoryId.toString(),
           searchFilter: search || "",
-          sortField: (search ? 2 : 3).toString(),
+          sortField: search ? "2" : "3",
           // Sort by relevance if searching, otherwise by download count
-          sortOrder: "2",
-          // Descending order
+          sortOrder: "desc",
+          // Descending order as string
           index: index.toString(),
           pageSize: PAGE_SIZE.toString()
         });
@@ -9943,49 +9943,13 @@ async function fetchModrinthContent(contentType, search) {
     return [];
   }
   try {
-    const allResults = [];
     const PAGE_SIZE = 100;
-    let offset = 0;
-    const maxResults = 200;
-    const firstSearchParams = new URLSearchParams({
-      query: search || "",
-      // Puede ser vacío para obtener resultados generales
-      facets: JSON.stringify(facets),
-      limit: PAGE_SIZE.toString(),
-      offset: offset.toString(),
-      index: search ? "relevance" : "downloads"
-      // Ordenar por descargas si no hay búsqueda específica
-    });
-    const firstUrl = `${MODRINTH_API_URL}/search?${firstSearchParams}`;
-    console.log("Buscando en Modrinth (p\xE1gina 1):", firstUrl);
-    const firstController = new AbortController();
-    const firstTimeoutId = setTimeout(() => firstController.abort(), 15e3);
-    const firstResponse = await (0, import_node_fetch8.default)(firstUrl, {
-      method: "GET",
-      headers: {
-        "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive"
-      },
-      signal: firstController.signal
-    });
-    clearTimeout(firstTimeoutId);
-    if (!firstResponse.ok) {
-      const errorBody = await firstResponse.text();
-      console.error(`Error al buscar en Modrinth: ${firstResponse.status} ${firstResponse.statusText}`, errorBody);
-      throw new Error(`Error de la API de Modrinth: ${firstResponse.statusText}`);
-    }
-    const firstJson = await firstResponse.json();
-    console.log("Primera respuesta de Modrinth:", firstJson);
-    if (!firstJson || !firstJson.hits || !Array.isArray(firstJson.hits)) {
-      console.warn("La respuesta de Modrinth no contiene resultados v\xE1lidos:", firstJson);
-      return [];
-    }
-    allResults.push(...firstJson.hits);
-    while (allResults.length < maxResults && firstJson.hits.length === PAGE_SIZE) {
-      offset += PAGE_SIZE;
-      const nextSearchParams = new URLSearchParams({
+    const maxResults = 1e3;
+    const numRequests = Math.min(10, Math.ceil(maxResults / PAGE_SIZE));
+    const requests = [];
+    for (let i = 0; i < numRequests; i++) {
+      const offset = i * PAGE_SIZE;
+      const searchParams = new URLSearchParams({
         query: search || "",
         // Puede ser vacío para obtener resultados generales
         facets: JSON.stringify(facets),
@@ -9994,37 +9958,37 @@ async function fetchModrinthContent(contentType, search) {
         index: search ? "relevance" : "downloads"
         // Ordenar por descargas si no hay búsqueda específica
       });
-      const nextUrl = `${MODRINTH_API_URL}/search?${nextSearchParams}`;
-      console.log(`Buscando en Modrinth (p\xE1gina ${offset / PAGE_SIZE + 1}):`, nextUrl);
-      const nextController = new AbortController();
-      const nextTimeoutId = setTimeout(() => nextController.abort(), 15e3);
-      const nextResponse = await (0, import_node_fetch8.default)(nextUrl, {
-        method: "GET",
-        headers: {
-          "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
-          "Accept": "application/json",
-          "Accept-Encoding": "gzip, deflate, br",
-          "Connection": "keep-alive"
-        },
-        signal: nextController.signal
-      });
-      clearTimeout(nextTimeoutId);
-      if (!nextResponse.ok) {
-        const errorBody = await nextResponse.text();
-        console.error(`Error al buscar en Modrinth: ${nextResponse.status} ${nextResponse.statusText}`, errorBody);
-        break;
+      const url = `${MODRINTH_API_URL}/search?${searchParams}`;
+      console.log(`Preparando solicitud Modrinth ${i + 1}:`, url);
+      requests.push(
+        (0, import_node_fetch8.default)(url, {
+          method: "GET",
+          headers: {
+            "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive"
+          }
+        })
+      );
+    }
+    const responses = await Promise.all(requests);
+    const allResults = [];
+    for (let i = 0; i < responses.length; i++) {
+      const response = responses[i];
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`Error al buscar en Modrinth (solicitud ${i + 1}): ${response.status} ${response.statusText}`, errorBody);
+        continue;
       }
-      const nextJson = await nextResponse.json();
-      console.log(`Respuesta de Modrinth p\xE1gina ${offset / PAGE_SIZE + 1}:`, nextJson);
-      if (!nextJson || !nextJson.hits || !Array.isArray(nextJson.hits)) {
-        console.warn("La respuesta de Modrinth no contiene resultados v\xE1lidos:", nextJson);
-        break;
+      const json = await response.json();
+      console.log(`Respuesta de Modrinth solicitud ${i + 1}:`, json);
+      if (json && json.hits && Array.isArray(json.hits)) {
+        allResults.push(...json.hits);
+      } else {
+        console.warn(`La respuesta ${i + 1} de Modrinth no contiene resultados v\xE1lidos:`, json);
       }
-      if (nextJson.hits.length === 0) {
-        break;
-      }
-      allResults.push(...nextJson.hits);
-      if (nextJson.hits.length < PAGE_SIZE) {
+      if (json.hits && json.hits.length < PAGE_SIZE) {
         break;
       }
     }
