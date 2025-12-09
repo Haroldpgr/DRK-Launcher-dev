@@ -4,6 +4,7 @@ import Button from '../components/Button'
 import IconButton from '../components/IconButton'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { Profile } from '../services/profileService';
+import HomeServerCard from '../components/HomeServerCard';
 
 type NewsItem = { id: string; title: string; body: string }
 type Instance = { id: string; name: string; version: string; loader?: string }
@@ -24,6 +25,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
   const [modpacks, setModpacks] = useState<any[]>([]); // Estado para almacenar modpacks
   const [shaders, setShaders] = useState<any[]>([]); // Estado para almacenar shaders
   const [servers, setServers] = useState<any[]>([]); // Estado para almacenar servidores
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const last = useMemo(() => instances[instances.length - 1], [instances])
 
   useEffect(() => {
@@ -168,16 +170,60 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
     // Cargar servidores recomendados
     // Aquí puedes cargar servidores desde una API o desde una configuración local
     setServers([
-      { id: 'server1', name: 'Hypixel', ip: 'mc.hypixel.net' },
-      { id: 'server2', name: 'Mineplex', ip: 'us.mineplex.com' },
-      { id: 'server3', name: 'CubeCraft', ip: 'play.cubecraft.net' }
+      {
+        id: 'server1',
+        name: 'Hypixel',
+        ip: 'mc.hypixel.net',
+        description: 'El servidor multijugador más grande de Minecraft con minijuegos, SkyBlock y más',
+        category: 'Minijuegos',
+        thumbnail: 'https://api.minetools.eu/favicon/mc.hypixel.net'
+      },
+      {
+        id: 'server2',
+        name: 'Minecade',
+        ip: 'play.minecade.net',
+        description: 'Minijuegos competitivos con torneos regulares y modos únicos',
+        category: 'Minijuegos',
+        thumbnail: 'https://api.minetools.eu/favicon/play.minecade.net'
+      },
+      {
+        id: 'server3',
+        name: 'Empire Minecraft',
+        ip: 'play.emc.gs',
+        description: 'Uno de los servidores de survival más grandes con economía y facciones',
+        category: 'Factions',
+        thumbnail: 'https://api.minetools.eu/favicon/play.emc.gs'
+      }
     ]);
   }, [currentUser]) // Agregar currentUser como dependencia para refrescar cuando cambie el perfil
 
   const play = async () => { if (!last) return; onPlay(last.id); }
 
+  const connectToServer = (ip: string) => {
+    navigator.clipboard.writeText(ip)
+      .then(() => {
+        setNotification({ message: `IP copiada: ${ip}`, type: 'success' });
+        setTimeout(() => setNotification(null), 3000);
+      })
+      .catch(() => {
+        setNotification({ message: 'Error al copiar la IP', type: 'error' });
+        setTimeout(() => setNotification(null), 3000);
+      });
+  }
+
   return (
     <div className="grid grid-cols-4 gap-6">
+      {/* Notification */}
+      {notification && (
+        <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 ${
+          notification.type === 'success'
+            ? 'bg-green-600 text-white'
+            : 'bg-red-600 text-white'
+        }`}>
+          {notification.message}
+        </div>
+      )}
+
       <div className="col-span-3 space-y-6">
         <Card>
           <div className="text-2xl font-bold text-gray-100">¡Bienvenido, {currentUser || 'Usuario'}!</div>
@@ -278,15 +324,18 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
             <div className="text-xl font-semibold text-gray-200">Servidores recomendados</div>
             <Button variant="secondary" onClick={() => location.assign('#/servers')}>Ver más</Button>
           </div>
-          <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-4">
             {servers.map(server => (
-              <div key={server.id} className="flex items-center justify-between bg-gray-800/60 backdrop-blur-sm p-3 rounded-xl border border-gray-700/50">
-                <div>
-                  <div className="font-medium text-gray-100">{server.name}</div>
-                  <div className="text-sm text-gray-400">{server.ip}</div>
-                </div>
-                <Button variant="secondary">Conectar</Button>
-              </div>
+              <HomeServerCard
+                key={server.id}
+                id={server.id}
+                name={server.name}
+                ip={server.ip}
+                description={server.description}
+                thumbnail={server.thumbnail}
+                category={server.category}
+                onConnect={connectToServer}
+              />
             ))}
           </div>
         </Card>
