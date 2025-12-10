@@ -730,25 +730,66 @@ ipcMain.handle('instance:install-content', async (_e, payload: {
   versionId?: string;  // Nuevo parámetro para versión específica
 }) => {
   try {
+    // Verificar si el contenido proviene de CurseForge o Modrinth (aplica para modpacks y otros tipos)
+    // Mejor lógica de identificación:
+    // - CurseForge IDs suelen ser numéricos (aunque pueden ser cortos como 245755)
+    // - Modrinth IDs suelen ser alfanuméricos cortos (letras y números, ej: "hdhj3")
+    // - CurseForge IDs también pueden tener prefijo 'cf_'
+    const isCurseForgeContent = payload.contentId && (
+      payload.contentId.startsWith?.('cf_') ||
+      /^\d+$/.test(payload.contentId) // Verificar si es un número puro (característica de CurseForge)
+    );
+
     if (payload.contentType === 'modpack') {
-      // Para modpacks, usar el método existente
-      await instanceCreationService.installContentToInstance(
-        payload.instancePath,
-        payload.contentId,
-        payload.contentType,
-        payload.mcVersion,
-        payload.loader
-      );
+      // Para modpacks, usar el servicio apropiado según la plataforma de origen
+      if (isCurseForgeContent) {
+        // Si es un modpack de CurseForge, usar el servicio de CurseForge
+        await curseforgeService.downloadContent(
+          payload.contentId,
+          payload.instancePath,
+          payload.mcVersion,
+          payload.loader,
+          payload.contentType,
+          payload.versionId  // Pasar el ID de versión específico si se proporcionó
+        );
+      } else {
+        // Si es un modpack de Modrinth, usar el servicio de Modrinth
+        await instanceCreationService.installContentToInstance(
+          payload.instancePath,
+          payload.contentId,
+          payload.contentType,
+          payload.mcVersion,
+          payload.loader
+        );
+      }
     } else {
-      // Para otros contenidos, usar el nuevo método con selección de versión
-      await modrinthDownloadService.downloadContent(
-        payload.contentId,
-        payload.instancePath,
-        payload.mcVersion,
-        payload.loader,
-        payload.contentType,
-        payload.versionId  // Pasar el ID de versión específico si se proporcionó
-      );
+      // Para otros contenidos, usar el servicio de descarga apropiado según la plataforma
+      // Debemos determinar la plataforma del contenido para usar el servicio correcto
+
+      if (isCurseForgeContent) {
+        // Si es contenido de CurseForge, usar el servicio de CurseForge para la descarga
+        // IMPORTANTE: para CurseForge, el payload.versionId debe ser el ID del archivo específico
+        console.log(`Descargando contenido de CurseForge - ID proyecto: ${payload.contentId}, ID versión: ${payload.versionId}`);
+        await curseforgeService.downloadContent(
+          payload.contentId,
+          payload.instancePath,
+          payload.mcVersion,
+          payload.loader,
+          payload.contentType,
+          payload.versionId  // Pasar el ID de versión específico si se proporcionó
+        );
+      } else {
+        // Para otros contenidos (suponemos que son de Modrinth), usar el servicio de Modrinth
+        console.log(`Descargando contenido de Modrinth - ID proyecto: ${payload.contentId}, ID versión: ${payload.versionId}`);
+        await modrinthDownloadService.downloadContent(
+          payload.contentId,
+          payload.instancePath,
+          payload.mcVersion,
+          payload.loader,
+          payload.contentType,
+          payload.versionId  // Pasar el ID de versión específico si se proporcionó
+        );
+      }
     }
     return { success: true };
   } catch (error) {
