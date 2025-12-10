@@ -7596,7 +7596,89 @@ var CurseForgeService = class {
         throw new Error(`Error fetching files for project ${projectId}: ${response.statusText}`);
       }
       const data = await response.json();
-      console.log("CurseForge files response:", data);
+      console.log("CurseForge files response FULL:", JSON.stringify(data, null, 2));
+      console.log("CurseForge files structure keys:", Object.keys(data));
+      if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+        console.log("CurseForge first file example:", JSON.stringify(data.data[0], null, 2));
+      }
+      if (data && data.data && Array.isArray(data.data)) {
+        const compatibilityInfo = [];
+        console.log(`CurseForge: Procesando ${data.data.length} archivos...`);
+        data.data.forEach((file, index) => {
+          if (index < 3) {
+            console.log(`CurseForge: Archivo ${index + 1} - Keys:`, Object.keys(file));
+            console.log(`CurseForge: Archivo ${index + 1} - Ejemplo de props importantes:`, {
+              fileName: file.fileName || file.displayName,
+              gameVersions: file.gameVersions,
+              modLoader: file.modLoader,
+              modLoaders: file.modLoaders,
+              categories: file.categories,
+              dependencies: file.dependencies
+            });
+          }
+          if (file.gameVersions && Array.isArray(file.gameVersions)) {
+            let modLoaderType = null;
+            if (file.modLoader) {
+              modLoaderType = file.modLoader;
+            } else if (file.modLoaders && Array.isArray(file.modLoaders) && file.modLoaders.length > 0) {
+              modLoaderType = file.modLoaders[0];
+            } else if (file.fileFingerprint && typeof file.fileFingerprint === "object" && file.fileFingerprint.modLoader) {
+              modLoaderType = file.fileFingerprint.modLoader;
+            } else if (file.dependencies && Array.isArray(file.dependencies)) {
+              const loaderDep = file.dependencies.find(
+                (dep) => dep.type === 1 && (dep.slug.includes("forge") || dep.slug.includes("fabric") || dep.slug.includes("quilt"))
+              );
+              if (loaderDep) {
+                if (loaderDep.slug.includes("forge")) modLoaderType = "forge";
+                else if (loaderDep.slug.includes("fabric")) modLoaderType = "fabric";
+                else if (loaderDep.slug.includes("quilt")) modLoaderType = "quilt";
+              }
+            }
+            let extractedModLoader = null;
+            const gameVersionList = [];
+            file.gameVersions.forEach((versionOrLoader) => {
+              const lowerVersion = versionOrLoader.toLowerCase();
+              if (lowerVersion.includes("forge") || lowerVersion.includes("fabric") || lowerVersion.includes("quilt") || lowerVersion.includes("neoforge")) {
+                if (lowerVersion.includes("forge") && !lowerVersion.includes("neo")) {
+                  extractedModLoader = "forge";
+                } else if (lowerVersion.includes("fabric")) {
+                  extractedModLoader = "fabric";
+                } else if (lowerVersion.includes("quilt")) {
+                  extractedModLoader = "quilt";
+                } else if (lowerVersion.includes("neoforge") || lowerVersion.includes("neo-forge")) {
+                  extractedModLoader = "neoforge";
+                }
+              } else if (versionOrLoader.startsWith("1.")) {
+                gameVersionList.push(versionOrLoader);
+              }
+            });
+            if (!extractedModLoader && modLoaderType) {
+              const loaderLower = modLoaderType.toLowerCase();
+              if (loaderLower.includes("forge") && !loaderLower.includes("neo")) {
+                extractedModLoader = "forge";
+              } else if (loaderLower.includes("fabric")) {
+                extractedModLoader = "fabric";
+              } else if (loaderLower.includes("quilt")) {
+                extractedModLoader = "quilt";
+              } else if (loaderLower.includes("neoforge") || loaderLower.includes("neo-forge")) {
+                extractedModLoader = "neoforge";
+              }
+            }
+            gameVersionList.forEach((version) => {
+              if (version.startsWith("1.")) {
+                compatibilityInfo.push({
+                  gameVersion: version,
+                  modLoader: extractedModLoader,
+                  // Usar el loader extraído directamente del array gameVersions
+                  fileName: file.fileName || file.displayName || null,
+                  downloadUrl: file.downloadUrl || file.downloadUrl || null
+                });
+              }
+            });
+          }
+        });
+        return compatibilityInfo;
+      }
       return [];
     } catch (error) {
       console.error(`Error getting compatible versions for project ${projectId}:`, error);

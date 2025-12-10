@@ -192,13 +192,110 @@ export class CurseForgeService {
       }
 
       const data = await response.json();
-      
-      // Process CurseForge files to match our existing format
-      // For now, return an empty array as the format conversion is complex and requires more research
-      // This method may need to be implemented differently based on CurseForge API response structure
-      console.log('CurseForge files response:', data);
-      
-      // Return an empty array for now - this needs to be properly implemented
+      console.log('CurseForge files response FULL:', JSON.stringify(data, null, 2));  // Log más detallado
+      console.log('CurseForge files structure keys:', Object.keys(data));
+      if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+        console.log('CurseForge first file example:', JSON.stringify(data.data[0], null, 2));
+      }
+
+      // Procesar la respuesta para extraer información de compatibilidad
+      // CurseForge retorna información sobre archivos que incluye versiones de juego y loaders
+      if (data && data.data && Array.isArray(data.data)) {
+        // Extraer versiones de Minecraft y loaders de los archivos disponibles
+        const compatibilityInfo: any[] = [];
+
+        console.log(`CurseForge: Procesando ${data.data.length} archivos...`);
+        data.data.forEach((file: any, index: number) => {
+          if (index < 3) { // Solo mostrar información de los primeros 3 archivos para no saturar
+            console.log(`CurseForge: Archivo ${index + 1} - Keys:`, Object.keys(file));
+            console.log(`CurseForge: Archivo ${index + 1} - Ejemplo de props importantes:`, {
+              fileName: file.fileName || file.displayName,
+              gameVersions: file.gameVersions,
+              modLoader: file.modLoader,
+              modLoaders: file.modLoaders,
+              categories: file.categories,
+              dependencies: file.dependencies
+            });
+          }
+          if (file.gameVersions && Array.isArray(file.gameVersions)) {
+            // Extraer información del modloader - puede estar en varias propiedades
+            let modLoaderType = null;
+            if (file.modLoader) {
+              modLoaderType = file.modLoader;
+            } else if (file.modLoaders && Array.isArray(file.modLoaders) && file.modLoaders.length > 0) {
+              modLoaderType = file.modLoaders[0]; // Tomar el primer loader disponible
+            } else if (file.fileFingerprint && typeof file.fileFingerprint === 'object' && file.fileFingerprint.modLoader) {
+              modLoaderType = file.fileFingerprint.modLoader;
+            } else if (file.dependencies && Array.isArray(file.dependencies)) {
+              // Buscar información de loader en dependencias
+              const loaderDep = file.dependencies.find((dep: any) =>
+                dep.type === 1 && (dep.slug.includes('forge') || dep.slug.includes('fabric') || dep.slug.includes('quilt'))
+              );
+              if (loaderDep) {
+                if (loaderDep.slug.includes('forge')) modLoaderType = 'forge';
+                else if (loaderDep.slug.includes('fabric')) modLoaderType = 'fabric';
+                else if (loaderDep.slug.includes('quilt')) modLoaderType = 'quilt';
+              }
+            }
+
+            // Extraer información del modloader - en CurseForge está mezclada con las versiones de juego
+            // Separar loaders de versiones de juego (ej. ['Fabric', '1.20.1'] -> loader='Fabric', versiones=['1.20.1'])
+            let extractedModLoader = null;
+            const gameVersionList: string[] = [];
+
+            file.gameVersions.forEach((versionOrLoader: string) => {
+              // Verificar si es un loader identificable
+              const lowerVersion = versionOrLoader.toLowerCase();
+              if (lowerVersion.includes('forge') || lowerVersion.includes('fabric') ||
+                  lowerVersion.includes('quilt') || lowerVersion.includes('neoforge')) {
+                // Este es un loader
+                if (lowerVersion.includes('forge') && !lowerVersion.includes('neo')) {
+                  extractedModLoader = 'forge';
+                } else if (lowerVersion.includes('fabric')) {
+                  extractedModLoader = 'fabric';
+                } else if (lowerVersion.includes('quilt')) {
+                  extractedModLoader = 'quilt';
+                } else if (lowerVersion.includes('neoforge') || lowerVersion.includes('neo-forge')) {
+                  extractedModLoader = 'neoforge';
+                }
+              } else if (versionOrLoader.startsWith('1.')) {
+                // Esto es una versión de juego de Minecraft
+                gameVersionList.push(versionOrLoader);
+              }
+            });
+
+            // Si no encontramos loader en gameVersions y no hay loader definido previamente, usar modLoaderType como fallback
+            if (!extractedModLoader && modLoaderType) {
+              const loaderLower = modLoaderType.toLowerCase();
+              if (loaderLower.includes('forge') && !loaderLower.includes('neo')) {
+                extractedModLoader = 'forge';
+              } else if (loaderLower.includes('fabric')) {
+                extractedModLoader = 'fabric';
+              } else if (loaderLower.includes('quilt')) {
+                extractedModLoader = 'quilt';
+              } else if (loaderLower.includes('neoforge') || loaderLower.includes('neo-forge')) {
+                extractedModLoader = 'neoforge';
+              }
+            }
+
+            // Procesar cada versión de juego encontrada
+            gameVersionList.forEach((version: string) => {
+              // Solo incluir versiones válidas de Minecraft
+              if (version.startsWith('1.')) {
+                compatibilityInfo.push({
+                  gameVersion: version,
+                  modLoader: extractedModLoader, // Usar el loader extraído directamente del array gameVersions
+                  fileName: file.fileName || file.displayName || null,
+                  downloadUrl: file.downloadUrl || file.downloadUrl || null
+                });
+              }
+            });
+          }
+        });
+
+        return compatibilityInfo;
+      }
+
       return [];
     } catch (error) {
       console.error(`Error getting compatible versions for project ${projectId}:`, error);

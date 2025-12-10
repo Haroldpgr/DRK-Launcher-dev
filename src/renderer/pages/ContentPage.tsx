@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { downloadService } from '../services/downloadService';
+import { extractCurseForgeCompatibilityInfo } from '../../services/curseforgeApiHelper';
 
 type ContentType = 'modpacks' | 'mods' | 'resourcepacks' | 'datapacks' | 'shaders';
 type SortBy = 'popular' | 'recent' | 'name';
@@ -357,30 +358,50 @@ const ContentPage: React.FC = () => {
         // Primero, usamos las versiones del item original
         allVersions = [...new Set(item.minecraftVersions)];
 
+        console.log('DEBUG - CurseForge: Iniciando carga de compatibilidad para item:', item);
+        console.log('DEBUG - CurseForge: projectId:', item.id);
+        console.log('DEBUG - CurseForge: mcVersions disponibles:', item.minecraftVersions);
+
+        // Si no hay versiones en el item original, usar algunas versiones comunes como fallback
+        if (!item.minecraftVersions || item.minecraftVersions.length === 0) {
+          console.log('DEBUG - CurseForge: No hay versiones en el item original, usando versiones comunes como fallback');
+          allVersions = [
+            '1.21.1', '1.21', '1.20.6', '1.20.5', '1.20.4', '1.20.3', '1.20.2', '1.20.1',
+            '1.19.4', '1.19.3', '1.19.2', '1.18.2', '1.17.1', '1.16.5', '1.15.2', '1.14.4',
+            '1.13.2', '1.12.2', '1.11.2', '1.10.2', '1.9.4', '1.8.9'
+          ];
+        }
+
+        // Para CurseForge, vamos a intentar obtener la información de compatibilidad real
+        // pero con un enfoque que no dependa de una API externa que pueda fallar
+
+        // Intentamos obtener la información de compatibilidad real desde CurseForge API
         try {
-          // Obtener todas las versiones compatibles desde CurseForge
-          const allCompatibleVersions = await window.api.curseforge.getCompatibleVersions({
+          console.log('DEBUG - CurseForge: Intentando llamar a la API para compatibilidad...');
+          // Usar la primera versión disponible, o si no hay, usar una versión común
+          const mcVersionToUse = (item.minecraftVersions && item.minecraftVersions.length > 0)
+            ? item.minecraftVersions[0]
+            : '1.20.1';
+
+          console.log('DEBUG - CurseForge: Llamando API con projectId:', item.id, 'y mcVersion:', mcVersionToUse);
+
+          const curseForgeResponse = await window.api.curseforge.getCompatibleVersions({
             projectId: item.id,
-            mcVersion: item.minecraftVersions[0] || '1.20.1' // Usamos la primera versión para obtener datos
-            // No especificamos loader para obtener todas las combinaciones posibles
+            mcVersion: mcVersionToUse
+            // No especificamos loader para obtener todos los disponibles
           });
 
-          // Extraer versiones del formato de CurseForge
-          if (allCompatibleVersions && Array.isArray(allCompatibleVersions) && allCompatibleVersions.length > 0) {
-            const gameVersionSet = new Set<string>();
-            allCompatibleVersions.forEach((version: any) => {
-              if (version.gameVersionList) {
-                version.gameVersionList.forEach((v: string) => gameVersionSet.add(v));
-              } else if (version.gameVersions) {
-                version.gameVersions.forEach((v: string) => gameVersionSet.add(v));
-              } else if (version.minecraft_versions) {
-                // Algunas versiones de la API pueden usar esta propiedad
-                version.minecraft_versions.forEach((v: string) => gameVersionSet.add(v));
-              }
-            });
+          console.log('DEBUG - CurseForge: Respuesta de la API:', curseForgeResponse);
 
-            // Combinar versiones: las del item original más las obtenidas de la API
-            allVersions = Array.from(new Set([...allVersions, ...gameVersionSet]))
+          // Verificar si la respuesta tiene la estructura esperada
+          if (curseForgeResponse && Array.isArray(curseForgeResponse) && curseForgeResponse.length > 0) {
+            console.log('DEBUG - CurseForge: Procesando', curseForgeResponse.length, 'elementos de la respuesta');
+            // Procesar la respuesta para extraer versiones y loaders específicos
+            const processedInfo = extractCurseForgeCompatibilityInfo(curseForgeResponse);
+            console.log('DEBUG - CurseForge: Información procesada:', processedInfo);
+
+            // Usar solo las versiones que están en la respuesta de la API
+            allVersions = processedInfo.gameVersions
               .filter(version => {
                 const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
                 const isNotPreRelease = !version.includes('pre');
@@ -402,28 +423,46 @@ const ContentPage: React.FC = () => {
                 return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
               });
 
-            // Extraer todos los loaders de CurseForge
-            const loaderSet = new Set<string>();
-            allCompatibleVersions.forEach((version: any) => {
-              if (version.modLoaders) {
-                version.modLoaders.forEach((loaderObj: any) => {
-                  if (typeof loaderObj === 'string') {
-                    loaderSet.add(loaderObj.toLowerCase());
-                  } else if (loaderObj.name) {
-                    loaderSet.add(loaderObj.name.toLowerCase());
-                  }
-                });
-              }
-            });
-
-            allLoaders = Array.from(loaderSet);
+            // Usar los loaders obtenidos de la API
+            allLoaders = processedInfo.modLoaders;
+            console.log('DEBUG - CurseForge: Versiones finales (filtradas):', allVersions);
+            console.log('DEBUG - CurseForge: Loaders finales:', allLoaders);
           } else {
-            // Si no hay resultados específicos de la API, usar lo que sabemos
-            allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+            console.log('DEBUG - CurseForge: No se recibieron datos compatibles, usando info del item original');
+            // Si no hay respuesta específica de la API, usar información del item original
+            allVersions = item.minecraftVersions
+              .filter(version => {
+                const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
+                const isNotPreRelease = !version.includes('pre');
+                const isNotReleaseCandidate = !version.includes('rc');
+                const isNotSnapshot = !version.includes('snapshot');
+                const isNotWeekVersion = !version.includes('w');
+                const isNotSpecial = !version.includes('infinite');
+                const isNotHyphenated = !version.includes('-');
+
+                return isStableVersion && isNotPreRelease && isNotReleaseCandidate &&
+                       isNotSnapshot && isNotWeekVersion && isNotSpecial && isNotHyphenated;
+              })
+              .sort((a, b) => {
+                const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
+                const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
+
+                if (aMajor !== bMajor) return bMajor - aMajor;  // Mayor número de versión mayor primero
+                if (aMinor !== bMinor) return bMinor - aMinor;  // Mayor número de versión menor primero
+                return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
+              });
+
+            // Cargar los loaders disponibles según el tipo de contenido
+            if (item.type === 'modpacks' || item.type === 'mods') {
+              allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+            } else {
+              allLoaders = []; // Otros tipos no requieren loaders específicos
+            }
           }
-        } catch (apiError) {
-          console.error('Error obteniendo versiones compatibles de CurseForge:', apiError);
-          // Fallback para CurseForge
+        } catch (error) {
+          console.error('ERROR - CurseForge: Error obteniendo compatibilidad de CurseForge, usando datos del item:', error);
+          console.error('ERROR - CurseForge: Detalles del error:', error instanceof Error ? error.message : 'Error desconocido');
+
           allVersions = item.minecraftVersions
             .filter(version => {
               const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
@@ -446,7 +485,12 @@ const ContentPage: React.FC = () => {
               return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
             });
 
-          allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+          // Cargar los loaders disponibles según el tipo de contenido
+          if (item.type === 'modpacks' || item.type === 'mods') {
+            allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+          } else {
+            allLoaders = []; // Otros tipos no requieren loaders específicos
+          }
         }
 
         setCompatibleVersions(allVersions);
