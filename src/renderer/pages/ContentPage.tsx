@@ -31,7 +31,9 @@ const ContentPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortBy>('popular');
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>('');
-  const [selectedLoader, setSelectedLoader] = useState<string>(''); // Nuevo estado para el loader
+  const [selectedLoader, setSelectedLoader] = useState<string>(''); // Filtro de loader para la búsqueda externa
+  const [detailVersion, setDetailVersion] = useState<string>(''); // Versión seleccionada en detalle (no afecta filtro)
+  const [detailLoader, setDetailLoader] = useState<string>(''); // Loader seleccionado en detalle (no afecta filtro)
   const [compatibleLoaders, setCompatibleLoaders] = useState<string[]>([]); // Loaders compatibles
   const [compatibleVersions, setCompatibleVersions] = useState<string[]>([]); // Versiones compatibles
   const [installationProgress, setInstallationProgress] = useState<number>(0); // Progreso de instalación
@@ -98,11 +100,80 @@ const ContentPage: React.FC = () => {
     }, 500); // Aumentamos el debounce a 500ms para evitar demasiadas llamadas
 
     return () => clearTimeout(debounceLoad);
-  }, [type, searchQuery, selectedPlatform]);
+  }, [type, searchQuery, selectedPlatform]); // Agregamos selectedLoader si necesitamos filtrar en el servidor
+
+  // Estados para manejar el contenido filtrado y original
+  const [displayedContent, setDisplayedContent] = useState<ContentItem[]>([]);
+  const [originalContent, setOriginalContent] = useState<ContentItem[]>([]);
+
+  // Efecto para actualizar contenido original cuando cambia el tipo o plataforma
+  useEffect(() => {
+    setOriginalContent(content);
+    setDisplayedContent(content);
+  }, [content, type, selectedPlatform]);
+
+  // Verificar compatibilidad de loader cuando cambia
+  useEffect(() => {
+    const checkLoaderCompatibility = async () => {
+      if (!selectedLoader) {
+        // Si no hay loader seleccionado, mostrar todo el contenido original
+        setDisplayedContent([...originalContent]);
+        return;
+      }
+
+      // Filtrar contenido basado en compatibilidad real con el loader
+      if (originalContent.length > 0 && (type === 'modpacks' || type === 'mods')) {
+        setIsLoading(true);
+        try {
+          // Usar un enfoque más eficiente: promesas en paralelo en lugar de secuencial
+          const compatibilityChecks = originalContent.map(async (item) => {
+            try {
+              let compatibleVersions: any[] = [];
+
+              if (selectedPlatform === 'modrinth') {
+                compatibleVersions = await window.api.modrinth.getCompatibleVersions({
+                  projectId: item.id,
+                  mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
+                  loader: selectedLoader
+                });
+              } else if (selectedPlatform === 'curseforge') {
+                compatibleVersions = await window.api.curseforge.getCompatibleVersions({
+                  projectId: item.id,
+                  mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
+                  loader: selectedLoader
+                });
+              }
+
+              return compatibleVersions.length > 0 ? item : null;
+            } catch (error) {
+              console.error(`Error checking compatibility for item ${item.id}:`, error);
+              // Si hay error verificando, asumir que es compatible
+              return item;
+            }
+          });
+
+          // Esperar a que todas las promesas se resuelvan
+          const results = await Promise.all(compatibilityChecks);
+
+          // Filtrar los resultados nulos
+          const filteredResults = results.filter(item => item !== null) as ContentItem[];
+
+          setDisplayedContent(filteredResults);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        // Si no es modpacks o mods, no aplicar filtro de loader
+        setDisplayedContent([...originalContent]);
+      }
+    };
+
+    checkLoaderCompatibility();
+  }, [selectedLoader, selectedVersion, selectedPlatform, originalContent, type]);
 
   // Filter and sort content
   const filteredContent = React.useMemo(() => {
-    let result = [...content];
+    let result = [...displayedContent];
 
     // Apply version filter
     if (selectedVersion !== 'all') {
@@ -133,7 +204,7 @@ const ContentPage: React.FC = () => {
     });
 
     return result;
-  }, [content, selectedVersion, selectedCategory, sortBy]);
+  }, [displayedContent, selectedVersion, selectedCategory, sortBy]);
 
   // Get paginated content
   const paginatedContent = React.useMemo(() => {
@@ -185,78 +256,203 @@ const ContentPage: React.FC = () => {
   const loadCompatibleVersionsAndLoaders = async (item: ContentItem) => {
     try {
       // Verificar si el método está disponible antes de usarlo, dependiendo de la plataforma
+
+      // Para mostrar todas las versiones posibles, primero vamos a obtener la información básica del item
+      // y luego consultar la API para obtener todas las versiones y loaders disponibles
+
       if (selectedPlatform === 'modrinth' && window.api.modrinth.getCompatibleVersions) {
-        // Obtener versiones compatibles desde Modrinth API
-        // Usamos la primera versión compatible como referencia si no hay versión seleccionada
-        const mcVersionForFilter = selectedVersion && selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1';
+        // Para Modrinth, necesitamos una estrategia diferente para obtener todas las versiones
+        // Consultamos sin parámetros específicos
+        let allVersions: string[] = [];
+        let allLoaders: string[] = [];
 
-        const compatibleVersions = await window.api.modrinth.getCompatibleVersions({
-          projectId: item.id,
-          mcVersion: mcVersionForFilter,
-          loader: selectedLoader || undefined
-        });
+        // Primero, intentemos obtener todas las versiones posibles desde el contenido original
+        allVersions = [...new Set(item.minecraftVersions)];
 
-        // Extraer todas las versiones únicas de Minecraft de las versiones compatibles
-        const allGameVersions = new Set<string>();
-        compatibleVersions.forEach((version: any) => {
-          version.game_versions.forEach((v: string) => allGameVersions.add(v));
-        });
-
-        // Filtrar y ordenar versiones como antes (descendente: la más nueva primero)
-        const filteredVersions = Array.from(allGameVersions)
-          .filter(version => {
-            const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
-            const isNotPreRelease = !version.includes('pre');
-            const isNotReleaseCandidate = !version.includes('rc');
-            const isNotSnapshot = !version.includes('snapshot');
-            const isNotWeekVersion = !version.includes('w');
-            const isNotSpecial = !version.includes('infinite');
-            const isNotHyphenated = !version.includes('-');
-
-            return isStableVersion && isNotPreRelease && isNotReleaseCandidate &&
-                   isNotSnapshot && isNotWeekVersion && isNotSpecial && isNotHyphenated;
-          })
-          .sort((a, b) => {
-            const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
-            const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
-
-            if (aMajor !== bMajor) return bMajor - aMajor;  // Mayor número de versión mayor primero
-            if (aMinor !== bMinor) return bMinor - aMinor;  // Mayor número de versión menor primero
-            return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
+        // Luego, intentamos obtener información más detallada de la API
+        try {
+          // Intentamos obtener todas las versiones posibles para este proyecto
+          // La API de Modrinth requiere al menos un parámetro, así que usamos uno genérico
+          const allCompatibleVersions = await window.api.modrinth.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: item.minecraftVersions[0] || '1.20.1' // Usamos la primera versión disponible para obtener los datos
+            // No especificamos loader para obtener todas las combinaciones posibles
           });
 
-        setCompatibleVersions(filteredVersions);
+          // Extraer todas las versiones posibles de todas las versiones compatibles
+          const gameVersions = new Set<string>();
+          allCompatibleVersions.forEach((version: any) => {
+            if (version.game_versions) {
+              version.game_versions.forEach((v: string) => gameVersions.add(v));
+            }
+          });
 
-        // Extraer loaders compatibles
-        const allLoaders = new Set<string>();
-        compatibleVersions.forEach((version: any) => {
-          version.loaders.forEach((l: string) => allLoaders.add(l));
-        });
+          // Combinar las versiones obtenidas de la API con las del contenido original
+          allVersions = Array.from(new Set([...allVersions, ...gameVersions]))
+            .filter(version => {
+              const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
+              const isNotPreRelease = !version.includes('pre');
+              const isNotReleaseCandidate = !version.includes('rc');
+              const isNotSnapshot = !version.includes('snapshot');
+              const isNotWeekVersion = !version.includes('w');
+              const isNotSpecial = !version.includes('infinite');
+              const isNotHyphenated = !version.includes('-');
 
-        const compatibleLoadersList = Array.from(allLoaders);
-        setCompatibleLoaders(compatibleLoadersList);
-      } else if (selectedPlatform === 'curseforge' && window.api.curseforge.getCompatibleVersions) {
-        // Obtener versiones compatibles desde CurseForge API
-        const mcVersionForFilter = selectedVersion && selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1';
+              return isStableVersion && isNotPreRelease && isNotReleaseCandidate &&
+                     isNotSnapshot && isNotWeekVersion && isNotSpecial && isNotHyphenated;
+            })
+            .sort((a, b) => {
+              const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
+              const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
 
-        const compatibleVersions = await window.api.curseforge.getCompatibleVersions({
-          projectId: item.id,
-          mcVersion: mcVersionForFilter,
-          loader: selectedLoader || undefined
-        });
+              if (aMajor !== bMajor) return bMajor - aMajor;  // Mayor número de versión mayor primero
+              if (aMinor !== bMinor) return bMinor - aMinor;  // Mayor número de versión menor primero
+              return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
+            });
 
-        // Para CurseForge, la estructura puede ser diferente
-        // Por ahora usaremos las versiones del item como fallback
-        setCompatibleVersions(item.minecraftVersions);
+          // Extraer todos los loaders de todas las versiones
+          const loaderSet = new Set<string>();
+          allCompatibleVersions.forEach((version: any) => {
+            if (version.loaders) {
+              version.loaders.forEach((l: string) => loaderSet.add(l));
+            }
+          });
 
-        // Para los loaders en CurseForge
-        if (item.type === 'modpacks' || item.type === 'mods') {
-          setCompatibleLoaders(['forge', 'fabric', 'quilt', 'neoforge']);
-        } else {
-          setCompatibleLoaders([]);
+          allLoaders = Array.from(loaderSet);
+        } catch (apiError) {
+          console.error('Error obteniendo versiones compatibles de Modrinth:', apiError);
+          // Fallback: usar las versiones del item original
+          allVersions = item.minecraftVersions
+            .filter(version => {
+              const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
+              const isNotPreRelease = !version.includes('pre');
+              const isNotReleaseCandidate = !version.includes('rc');
+              const isNotSnapshot = !version.includes('snapshot');
+              const isNotWeekVersion = !version.includes('w');
+              const isNotSpecial = !version.includes('infinite');
+              const isNotHyphenated = !version.includes('-');
+
+              return isStableVersion && isNotPreRelease && isNotReleaseCandidate &&
+                     isNotSnapshot && isNotWeekVersion && isNotSpecial && isNotHyphenated;
+            })
+            .sort((a, b) => {
+              const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
+              const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
+
+              if (aMajor !== bMajor) return bMajor - aMajor;  // Mayor número de versión mayor primero
+              if (aMinor !== bMinor) return bMinor - aMinor;  // Mayor número de versión menor primero
+              return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
+            });
+
+          allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
         }
+
+        setCompatibleVersions(allVersions);
+        setCompatibleLoaders(allLoaders);
+      } else if (selectedPlatform === 'curseforge' && window.api.curseforge.getCompatibleVersions) {
+        // Para CurseForge, seguimos una estrategia similar
+        let allVersions: string[] = [];
+        let allLoaders: string[] = [];
+
+        // Primero, usamos las versiones del item original
+        allVersions = [...new Set(item.minecraftVersions)];
+
+        try {
+          // Obtener todas las versiones compatibles desde CurseForge
+          const allCompatibleVersions = await window.api.curseforge.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: item.minecraftVersions[0] || '1.20.1' // Usamos la primera versión para obtener datos
+            // No especificamos loader para obtener todas las combinaciones posibles
+          });
+
+          // Extraer versiones del formato de CurseForge
+          if (allCompatibleVersions && Array.isArray(allCompatibleVersions) && allCompatibleVersions.length > 0) {
+            const gameVersionSet = new Set<string>();
+            allCompatibleVersions.forEach((version: any) => {
+              if (version.gameVersionList) {
+                version.gameVersionList.forEach((v: string) => gameVersionSet.add(v));
+              } else if (version.gameVersions) {
+                version.gameVersions.forEach((v: string) => gameVersionSet.add(v));
+              } else if (version.minecraft_versions) {
+                // Algunas versiones de la API pueden usar esta propiedad
+                version.minecraft_versions.forEach((v: string) => gameVersionSet.add(v));
+              }
+            });
+
+            // Combinar versiones: las del item original más las obtenidas de la API
+            allVersions = Array.from(new Set([...allVersions, ...gameVersionSet]))
+              .filter(version => {
+                const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
+                const isNotPreRelease = !version.includes('pre');
+                const isNotReleaseCandidate = !version.includes('rc');
+                const isNotSnapshot = !version.includes('snapshot');
+                const isNotWeekVersion = !version.includes('w');
+                const isNotSpecial = !version.includes('infinite');
+                const isNotHyphenated = !version.includes('-');
+
+                return isStableVersion && isNotPreRelease && isNotReleaseCandidate &&
+                       isNotSnapshot && isNotWeekVersion && isNotSpecial && isNotHyphenated;
+              })
+              .sort((a, b) => {
+                const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
+                const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
+
+                if (aMajor !== bMajor) return bMajor - aMajor;  // Mayor número de versión mayor primero
+                if (aMinor !== bMinor) return bMinor - aMinor;  // Mayor número de versión menor primero
+                return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
+              });
+
+            // Extraer todos los loaders de CurseForge
+            const loaderSet = new Set<string>();
+            allCompatibleVersions.forEach((version: any) => {
+              if (version.modLoaders) {
+                version.modLoaders.forEach((loaderObj: any) => {
+                  if (typeof loaderObj === 'string') {
+                    loaderSet.add(loaderObj.toLowerCase());
+                  } else if (loaderObj.name) {
+                    loaderSet.add(loaderObj.name.toLowerCase());
+                  }
+                });
+              }
+            });
+
+            allLoaders = Array.from(loaderSet);
+          } else {
+            // Si no hay resultados específicos de la API, usar lo que sabemos
+            allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+          }
+        } catch (apiError) {
+          console.error('Error obteniendo versiones compatibles de CurseForge:', apiError);
+          // Fallback para CurseForge
+          allVersions = item.minecraftVersions
+            .filter(version => {
+              const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
+              const isNotPreRelease = !version.includes('pre');
+              const isNotReleaseCandidate = !version.includes('rc');
+              const isNotSnapshot = !version.includes('snapshot');
+              const isNotWeekVersion = !version.includes('w');
+              const isNotSpecial = !version.includes('infinite');
+              const isNotHyphenated = !version.includes('-');
+
+              return isStableVersion && isNotPreRelease && isNotReleaseCandidate &&
+                     isNotSnapshot && isNotWeekVersion && isNotSpecial && isNotHyphenated;
+            })
+            .sort((a, b) => {
+              const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
+              const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
+
+              if (aMajor !== bMajor) return bMajor - aMajor;  // Mayor número de versión mayor primero
+              if (aMinor !== bMinor) return bMinor - aMinor;  // Mayor número de versión menor primero
+              return (bPatch || 0) - (aPatch || 0);          // Mayor número de parche primero
+            });
+
+          allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+        }
+
+        setCompatibleVersions(allVersions);
+        setCompatibleLoaders(allLoaders);
       } else {
-        // Fallback: usar las versiones originales del contenido del item
+        // Fallback: usar las versiones y loaders originales del contenido del item
         const filteredVersions = item.minecraftVersions
           .filter(version => {
             const isStableVersion = /^1\.\d{1,2}(\.\d{1,2})?$/.test(version);
@@ -342,10 +538,10 @@ const ContentPage: React.FC = () => {
 
   // Actualizar versiones y loaders compatibles cuando cambia la selección
   useEffect(() => {
-    if (selectedContent && (selectedVersion || selectedLoader)) {
+    if (selectedContent) {
       loadCompatibleVersionsAndLoaders(selectedContent);
     }
-  }, [selectedVersion, selectedLoader, selectedContent]);
+  }, [selectedContent, selectedPlatform]);
 
   const handleContentClick = (item: ContentItem) => {
     navigate(`/contenido/${type}/${item.id}`);
@@ -442,13 +638,17 @@ const ContentPage: React.FC = () => {
           }
 
           // Validar que se haya seleccionado una versión
-          if (!selectedVersion || selectedVersion === 'all' || selectedVersion === '') {
+          // Usar detailVersion si está disponible (vista de detalle), de lo contrario usar el general
+          const versionToUse = detailVersion || selectedVersion;
+          if (!versionToUse || versionToUse === 'all' || versionToUse === '') {
             alert('Por favor, selecciona una versión de Minecraft.');
             return;
           }
 
           // Validar que se haya seleccionado un loader si es necesario
-          if ((contentType === 'mod' || contentType === 'modpack') && !selectedLoader) {
+          // Usar detailLoader si está disponible (vista de detalle), de lo contrario usar el general
+          const loaderToUse = detailLoader || selectedLoader;
+          if ((contentType === 'mod' || contentType === 'modpack') && !loaderToUse) {
             alert('Por favor, selecciona un loader compatible.');
             return;
           }
@@ -458,14 +658,14 @@ const ContentPage: React.FC = () => {
           if (selectedPlatform === 'modrinth' && window.api.modrinth.getCompatibleVersions) {
             compatibleVersionsCheck = await window.api.modrinth.getCompatibleVersions({
               projectId: item.id,
-              mcVersion: selectedVersion,
-              loader: selectedLoader || undefined
+              mcVersion: versionToUse,
+              loader: loaderToUse || undefined
             });
           } else if (selectedPlatform === 'curseforge' && window.api.curseforge.getCompatibleVersions) {
             compatibleVersionsCheck = await window.api.curseforge.getCompatibleVersions({
               projectId: item.id,
-              mcVersion: selectedVersion,
-              loader: selectedLoader || undefined
+              mcVersion: versionToUse,
+              loader: loaderToUse || undefined
             });
           }
 
@@ -632,31 +832,8 @@ const ContentPage: React.FC = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <style dangerouslySetInnerHTML={{ __html: scrollbarStyles }} />
       
-      {/* Modern Platform and Content Type Tabs */}
-      <div className="relative mb-8">
-        {/* Platform Tabs - Above Content Type Tabs */}
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-          {(['modrinth', 'curseforge'] as Platform[]).map((platform) => (
-            <button
-              key={platform}
-              onClick={() => setSelectedPlatform(platform)}
-              className={`px-5 py-2.5 rounded-xl font-medium transition-all duration-300 whitespace-nowrap relative overflow-hidden group ${
-                selectedPlatform === platform
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/30'
-                  : 'bg-gray-800/70 text-gray-300 hover:bg-gray-700/80 hover:text-white'
-              }`}
-            >
-              <span className="relative z-10">
-                {platform === 'modrinth' ? 'Modrinth' : 'CurseForge'}
-              </span>
-              <span className={`absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 transition-opacity duration-300 ${
-                selectedPlatform === platform ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}></span>
-            </button>
-          ))}
-        </div>
-
-        {/* Content Type Tabs */}
+      {/* Content Type Tabs */}
+      <div className="relative mb-6">
         <div className="absolute inset-0 bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-2xl -z-10 blur-xl opacity-50"></div>
         <div className="flex flex-wrap gap-2 overflow-x-auto pb-2">
           {['modpacks', 'mods', 'resourcepacks', 'datapacks', 'shaders'].map((tab) => (
@@ -685,6 +862,40 @@ const ContentPage: React.FC = () => {
         {!selectedContent && (
         <div className="lg:w-72 flex-shrink-0">
           <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-5 border border-gray-700/50 shadow-lg">
+            {/* Platform Selection Buttons - Inside the Filter Box */}
+            <div className="flex flex-col items-center gap-3 mb-6 overflow-x-auto pb-2">
+              {(['modrinth', 'curseforge'] as Platform[]).map((platform) => (
+                <button
+                  key={platform}
+                  onClick={() => setSelectedPlatform(platform)}
+                  className={`flex items-center px-4 py-2 rounded-xl font-medium transition-all duration-300 relative overflow-hidden group w-full ${
+                    selectedPlatform === platform
+                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/30'
+                      : 'bg-gray-800/70 text-gray-300 hover:bg-gray-700/80 hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center justify-center relative z-10 w-full">
+                    <img
+                      src={platform === 'modrinth' ? 'https://cdn.modrinth.com/static/logo-cubeonly.5f38e9dd.png' : 'https://www.curseforge.com/themes/custom/cf/images/logos/curseforge.svg'}
+                      alt={platform === 'modrinth' ? 'Modrinth' : 'CurseForge'}
+                      className="w-5 h-5 mr-2"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.onerror = null;
+                        if (platform === 'modrinth') {
+                          target.src = 'https://modrinth.com/favicon.ico';
+                        } else {
+                          // If SVG fails, use PNG version of CurseForge logo
+                          target.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/CurseForge_Logo.svg/640px-CurseForge_Logo.svg.png';
+                        }
+                      }}
+                    />
+                    {platform === 'modrinth' ? 'Modrinth' : 'CurseForge'}
+                  </span>
+                </button>
+              ))}
+            </div>
+
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
               <svg className="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
@@ -720,10 +931,39 @@ const ContentPage: React.FC = () => {
                   onChange={(e) => setSelectedVersion(e.target.value)}
                   className="appearance-none w-full bg-gray-700/50 border border-gray-600 rounded-xl text-white pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                 >
-                  <option value="">Todas las versiones</option>
-                  {Array.from(new Set(content.flatMap(item => item.minecraftVersions))).map(version => (
-                    <option key={version} value={version}>{version}</option>
-                  ))}
+                  <option value="all">Todas las versiones</option>
+                  {/* Versiones principales de Minecraft, de más reciente a más antigua (futuro 2025) */}
+                  <option value="1.21.10">1.21.10</option>
+                  <option value="1.21.9">1.21.9</option>
+                  <option value="1.21.8">1.21.8</option>
+                  <option value="1.21.7">1.21.7</option>
+                  <option value="1.21.6">1.21.6</option>
+                  <option value="1.21.5">1.21.5</option>
+                  <option value="1.21.4">1.21.4</option>
+                  <option value="1.21.3">1.21.3</option>
+                  <option value="1.21.2">1.21.2</option>
+                  <option value="1.21.1">1.21.1</option>
+                  <option value="1.21">1.21</option>
+                  <option value="1.20.6">1.20.6</option>
+                  <option value="1.20.5">1.20.5</option>
+                  <option value="1.20.4">1.20.4</option>
+                  <option value="1.20.3">1.20.3</option>
+                  <option value="1.20.2">1.20.2</option>
+                  <option value="1.20.1">1.20.1</option>
+                  <option value="1.19.4">1.19.4</option>
+                  <option value="1.19.3">1.19.3</option>
+                  <option value="1.19.2">1.19.2</option>
+                  <option value="1.18.2">1.18.2</option>
+                  <option value="1.17.1">1.17.1</option>
+                  <option value="1.16.5">1.16.5</option>
+                  <option value="1.15.2">1.15.2</option>
+                  <option value="1.14.4">1.14.4</option>
+                  <option value="1.13.2">1.13.2</option>
+                  <option value="1.12.2">1.12.2</option>
+                  <option value="1.11.2">1.11.2</option>
+                  <option value="1.10.2">1.10.2</option>
+                  <option value="1.9.4">1.9.4</option>
+                  <option value="1.8.9">1.8.9</option>
                 </select>
                 <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                   <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 20 20" stroke="currentColor">
@@ -732,6 +972,31 @@ const ContentPage: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Loader Filter */}
+            {type === 'modpacks' || type === 'mods' ? (
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-300 mb-2">Loader</label>
+              <div className="relative">
+                <select
+                  value={selectedLoader}
+                  onChange={(e) => setSelectedLoader(e.target.value)}
+                  className="appearance-none w-full bg-gray-700/50 border border-gray-600 rounded-xl text-white pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                >
+                  <option value="">Todos los loaders</option>
+                  <option value="forge">Forge</option>
+                  <option value="fabric">Fabric</option>
+                  <option value="quilt">Quilt</option>
+                  <option value="neoforge">NeoForge</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 20 20" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+            ) : null}
 
             {/* Sort By */}
             <div>
@@ -812,8 +1077,8 @@ const ContentPage: React.FC = () => {
                       </label>
                       <div className="relative">
                         <select
-                          value={selectedVersion || ''}
-                          onChange={(e) => setSelectedVersion(e.target.value)}
+                          value={detailVersion || ''}
+                          onChange={(e) => setDetailVersion(e.target.value)}
                           className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
                         >
                           <option value="">Selecciona una versión...</option>
@@ -839,8 +1104,8 @@ const ContentPage: React.FC = () => {
                         </label>
                         <div className="relative">
                           <select
-                            value={selectedLoader}
-                            onChange={(e) => setSelectedLoader(e.target.value)}
+                            value={detailLoader}
+                            onChange={(e) => setDetailLoader(e.target.value)}
                             className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
                           >
                             <option value="">Selecciona un loader...</option>
