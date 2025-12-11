@@ -278,12 +278,24 @@ export class CurseForgeService {
           gameVersionList.forEach((version: string) => {
             // Solo incluir versiones válidas de Minecraft (empiezan con "1.")
             if (version.startsWith('1.')) {
+              // Obtener URL de descarga del archivo
+              let downloadUrl = file.downloadUrl;
+              if (!downloadUrl && file.id) {
+                // Construir URL de descarga usando el ID del archivo
+                const fileId = file.id;
+                const fileName = file.fileName || file.displayName || `curseforge-${projectId}.jar`;
+                downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${fileName}`;
+              }
+              
               // Crear un objeto por cada combinación versión-loader, igual que Modrinth
               compatibilityInfo.push({
                 game_versions: [version], // Array como Modrinth
                 loaders: [extractedModLoader!], // Array como Modrinth
                 gameVersion: version, // Mantener para compatibilidad
-                modLoader: extractedModLoader! // Mantener para compatibilidad
+                modLoader: extractedModLoader!, // Mantener para compatibilidad
+                downloadUrl: downloadUrl || null, // URL de descarga
+                fileId: file.id || null, // ID del archivo
+                fileName: file.fileName || file.displayName || null // Nombre del archivo
               });
             }
           });
@@ -332,20 +344,36 @@ export class CurseForgeService {
         throw new Error(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}`);
       }
 
+      // Filtrar versiones que coincidan exactamente con la versión y loader solicitados
+      const matchingVersions = compatibleVersions.filter((v: any) => {
+        const versionMatch = (v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(mcVersion)) ||
+                             (v.gameVersion === mcVersion);
+        const loaderMatch = !loader || 
+                            (v.loaders && Array.isArray(v.loaders) && v.loaders.includes(loader)) ||
+                            (v.modLoader && v.modLoader.toLowerCase() === loader.toLowerCase());
+        return versionMatch && loaderMatch;
+      });
+      
+      if (matchingVersions.length === 0) {
+        throw new Error(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}`);
+      }
+
       // Tomar la primera versión compatible (la más reciente)
-      const targetVersion = compatibleVersions[0];
+      const targetVersion = matchingVersions[0];
       
       // Obtener URL de descarga
       let downloadUrl = targetVersion.downloadUrl;
-      if (!downloadUrl && (targetVersion as any).fileId) {
+      if (!downloadUrl && targetVersion.fileId) {
         // Construir URL de descarga usando el ID del archivo si no está disponible
-        const fileId = (targetVersion as any).fileId;
+        const fileId = targetVersion.fileId;
         const fileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
         downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${fileName}`;
       }
       
       if (!downloadUrl) {
-        throw new Error(`No se encontró URL de descarga para la versión compatible`);
+        // Si aún no hay URL, intentar obtener el archivo directamente desde la API
+        console.warn(`No se encontró URL de descarga en la versión compatible, intentando obtener archivo directamente...`);
+        throw new Error(`No se encontró URL de descarga para la versión compatible. Por favor, intenta con otra versión o loader.`);
       }
 
       // Determinar carpeta de destino según tipo de contenido
