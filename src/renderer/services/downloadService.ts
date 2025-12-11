@@ -595,6 +595,35 @@ export class DownloadService {
     this.notifyObservers();
   }
 
+  clearErrors() {
+    const current = this.getCurrentProfileUsername();
+    const entries = Array.from(this.downloads.entries());
+
+    for (const [id, download] of entries) {
+      if (download.status === 'error' && (!current || download.profileUsername === current || !download.profileUsername)) {
+        this.downloads.delete(id);
+      }
+    }
+
+    this.persistDownloads();
+    this.notifyObservers();
+  }
+
+  clearCompletedAndErrors() {
+    const current = this.getCurrentProfileUsername();
+    const entries = Array.from(this.downloads.entries());
+
+    for (const [id, download] of entries) {
+      if ((download.status === 'completed' || download.status === 'error') && 
+          (!current || download.profileUsername === current || !download.profileUsername)) {
+        this.downloads.delete(id);
+      }
+    }
+
+    this.persistDownloads();
+    this.notifyObservers();
+  }
+
   removeFromHistory(downloadId: string) {
     if (this.downloads.has(downloadId)) {
       this.downloads.delete(downloadId);

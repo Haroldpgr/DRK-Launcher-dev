@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { multipleDownloadQueueService, QueuedDownloadItem } from '../services/multipleDownloadQueueService';
 import { downloadService } from '../services/downloadService';
+import { showModernConfirm } from '../utils/uiUtils';
 
 // Interfaz extendida para incluir información del contenido original
 interface ExtendedQueuedItem extends QueuedDownloadItem {
@@ -41,8 +42,15 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
     multipleDownloadQueueService.toggleItemEnabled(id);
   };
 
-  const clearCompleted = () => {
-    multipleDownloadQueueService.clearCompleted();
+  const clearCompleted = async () => {
+    const confirmed = await showModernConfirm(
+      'Limpiar cola',
+      '¿Estás seguro de que quieres limpiar los elementos completados y con error de la cola?',
+      'warning'
+    );
+    if (confirmed) {
+      multipleDownloadQueueService.clearCompletedAndErrors();
+    }
   };
 
   const startDownload = async () => {
@@ -191,6 +199,7 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
   const enabledCount = queue.filter(item => item.enabled && item.status === 'pending').length;
   const hasPendingDownloads = queue.some(item => item.enabled && item.status === 'pending');
   const completedDownloads = queue.filter(item => item.status === 'completed').length;
+  const errorDownloads = queue.filter(item => item.status === 'error').length;
   const totalDownloads = queue.length;
 
   if (!isVisible) return null;
@@ -303,17 +312,33 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
                       </div>
                     </div>
                     
-                    {item.status === 'pending' && (
-                      <button
-                        onClick={() => removeFromQueue(item.id)}
-                        className="text-gray-400 hover:text-red-400 transition-colors p-1 flex-shrink-0"
-                        title="Remover de la cola"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {(item.status === 'pending' || item.status === 'error') && (
+                        <button
+                          onClick={async () => {
+                            const confirmed = await showModernConfirm(
+                              'Eliminar de la cola',
+                              `¿Estás seguro de que quieres eliminar "${item.name}" de la cola?`,
+                              item.status === 'error' ? 'danger' : 'warning'
+                            );
+                            if (confirmed) {
+                              removeFromQueue(item.id);
+                            }
+                          }}
+                          className={`px-3 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 ${
+                            item.status === 'error'
+                              ? 'bg-red-600/80 hover:bg-red-600 text-white'
+                              : 'text-gray-400 hover:text-red-400'
+                          }`}
+                          title={item.status === 'error' ? 'Eliminar de la cola' : 'Remover de la cola'}
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          {item.status === 'error' && <span className="text-sm">Eliminar</span>}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   
                   {item.status === 'downloading' && item.progress !== undefined && (
@@ -373,7 +398,7 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
                   <button
                     onClick={clearCompleted}
                     className="px-4 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all duration-200"
-                    disabled={completedDownloads === 0}
+                    disabled={completedDownloads === 0 && errorDownloads === 0}
                   >
                     Limpiar completados
                   </button>

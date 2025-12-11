@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ContentItem } from '../types/content';
+import { showModernAlert } from '../utils/uiUtils';
 
 interface SingleDownloadModalProps {
   isOpen: boolean;
@@ -126,9 +127,9 @@ const SingleDownloadModal: React.FC<SingleDownloadModalProps> = ({
     filterLoadersForVersion();
   }, [selectedVersion, contentItem.id, contentItem.platform, contentItem.type]);
 
-  const handleStartDownload = () => {
+  const handleStartDownload = async () => {
     if (!selectedVersion || (contentItem.type === 'mods' && !selectedLoader) || (!targetPath && !isCustomPath)) {
-      alert('Por favor, completa todos los campos requeridos');
+      await showModernAlert('Campos requeridos', 'Por favor, completa todos los campos requeridos', 'warning');
       return;
     }
 
@@ -383,11 +384,11 @@ const SingleDownloadModal: React.FC<SingleDownloadModalProps> = ({
                               setTargetPath(result.filePaths[0]);
                             }
                           } else {
-                            alert('La función de selección de carpetas no está disponible.');
+                            await showModernAlert('Función no disponible', 'La función de selección de carpetas no está disponible.', 'warning');
                           }
                         } catch (error) {
                           console.error('Error al seleccionar carpeta:', error);
-                          alert('Error al seleccionar la carpeta: ' + (error as Error).message);
+                          await showModernAlert('Error', 'Error al seleccionar la carpeta: ' + (error as Error).message, 'error');
                         }
                       }}
                     >

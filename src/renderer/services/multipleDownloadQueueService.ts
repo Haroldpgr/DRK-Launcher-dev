@@ -104,6 +104,18 @@ class MultipleDownloadQueueService {
     this.notifyObservers();
   }
 
+  clearErrors() {
+    this.queue = this.queue.filter(item => item.status !== 'error');
+    this.persistQueue();
+    this.notifyObservers();
+  }
+
+  clearCompletedAndErrors() {
+    this.queue = this.queue.filter(item => item.status !== 'completed' && item.status !== 'error');
+    this.persistQueue();
+    this.notifyObservers();
+  }
+
   getQueue(): QueuedDownloadItem[] {
     return [...this.queue];
   }

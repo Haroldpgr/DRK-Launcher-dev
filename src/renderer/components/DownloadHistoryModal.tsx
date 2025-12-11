@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { downloadService, Download } from '../services/downloadService';
 import { multipleDownloadQueueService, QueuedDownloadItem } from '../services/multipleDownloadQueueService';
+import { showModernConfirm, showModernAlert } from '../utils/uiUtils';
 
 interface DownloadHistoryModalProps {
   isOpen: boolean;
@@ -154,18 +155,34 @@ const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
         if (window.api?.shell?.showItemInFolder) {
           await window.api.shell.showItemInFolder(download.path);
         } else {
-          alert('No se pudo abrir la carpeta. Ruta: ' + download.path);
+          await showModernAlert('Error', 'No se pudo abrir la carpeta. Ruta: ' + download.path, 'error');
         }
       } catch (error) {
         console.error('Error opening folder:', error);
-        alert('Error al abrir la carpeta: ' + (error as Error).message);
+        await showModernAlert('Error', 'Error al abrir la carpeta: ' + (error as Error).message, 'error');
       }
     }
   };
 
-  const handleClearHistory = () => {
-    if (confirm('¿Estás seguro de que quieres limpiar el historial de descargas completadas?')) {
-      downloadService.clearCompleted();
+  const handleClearHistory = async () => {
+    const confirmed = await showModernConfirm(
+      'Limpiar historial',
+      '¿Estás seguro de que quieres limpiar el historial de descargas completadas y con error?',
+      'warning'
+    );
+    if (confirmed) {
+      downloadService.clearCompletedAndErrors();
+    }
+  };
+
+  const handleDeleteDownload = async (downloadId: string, downloadName: string) => {
+    const confirmed = await showModernConfirm(
+      'Eliminar del historial',
+      `¿Estás seguro de que quieres eliminar "${downloadName}" del historial?`,
+      'danger'
+    );
+    if (confirmed) {
+      downloadService.removeFromHistory(downloadId);
     }
   };
 
@@ -301,18 +318,32 @@ const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                         </div>
                       </div>
                     </div>
-                    {download.path && download.status === 'completed' && (
-                      <button
-                        onClick={() => handleOpenFolder(download)}
-                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-medium transition-all duration-200 flex items-center gap-2 flex-shrink-0"
-                        title="Abrir carpeta"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                        </svg>
-                        Abrir
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {download.path && download.status === 'completed' && (
+                        <button
+                          onClick={() => handleOpenFolder(download)}
+                          className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-medium transition-all duration-200 flex items-center gap-2"
+                          title="Abrir carpeta"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                          </svg>
+                          Abrir
+                        </button>
+                      )}
+                      {download.status === 'error' && (
+                        <button
+                          onClick={() => handleDeleteDownload(download.id, download.name)}
+                          className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-xl font-medium transition-all duration-200 flex items-center gap-2"
+                          title="Eliminar del historial"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

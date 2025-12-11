@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { showModernAlert } from '../utils/uiUtils';
 
 // Definir ContentItem localmente o importarlo desde donde esté definido
 interface ContentItem {
@@ -319,7 +320,11 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
     // Mostrar mensajes de error si hay items inválidos
     if (invalidItems.length > 0) {
       const errorMessages = invalidItems.map(item => `• ${item.name}: ${item.reason}`).join('\n');
-      alert(`Los siguientes items no se pudieron agregar a la cola:\n\n${errorMessages}\n\n${validItems.length > 0 ? 'Los items válidos se agregarán a la cola.' : 'Por favor, selecciona versiones y loaders compatibles.'}`);
+      await showModernAlert(
+        'Items no agregados',
+        `Los siguientes items no se pudieron agregar a la cola:\n\n${errorMessages}\n\n${validItems.length > 0 ? 'Los items válidos se agregarán a la cola.' : 'Por favor, selecciona versiones y loaders compatibles.'}`,
+        'warning'
+      );
     }
     
     if (validItems.length === 0) {
@@ -435,11 +440,11 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                             setGlobalTargetPath(result.filePaths[0]);
                           }
                         } else {
-                          alert('La función de selección de carpetas no está disponible.');
+                          await showModernAlert('Función no disponible', 'La función de selección de carpetas no está disponible.', 'warning');
                         }
                       } catch (error) {
                         console.error('Error al seleccionar carpeta:', error);
-                        alert('Error al seleccionar la carpeta: ' + (error as Error).message);
+                        await showModernAlert('Error', 'Error al seleccionar la carpeta: ' + (error as Error).message, 'error');
                       }
                     }}
                   >

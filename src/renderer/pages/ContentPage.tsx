@@ -15,6 +15,7 @@ import SingleDownloadModal from '../components/SingleDownloadModal';
 import MultipleDownloadModal from '../components/MultipleDownloadModal';
 import MultipleDownloadQueue from '../components/MultipleDownloadQueue';
 import DownloadHistoryModal from '../components/DownloadHistoryModal';
+import { showModernAlert, showModernConfirm } from '../utils/uiUtils';
 
 type ContentType = 'modpacks' | 'mods' | 'resourcepacks' | 'datapacks' | 'shaders';
 type SortBy = 'popular' | 'recent' | 'name';
@@ -117,9 +118,9 @@ const ContentPage: React.FC = () => {
         console.error('Error al obtener datos:', error);
         // Mostrar mensaje de error al usuario
         if (error.message && error.message.includes('tiempo')) {
-          alert('La solicitud ha tardado demasiado. Por favor, verifica tu conexión e inténtalo de nuevo.');
+          await showModernAlert('Tiempo de espera agotado', 'La solicitud ha tardado demasiado. Por favor, verifica tu conexión e inténtalo de nuevo.', 'warning');
         } else {
-          alert('No se pudieron cargar los datos. Por favor, verifica tu conexión e inténtalo de nuevo.');
+          await showModernAlert('Error de conexión', 'No se pudieron cargar los datos. Por favor, verifica tu conexión e inténtalo de nuevo.', 'error');
         }
         setContent([]);
       } finally {
@@ -1379,9 +1380,13 @@ const ContentPage: React.FC = () => {
       const hasTargetPath = targetPathParam && targetPathParam.trim() !== '';
       
       if (!selectedInstanceId && !hasTargetPath) {
-        const userChoice = confirm(`No has seleccionado una instancia.\n¿Quieres descargar "${item.title}" directamente a la zona de descargas?\n\nCancela para seleccionar una instancia en su lugar.`);
+        const userChoice = await showModernConfirm(
+          'Sin instancia seleccionada',
+          `No has seleccionado una instancia.\n¿Quieres descargar "${item.title}" directamente a la zona de descargas?\n\nCancela para seleccionar una instancia en su lugar.`,
+          'info'
+        );
         if (!userChoice) {
-          alert('Por favor, selecciona una instancia para instalar el contenido.');
+          await showModernAlert('Información', 'Por favor, selecciona una instancia para instalar el contenido.', 'info');
           return;
         }
 
@@ -1414,7 +1419,7 @@ const ContentPage: React.FC = () => {
         }
 
         if (!primaryFile) {
-          alert('No se encontraron archivos para descargar');
+          await showModernAlert('Sin archivos', 'No se encontraron archivos para descargar', 'warning');
           return;
         }
 
@@ -1424,18 +1429,18 @@ const ContentPage: React.FC = () => {
           item.title
         );
 
-        alert(`¡Contenido iniciado para descarga!\n${item.title} se está descargando en la zona de descargas.`);
+        await showModernAlert('Descarga iniciada', `${item.title} se está descargando en la zona de descargas.`, 'success');
       } else {
         // Si hay targetPath desde el modal, validar solo versión y loader, luego proceder directamente
         if (hasTargetPath) {
           // Validaciones mínimas cuando hay targetPath desde el modal
           if (!mcVersion || mcVersion === 'all' || mcVersion === '') {
-            alert('Por favor, selecciona una versión de Minecraft.');
+            await showModernAlert('Campo requerido', 'Por favor, selecciona una versión de Minecraft.', 'warning');
             return;
           }
 
           if ((contentType === 'mod' || contentType === 'modpack') && !loader) {
-            alert('Por favor, selecciona un loader compatible.');
+            await showModernAlert('Campo requerido', 'Por favor, selecciona un loader compatible.', 'warning');
             return;
           }
 
@@ -1456,25 +1461,25 @@ const ContentPage: React.FC = () => {
           }
 
           if (compatibleVersionsCheck.length === 0) {
-            alert(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+            await showModernAlert('Versión no compatible', `No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`, 'warning');
             return;
           }
         } else {
           // Validaciones completas solo si no hay targetPath desde el modal
           if (selectedInstanceId && selectedInstanceId !== 'custom') {
             if (selectedContent && installedContent.has(`${selectedInstanceId}-${selectedContent.id}`)) {
-              alert(`El contenido "${item.title}" ya está instalado en la instancia seleccionada.`);
+              await showModernAlert('Ya instalado', `El contenido "${item.title}" ya está instalado en la instancia seleccionada.`, 'info');
               return;
             }
           }
 
           if (!mcVersion || mcVersion === 'all' || mcVersion === '') {
-            alert('Por favor, selecciona una versión de Minecraft.');
+            await showModernAlert('Campo requerido', 'Por favor, selecciona una versión de Minecraft.', 'warning');
             return;
           }
 
           if ((contentType === 'mod' || contentType === 'modpack') && !loader) {
-            alert('Por favor, selecciona un loader compatible.');
+            await showModernAlert('Campo requerido', 'Por favor, selecciona un loader compatible.', 'warning');
             return;
           }
 
@@ -1494,7 +1499,7 @@ const ContentPage: React.FC = () => {
           }
 
           if (compatibleVersionsCheck.length === 0) {
-            alert(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+            await showModernAlert('Versión no compatible', `No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`, 'warning');
             return;
           }
 
@@ -1510,7 +1515,7 @@ const ContentPage: React.FC = () => {
             }
 
             if (!hasSpecificVersion) {
-              alert(`El modpack no tiene una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+              await showModernAlert('Versión no compatible', `El modpack no tiene una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`, 'warning');
               return;
             }
           }
@@ -1613,7 +1618,7 @@ const ContentPage: React.FC = () => {
           
           await new Promise(resolve => setTimeout(resolve, 300));
 
-          alert(`¡Contenido instalado!\n${item.title} ha sido instalado en la ubicación seleccionada.`);
+          await showModernAlert('¡Contenido instalado!', `${item.title} ha sido instalado en la ubicación seleccionada.`, 'success');
         } catch (error) {
           clearInterval(progressInterval);
           setInstallationProgress(0);
@@ -1639,7 +1644,7 @@ const ContentPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error al manejar el contenido:', error);
-      alert(`Error: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      await showModernAlert('Error', error instanceof Error ? error.message : 'Error desconocido', 'error');
     } finally {
       setIsDownloading(prev => ({ ...prev, [item.id]: false }));
       setInstallationProgress(0);
@@ -1673,10 +1678,14 @@ const ContentPage: React.FC = () => {
 
       if (!selectedInstanceId) {
         // Si no se seleccionó instancia, preguntar al usuario qué quiere hacer
-        const userChoice = confirm(`No has seleccionado una instancia.\n¿Quieres descargar "${item.title}" directamente a la zona de descargas?\n\nCancela para seleccionar una instancia en su lugar.`);
+        const userChoice = await showModernConfirm(
+          'Sin instancia seleccionada',
+          `No has seleccionado una instancia.\n¿Quieres descargar "${item.title}" directamente a la zona de descargas?\n\nCancela para seleccionar una instancia en su lugar.`,
+          'info'
+        );
 
         if (!userChoice) {
-          alert('Por favor, selecciona una instancia para instalar el contenido.');
+          await showModernAlert('Información', 'Por favor, selecciona una instancia para instalar el contenido.', 'info');
           return;
         }
 
@@ -1736,7 +1745,7 @@ const ContentPage: React.FC = () => {
           // Usar detailVersion si está disponible (vista de detalle), de lo contrario usar el general
           const versionToUse = detailVersion || selectedVersion;
           if (!versionToUse || versionToUse === 'all' || versionToUse === '') {
-            alert('Por favor, selecciona una versión de Minecraft.');
+            await showModernAlert('Campo requerido', 'Por favor, selecciona una versión de Minecraft.', 'warning');
             return;
           }
 
@@ -1744,7 +1753,7 @@ const ContentPage: React.FC = () => {
           // Usar detailLoader si está disponible (vista de detalle), de lo contrario usar el general
           const loaderToUse = detailLoader || selectedLoader;
           if ((contentType === 'mod' || contentType === 'modpack') && !loaderToUse) {
-            alert('Por favor, selecciona un loader compatible.');
+            await showModernAlert('Campo requerido', 'Por favor, selecciona un loader compatible.', 'warning');
             return;
           }
 
@@ -1853,7 +1862,7 @@ const ContentPage: React.FC = () => {
           // Pequeña pausa para que se vea el 100%
           await new Promise(resolve => setTimeout(resolve, 300));
 
-          alert(`¡Contenido instalado!\n${item.title} ha sido instalado en la ubicación seleccionada.`);
+          await showModernAlert('¡Contenido instalado!', `${item.title} ha sido instalado en la ubicación seleccionada.`, 'success');
         } catch (error) {
           clearInterval(progressInterval);
           setInstallationProgress(0);
@@ -1862,7 +1871,7 @@ const ContentPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error al manejar el contenido:', error);
-      alert(`Error: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      await showModernAlert('Error', error instanceof Error ? error.message : 'Error desconocido', 'error');
     } finally {
       setIsDownloading(prev => ({ ...prev, [item.id]: false }));
       setInstallationProgress(0); // Resetear progreso de instalación
