@@ -5,6 +5,8 @@ interface MultipleDownloadModalProps {
   isOpen: boolean;
   onClose: () => void;
   contentItems: ContentItem[];
+  availableVersions?: string[]; // Prop opcional para versiones disponibles
+  availableLoaders?: string[];  // Prop opcional para loaders disponibles
   onAddToQueue: (queueItems: Array<{
     id: string;
     name: string;
@@ -19,28 +21,43 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
   isOpen,
   onClose,
   contentItems,
+  availableVersions: propsAvailableVersions = [],
+  availableLoaders: propsAvailableLoaders = [],
   onAddToQueue
 }) => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [downloadConfigs, setDownloadConfigs] = useState<Record<string, { version: string; loader?: string; targetPath: string }>>({});
+  const [downloadConfigs, setDownloadConfigs] = useState<Record<string, { version: string; loader?: string; targetPath: string; availableVersions: string[]; availableLoaders: string[] }>>({});
+  const [showVersionOptions, setShowVersionOptions] = useState<Record<string, boolean>>({});
+  const [showLoaderOptions, setShowLoaderOptions] = useState<Record<string, boolean>>({});
   const [globalTargetPath, setGlobalTargetPath] = useState<string>('');
   const [isCustomGlobalPath, setIsCustomGlobalPath] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [itemDetailsLoaded, setItemDetailsLoaded] = useState<Set<string>>(new Set());
 
   // Inicializar configuraciones por defecto para cada ítem
   useEffect(() => {
     if (isOpen) {
-      const initialConfigs: Record<string, { version: string; loader?: string; targetPath: string }> = {};
+      const initialConfigs: Record<string, { version: string; loader?: string; targetPath: string; availableVersions: string[]; availableLoaders: string[] }> = {};
+      const initialShowVersionOptions: Record<string, boolean> = {};
+      const initialShowLoaderOptions: Record<string, boolean> = {};
+
       contentItems.forEach(item => {
         initialConfigs[item.id] = {
           version: item.minecraftVersions[0] || '',
           loader: '',
-          targetPath: globalTargetPath || ''
+          targetPath: globalTargetPath || '',
+          availableVersions: propsAvailableVersions.length > 0 ? propsAvailableVersions : item.minecraftVersions,
+          availableLoaders: propsAvailableLoaders
         };
+        initialShowVersionOptions[item.id] = false;
+        initialShowLoaderOptions[item.id] = false;
       });
+
       setDownloadConfigs(initialConfigs);
+      setShowVersionOptions(initialShowVersionOptions);
+      setShowLoaderOptions(initialShowLoaderOptions);
     }
-  }, [isOpen, contentItems, globalTargetPath]);
+  }, [isOpen, contentItems, globalTargetPath, propsAvailableVersions, propsAvailableLoaders]);
 
   const toggleItemSelection = (id: string) => {
     const newSelectedItems = new Set(selectedItems);
@@ -55,7 +72,10 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
   const updateItemConfig = (id: string, config: { version: string; loader?: string; targetPath: string }) => {
     setDownloadConfigs(prev => ({
       ...prev,
-      [id]: config
+      [id]: {
+        ...prev[id],
+        ...config
+      }
     }));
   };
 
@@ -212,7 +232,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                         {isSelected && (
                           <div className="mt-4 pt-4 border-t border-gray-600/30 space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                              {/* Selección de versión */}
+                              {/* Selección de versión con los datos reales */}
                               <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-2">
                                   Versión de Minecraft
@@ -223,7 +243,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                                   className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all duration-200"
                                 >
                                   <option value="">Selecciona...</option>
-                                  {item.minecraftVersions.map((version, idx) => (
+                                  {config.availableVersions.map((version, idx) => (
                                     <option key={idx} value={version}>
                                       {version}
                                     </option>
@@ -231,7 +251,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                                 </select>
                               </div>
 
-                              {/* Selección de loader (si aplica) */}
+                              {/* Selección de loader (si aplica) con datos reales */}
                               {(item.type === 'mods' || item.type === 'modpacks') && (
                                 <div>
                                   <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -243,10 +263,11 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                                     className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all duration-200"
                                   >
                                     <option value="">Cualquiera</option>
-                                    <option value="forge">Forge</option>
-                                    <option value="fabric">Fabric</option>
-                                    <option value="quilt">Quilt</option>
-                                    <option value="neoforge">NeoForge</option>
+                                    {config.availableLoaders.map((loader, idx) => (
+                                      <option key={idx} value={loader}>
+                                        {loader.charAt(0).toUpperCase() + loader.slice(1)}
+                                      </option>
+                                    ))}
                                   </select>
                                 </div>
                               )}

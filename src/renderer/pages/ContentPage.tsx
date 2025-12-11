@@ -379,10 +379,204 @@ const ContentPage: React.FC = () => {
     }
   };
 
-  const handleMultipleDownload = () => {
+  const handleMultipleDownload = async () => {
     if (selectedDownloadItem) {
       setShowDownloadSelectionModal(false);
-      setShowMultipleDownloadModal(true);
+
+      try {
+        // Cargar versiones y loaders compatibles para el download multiple
+        let versionsToUse: string[] = [];
+        let loadersToUse: string[] = [];
+
+        if (selectedPlatform === 'modrinth' && window.api?.modrinth?.getCompatibleVersions) {
+          try {
+            const response = await window.api.modrinth.getCompatibleVersions({
+              projectId: selectedDownloadItem.id,
+              mcVersion: selectedDownloadItem.minecraftVersions[0] || '1.20.1'
+            });
+
+            if (response && Array.isArray(response)) {
+              // Extraer versiones estables de Minecraft
+              const extractedVersions = new Set<string>();
+
+              for (const item of response) {
+                if (item.game_versions && Array.isArray(item.game_versions)) {
+                  for (const version of item.game_versions) {
+                    if (typeof version === 'string' && version.startsWith('1.') &&
+                        !version.includes('w') && !version.includes('pre') &&
+                        !version.includes('rc') && !version.includes('snapshot')) {
+                      extractedVersions.add(version);
+                    }
+                  }
+                }
+                // Comprobar otras propiedades posibles
+                else if (item.game_version && typeof item.game_version === 'string') {
+                  if (item.game_version.startsWith('1.') &&
+                      !item.game_version.includes('w') && !item.game_version.includes('pre') &&
+                      !item.game_version.includes('rc') && !item.game_version.includes('snapshot')) {
+                    extractedVersions.add(item.game_version);
+                  }
+                }
+                else if (Array.isArray(item.versions)) {
+                  for (const version of item.versions) {
+                    if (typeof version === 'string' && version.startsWith('1.') &&
+                        !version.includes('w') && !version.includes('pre') &&
+                        !version.includes('rc') && !version.includes('snapshot')) {
+                      extractedVersions.add(version);
+                    }
+                  }
+                }
+              }
+
+              // Combinar versiones de la API con las versiones del contenido original
+              const allPossibleVersions = new Set<string>([
+                ...extractedVersions,
+                ...selectedDownloadItem.minecraftVersions
+              ]);
+
+              // Filtrar todas las versiones para incluir solo versiones estables
+              versionsToUse = Array.from(allPossibleVersions)
+                .filter(version =>
+                  typeof version === 'string' &&
+                  version.startsWith('1.') &&
+                  !version.includes('w') &&
+                  !version.includes('pre') &&
+                  !version.includes('rc') &&
+                  !version.includes('snapshot')
+                )
+                .sort((a, b) => {
+                  // Dividir versiones por puntos y convertir a números para ordenar correctamente
+                  const aParts = a.split('.').map(Number);
+                  const bParts = b.split('.').map(Number);
+
+                  for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+                    if (aParts[i] !== bParts[i]) {
+                      return bParts[i] - aParts[i]; // Orden descendente (1.21, 1.20, etc.)
+                    }
+                  }
+                  return bParts.length - aParts.length; // Si todo es igual, más largo primero
+                });
+
+              // Extraer loaders
+              const extractedLoaders = new Set<string>();
+              for (const item of response) {
+                if (item.loaders && Array.isArray(item.loaders)) {
+                  for (const loader of item.loaders) {
+                    if (typeof loader === 'string') {
+                      // Para diferentes tipos de contenido, usar loaders específicos
+                      if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                        // Para mods y modpacks, usar loaders específicos
+                        if (['forge', 'fabric', 'quilt', 'neoforge'].includes(loader)) {
+                          extractedLoaders.add(loader);
+                        }
+                      } else {
+                        extractedLoaders.add(loader);
+                      }
+                    }
+                  }
+                }
+                // Comprobar otra propiedad posible para loaders
+                else if (item.loader && typeof item.loader === 'string') {
+                  if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                    if (['forge', 'fabric', 'quilt', 'neoforge'].includes(item.loader)) {
+                      extractedLoaders.add(item.loader);
+                    }
+                  } else {
+                    extractedLoaders.add(item.loader);
+                  }
+                }
+              }
+
+              loadersToUse = Array.from(extractedLoaders);
+            }
+          } catch (modrinthError) {
+            console.error('Error obteniendo datos de Modrinth para download múltiple:', modrinthError);
+          }
+        } else if (selectedPlatform === 'curseforge' && window.api?.curseforge?.getCompatibleVersions) {
+          try {
+            const response = await window.api.curseforge.getCompatibleVersions({
+              projectId: selectedDownloadItem.id,
+              mcVersion: selectedDownloadItem.minecraftVersions[0] || '1.20.1'
+            });
+
+            if (response && Array.isArray(response)) {
+              const processedInfo = extractCurseForgeCompatibilityInfo(response);
+
+              // Combinar versiones de la API con las versiones del contenido original
+              const allPossibleVersions = new Set<string>([
+                ...processedInfo.gameVersions,
+                ...selectedDownloadItem.minecraftVersions
+              ]);
+
+              // Filtrar todas las versiones para incluir solo versiones estables
+              versionsToUse = Array.from(allPossibleVersions)
+                .filter((version: string) =>
+                  typeof version === 'string' &&
+                  version.startsWith('1.') &&
+                  !version.includes('w') &&
+                  !version.includes('pre') &&
+                  !version.includes('rc') &&
+                  !version.includes('snapshot'))
+                .sort((a: string, b: string) => {
+                  // Dividir versiones por puntos y convertir a números para ordenar correctamente
+                  const aParts = a.split('.').map(Number);
+                  const bParts = b.split('.').map(Number);
+
+                  for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+                    if (aParts[i] !== bParts[i]) {
+                      return bParts[i] - aParts[i]; // Orden descendente (1.21, 1.20, etc.)
+                    }
+                  }
+                  return bParts.length - aParts.length; // Si todo es igual, más largo primero
+                });
+
+              // Usar loaders apropiados para el tipo de contenido
+              if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                // Filtrar solo loaders válidos para mods y modpacks
+                loadersToUse = processedInfo.modLoaders.filter((loader: string) =>
+                  ['forge', 'fabric', 'quilt', 'neoforge'].includes(loader)
+                );
+              } else {
+                // Para otros tipos de contenido, usar los loaders disponibles o dejarlo vacío
+                loadersToUse = processedInfo.modLoaders;
+              }
+            }
+          } catch (curseError) {
+            console.error('Error obteniendo datos de CurseForge para download múltiple:', curseError);
+          }
+        }
+
+        // Si no se encontró nada o hubo error, usar fallback
+        if (versionsToUse.length === 0) {
+          versionsToUse = selectedDownloadItem.minecraftVersions
+            .filter((version: string) =>
+              version.startsWith('1.') &&
+              !version.includes('w') &&
+              !version.includes('pre') &&
+              !version.includes('rc') &&
+              !version.includes('snapshot'))
+            .sort((a: string, b: string) => {
+              const [aMajor, aMinor, aPatch] = a.split('.').slice(1).map(Number);
+              const [bMajor, bMinor, bPatch] = b.split('.').slice(1).map(Number);
+
+              if (aMajor !== bMajor) return bMajor - aMajor;
+              if (aMinor !== bMinor) return bMinor - aMinor;
+              return (bPatch || 0) - (aPatch || 0);
+            });
+        }
+
+        if (loadersToUse.length === 0) {
+          loadersToUse = selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods'
+            ? ['forge', 'fabric', 'quilt', 'neoforge']
+            : [];
+        }
+
+        setShowMultipleDownloadModal(true);
+      } catch (error) {
+        console.error('Error general en handleMultipleDownload:', error);
+        // Aunque haya error, mostrar modal de todas formas con datos básicos
+        setShowMultipleDownloadModal(true);
+      }
     }
   };
 
@@ -1812,6 +2006,8 @@ const ContentPage: React.FC = () => {
         isOpen={showMultipleDownloadModal}
         onClose={() => setShowMultipleDownloadModal(false)}
         contentItems={[selectedDownloadItem]} // Pasar como array
+        availableVersions={availableVersions} // Pasar las versiones obtenidas para el item
+        availableLoaders={availableLoaders} // Pasar los loaders obtenidos para el item
         onAddToQueue={handleAddToMultipleQueue}
       />
     )}
