@@ -16,6 +16,7 @@ import { profileService, type Profile } from './services/profileService' // Impo
 import { themeService } from './services/themeService';
 import { processMonitorService } from './services/processMonitorService';
 import NotificationContainer from './components/NotificationContainer';
+import DownloadProgressWidget from './components/DownloadProgressWidget';
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'oled'>('dark')

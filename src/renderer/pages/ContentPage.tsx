@@ -2,6 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { downloadService } from '../services/downloadService';
 import { extractCurseForgeCompatibilityInfo } from '../../services/curseforgeApiHelper';
+import { modrinthAPI, ModrinthProject } from '../services/ModrinthAPI_Handler';
+import { curseForgeAPI, CurseForgeMod } from '../services/CurseForgeAPI_Handler';
+import ContentCard from '../components/ContentCard';
+import DownloadModalModrinth from '../components/DownloadModalModrinth';
+import DownloadModalCurseForge from '../components/DownloadModalCurseForge';
+import ContentDownloadProgressWidget from '../components/ContentDownloadProgressWidget';
+import ModernContentDetail from '../components/ModernContentDetail';
+import Tooltip from '../components/Tooltip';
+import DownloadSelectionModal from '../components/DownloadSelectionModal';
+import SingleDownloadModal from '../components/SingleDownloadModal';
+import MultipleDownloadModal from '../components/MultipleDownloadModal';
+import MultipleDownloadQueue from '../components/MultipleDownloadQueue';
 
 type ContentType = 'modpacks' | 'mods' | 'resourcepacks' | 'datapacks' | 'shaders';
 type SortBy = 'popular' | 'recent' | 'name';
@@ -20,6 +32,7 @@ interface ContentItem {
   type: ContentType;
   version: string;
   downloadUrl?: string; // Añadido para la URL de descarga real
+  platform: Platform; // Added to identify the platform
 }
 
 
@@ -49,6 +62,11 @@ const ContentPage: React.FC = () => {
   const [installedContent, setInstalledContent] = useState<Set<string>>(new Set()); // Contenido ya instalado
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('modrinth'); // New state to track selected platform
+  const [selectedModalProject, setSelectedModalProject] = useState<ModrinthProject | null>(null);
+  const [selectedModalMod, setSelectedModalMod] = useState<CurseForgeMod | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [availableVersions, setAvailableVersions] = useState<string[]>([]);
+  const [availableLoaders, setAvailableLoaders] = useState<string[]>([]);
   const itemsPerPage = 20; // Mostrar 20 elementos por página
 
   // Cargar contenido desde Modrinth o CurseForge
@@ -62,7 +80,7 @@ const ContentPage: React.FC = () => {
           setInstances(userInstances);
         }
 
-        // Cargar contenido desde la plataforma seleccionada
+        // Cargar contenido desde la plataforma seleccionada usando la API original
         let results: ContentItem[] = [];
         if (selectedPlatform === 'modrinth') {
           console.log(`Buscando ${type} en Modrinth con término:`, searchQuery);
@@ -71,6 +89,12 @@ const ContentPage: React.FC = () => {
             search: searchQuery
           });
           console.log('Resultados de Modrinth:', results);
+
+          // Asegurar que el platform está definido
+          results = results.map(item => ({
+            ...item,
+            platform: 'modrinth'
+          }));
         } else if (selectedPlatform === 'curseforge') {
           console.log(`Buscando ${type} en CurseForge con término:`, searchQuery);
           results = await window.api.curseforge.search({
@@ -78,6 +102,12 @@ const ContentPage: React.FC = () => {
             search: searchQuery
           });
           console.log('Resultados de CurseForge:', results);
+
+          // Asegurar que el platform está definido
+          results = results.map(item => ({
+            ...item,
+            platform: 'curseforge'
+          }));
         }
 
         setContent(results);
@@ -107,6 +137,325 @@ const ContentPage: React.FC = () => {
   const [displayedContent, setDisplayedContent] = useState<ContentItem[]>([]);
   const [originalContent, setOriginalContent] = useState<ContentItem[]>([]);
 
+  // Estados para los nuevos modales de descarga
+  const [showDownloadSelectionModal, setShowDownloadSelectionModal] = useState<boolean>(false);
+  const [showSingleDownloadModal, setShowSingleDownloadModal] = useState<boolean>(false);
+  const [showMultipleDownloadModal, setShowMultipleDownloadModal] = useState<boolean>(false);
+  const [showMultipleDownloadQueue, setShowMultipleDownloadQueue] = useState<boolean>(false);
+  const [selectedDownloadItem, setSelectedDownloadItem] = useState<ContentItem | null>(null);
+
+  const handleDownload = (item: ContentItem) => {
+    // Mostrar el modal de selección de tipo de descarga (individual o múltiple)
+    setSelectedDownloadItem(item);
+    setShowDownloadSelectionModal(true);
+  };
+
+  const handleSingleDownload = async () => {
+    if (selectedDownloadItem) {
+      setShowDownloadSelectionModal(false);
+
+      try {
+        // Valores por defecto
+        let versionsToUse: string[] = [];
+        let loadersToUse: string[] = [];
+
+        // Intentar cargar desde APIs si están disponibles
+        if (selectedPlatform === 'modrinth' && window.api?.modrinth?.getCompatibleVersions) {
+          try {
+            console.log('Solicitando versiones de Modrinth para:', selectedDownloadItem.id, 'Tipo:', selectedDownloadItem.type);
+            const response = await window.api.modrinth.getCompatibleVersions({
+              projectId: selectedDownloadItem.id,
+              mcVersion: selectedDownloadItem.minecraftVersions[0] || '1.20.1'
+            });
+
+            console.log('Respuesta de Modrinth:', response);
+
+            if (response && Array.isArray(response)) {
+              // Extraer versiones estables de Minecraft desde la respuesta actual
+              const extractedVersionsFromResponse = new Set<string>();
+
+              for (const item of response) {
+                // Intentar diferentes propiedades que pueden contener versiones
+                if (item.game_versions && Array.isArray(item.game_versions)) {
+                  for (const version of item.game_versions) {
+                    if (typeof version === 'string' && version.startsWith('1.') &&
+                        !version.includes('w') && !version.includes('pre') &&
+                        !version.includes('rc') && !version.includes('snapshot')) {
+                      extractedVersionsFromResponse.add(version);
+                    }
+                  }
+                }
+                // Comprobar también otras propiedades comunes
+                else if (item.game_version && typeof item.game_version === 'string') {
+                  if (item.game_version.startsWith('1.') &&
+                      !item.game_version.includes('w') && !item.game_version.includes('pre') &&
+                      !item.game_version.includes('rc') && !item.game_version.includes('snapshot')) {
+                    extractedVersionsFromResponse.add(item.game_version);
+                  }
+                }
+                else if (Array.isArray(item.versions)) {
+                  for (const version of item.versions) {
+                    if (typeof version === 'string' && version.startsWith('1.') &&
+                        !version.includes('w') && !version.includes('pre') &&
+                        !version.includes('rc') && !version.includes('snapshot')) {
+                      extractedVersionsFromResponse.add(version);
+                    }
+                  }
+                }
+              }
+
+              // Combinar versiones de la API con las versiones del contenido original
+              // para tener una lista más completa de versiones posibles
+              const allPossibleVersions = new Set<string>([
+                ...extractedVersionsFromResponse,
+                ...selectedDownloadItem.minecraftVersions
+              ]);
+
+              // Filtrar todas las versiones para incluir solo versiones estables
+              versionsToUse = Array.from(allPossibleVersions)
+                .filter(version =>
+                  typeof version === 'string' &&
+                  version.startsWith('1.') &&
+                  !version.includes('w') &&
+                  !version.includes('pre') &&
+                  !version.includes('rc') &&
+                  !version.includes('snapshot')
+                )
+                .sort((a, b) => {
+                  // Dividir versiones por puntos y convertir a números para ordenar correctamente
+                  const aParts = a.split('.').map(Number);
+                  const bParts = b.split('.').map(Number);
+
+                  for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+                    if (aParts[i] !== bParts[i]) {
+                      return bParts[i] - aParts[i]; // Orden descendente (1.21, 1.20, etc.)
+                    }
+                  }
+                  return bParts.length - aParts.length; // Si todo es igual, más largo primero
+                });
+
+              console.log('Versiones extraídas de Modrinth (antes de ordenar):', Array.from(extractedVersionsFromResponse));
+              console.log('Todas las posibles versiones combinadas:', Array.from(allPossibleVersions));
+              console.log('Versiones filtradas finales:', versionsToUse);
+
+              // Extraer loaders - considerar el tipo de contenido
+              const extractedLoaders = new Set<string>();
+              for (const item of response) {
+                if (item.loaders && Array.isArray(item.loaders)) {
+                  for (const loader of item.loaders) {
+                    if (typeof loader === 'string') {
+                      // Para diferentes tipos de contenido, usar loaders específicos
+                      if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                        // Para mods y modpacks, usar loaders específicos
+                        if (['forge', 'fabric', 'quilt', 'neoforge'].includes(loader)) {
+                          extractedLoaders.add(loader);
+                        }
+                      } else {
+                        // Para otros tipos, fabric puede ser suficiente o ninguno
+                        extractedLoaders.add(loader);
+                      }
+                    }
+                  }
+                }
+                // Comprobar otras propiedades posibles para loaders
+                else if (item.loader && typeof item.loader === 'string') {
+                  if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                    if (['forge', 'fabric', 'quilt', 'neoforge'].includes(item.loader)) {
+                      extractedLoaders.add(item.loader);
+                    }
+                  } else {
+                    extractedLoaders.add(item.loader);
+                  }
+                }
+              }
+
+              loadersToUse = Array.from(extractedLoaders);
+              console.log('Loaders extraídos de Modrinth:', loadersToUse);
+            }
+          } catch (modrinthError) {
+            console.error('Error obteniendo datos de Modrinth:', modrinthError);
+          }
+        } else if (selectedPlatform === 'curseforge' && window.api?.curseforge?.getCompatibleVersions) {
+          try {
+            console.log('Solicitando versiones de CurseForge para:', selectedDownloadItem.id, 'Tipo:', selectedDownloadItem.type);
+            const response = await window.api.curseforge.getCompatibleVersions({
+              projectId: selectedDownloadItem.id,
+              mcVersion: selectedDownloadItem.minecraftVersions[0] || '1.20.1'
+            });
+
+            console.log('Respuesta de CurseForge:', response);
+
+            if (response && Array.isArray(response)) {
+              const processedInfo = extractCurseForgeCompatibilityInfo(response);
+              console.log('Información procesada de CurseForge:', processedInfo);
+
+              // Combinar versiones de la API con las versiones del contenido original
+              const allPossibleVersions = new Set<string>([
+                ...processedInfo.gameVersions,
+                ...selectedDownloadItem.minecraftVersions
+              ]);
+
+              // Filtrar todas las versiones para incluir solo versiones estables
+              versionsToUse = Array.from(allPossibleVersions)
+                .filter((version: string) =>
+                  typeof version === 'string' &&
+                  version.startsWith('1.') &&
+                  !version.includes('w') &&
+                  !version.includes('pre') &&
+                  !version.includes('rc') &&
+                  !version.includes('snapshot'))
+                .sort((a: string, b: string) => {
+                  // Dividir versiones por puntos y convertir a números para ordenar correctamente
+                  const aParts = a.split('.').map(Number);
+                  const bParts = b.split('.').map(Number);
+
+                  for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+                    if (aParts[i] !== bParts[i]) {
+                      return bParts[i] - aParts[i]; // Orden descendente (1.21, 1.20, etc.)
+                    }
+                  }
+                  return bParts.length - aParts.length; // Si todo es igual, más largo primero
+                });
+
+              console.log('Versiones extraídas de CurseForge (después de filtrar):', versionsToUse);
+
+              // Usar loaders apropiados para el tipo de contenido
+              if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                // Filtrar solo loaders válidos para mods y modpacks
+                loadersToUse = processedInfo.modLoaders.filter((loader: string) =>
+                  ['forge', 'fabric', 'quilt', 'neoforge'].includes(loader)
+                );
+              } else {
+                // Para otros tipos de contenido, usar los loaders disponibles o dejarlo vacío
+                loadersToUse = processedInfo.modLoaders;
+              }
+
+              console.log('Loaders extraídos de CurseForge:', loadersToUse);
+            }
+          } catch (curseError) {
+            console.error('Error obteniendo datos de CurseForge:', curseError);
+          }
+        }
+
+        // Si no se encontró nada o hubo error, usar fallback
+        if (versionsToUse.length === 0) {
+          versionsToUse = selectedDownloadItem.minecraftVersions
+            .filter((version: string) =>
+              version.startsWith('1.') &&
+              !version.includes('w') &&
+              !version.includes('pre') &&
+              !version.includes('rc') &&
+              !version.includes('snapshot'))
+            .sort((a: string, b: string) => {
+              const [aMajor, aMinor, aPatch] = a.split('.').slice(1).map(Number);
+              const [bMajor, bMinor, bPatch] = b.split('.').slice(1).map(Number);
+
+              if (aMajor !== bMajor) return bMajor - aMajor;
+              if (aMinor !== bMinor) return bMinor - aMinor;
+              return (bPatch || 0) - (aPatch || 0);
+            });
+        }
+
+        if (loadersToUse.length === 0) {
+          loadersToUse = selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods'
+            ? ['forge', 'fabric', 'quilt', 'neoforge']
+            : [];
+        }
+
+        // Actualizar los estados
+        setAvailableVersions(versionsToUse);
+        setAvailableLoaders(loadersToUse);
+
+        console.log('Datos cargados para el modal:', { versions: versionsToUse, loaders: loadersToUse });
+
+        setShowSingleDownloadModal(true);
+      } catch (error) {
+        console.error('Error general en handleSingleDownload:', error);
+        // Fallback en caso de error
+        setAvailableVersions(selectedDownloadItem.minecraftVersions.filter((v: string) => v.startsWith('1.')) || []);
+        setAvailableLoaders(['forge', 'fabric', 'quilt', 'neoforge']);
+        setShowSingleDownloadModal(true);
+      }
+    }
+  };
+
+  const handleMultipleDownload = () => {
+    if (selectedDownloadItem) {
+      setShowDownloadSelectionModal(false);
+      setShowMultipleDownloadModal(true);
+    }
+  };
+
+  const handleStartSingleDownload = async (downloadInfo: {
+    id: string;
+    name: string;
+    version: string;
+    loader?: string;
+    targetPath: string;
+    platform: string;
+  }) => {
+    // Buscar el elemento correspondiente
+    const item = content.find(c => c.id === downloadInfo.id);
+    if (!item) {
+      console.error('No se encontró el ítem para descargar:', downloadInfo.id);
+      return;
+    }
+
+    // Iniciar la descarga individual con la información proporcionada
+    console.log('Iniciando descarga individual con:', downloadInfo);
+
+    // Actualizar el estado con la información de la descarga
+    if (downloadInfo.targetPath) {
+      // Si la ruta no es una instancia predefinida, usar ruta personalizada
+      if (instances.some(instance => instance.path === downloadInfo.targetPath)) {
+        // Si es una instancia existente, encontrar su ID
+        const instanceId = instances.find(instance => instance.path === downloadInfo.targetPath)?.id;
+        setSelectedInstanceId(instanceId || '');
+      } else {
+        // Si es una ruta personalizada, usar el sistema de carpeta personalizada
+        setSelectedInstanceId('custom');
+        setCustomFolderPath(downloadInfo.targetPath);
+      }
+    } else {
+      setSelectedInstanceId(''); // No se ha seleccionado ninguna instancia
+    }
+
+    setSelectedVersion(downloadInfo.version);
+    setSelectedLoader(downloadInfo.loader || '');
+
+    // Usar la función principal de descarga e instalación
+    await handleDownloadAndInstall(item);
+
+    // Cerrar el modal
+    setShowSingleDownloadModal(false);
+  };
+
+  const handleAddToMultipleQueue = (queueItems: Array<{
+    id: string;
+    name: string;
+    version: string;
+    loader?: string;
+    targetPath: string;
+    platform: string;
+  }>) => {
+    // Agregar los elementos a la cola de descargas múltiples
+    console.log('Agregando a cola múltiple:', queueItems);
+
+    // Cerrar el modal de descarga múltiple
+    setShowMultipleDownloadModal(false);
+
+    // Mostrar la cola de descargas múltiples
+    setShowMultipleDownloadQueue(true);
+  };
+
+  const handleStartMultipleDownload = () => {
+    // Iniciar la descarga de todos los elementos en la cola
+    console.log('Iniciando descarga múltiple');
+
+    // Cerrar la cola
+    setShowMultipleDownloadQueue(false);
+  };
+
   // Efecto para actualizar contenido original cuando cambia el tipo o plataforma
   useEffect(() => {
     setOriginalContent(content);
@@ -131,14 +480,14 @@ const ContentPage: React.FC = () => {
             try {
               let compatibleVersions: any[] = [];
 
-              if (selectedPlatform === 'modrinth') {
-                compatibleVersions = await window.api.modrinth.getCompatibleVersions({
+              if (item.platform === 'modrinth') {
+                compatibleVersions = await modrinthAPI.getCompatibleVersions({
                   projectId: item.id,
                   mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
                   loader: selectedLoader
                 });
-              } else if (selectedPlatform === 'curseforge') {
-                compatibleVersions = await window.api.curseforge.getCompatibleVersions({
+              } else if (item.platform === 'curseforge') {
+                compatibleVersions = await curseForgeAPI.getCompatibleVersions({
                   projectId: item.id,
                   mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
                   loader: selectedLoader
@@ -238,19 +587,111 @@ const ContentPage: React.FC = () => {
 
   // Set selected content when ID changes and check installation status
   useEffect(() => {
-    if (id) {
-      const item = content.find(item => item.id === id);
-      setSelectedContent(item || null);
+    const controller = new AbortController();
 
-      // Si se ha encontrado el contenido, cargar versiones y loaders compatibles
-      if (item) {
-        loadCompatibleVersionsAndLoaders(item);
+    const loadSelectedContent = async () => {
+      if (id) {
+        let item = content.find(item => item.id === id);
+
+        if (item) {
+          // Create a copy of the item to prevent directly modifying the original
+          const updatedItem = { ...item };
+
+          // Fetch additional information in the background without blocking the UI
+          if (item.platform === 'curseforge') {
+            try {
+              const modId = parseInt(item.id, 10);
+              if (!isNaN(modId)) {
+                // Implementar timeout para la llamada a CurseForge
+                const fetchWithTimeout = (promise: Promise<any>, timeoutMs: number) => {
+                  return Promise.race([
+                    promise,
+                    new Promise((_, reject) =>
+                      setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
+                    )
+                  ]);
+                };
+
+                // Fetch CurseForge details with timeout protection
+                const modPromise = fetchWithTimeout(curseForgeAPI.getMod(modId), 10000);
+                const filePromise = fetchWithTimeout(curseForgeAPI.getModFiles(modId), 10000);
+
+                try {
+                  const mod = await modPromise;
+                  const modFiles = await filePromise;
+
+                  // Extract all Minecraft versions from the mod files
+                  const allGameVersions = new Set<string>();
+                  modFiles.forEach(file => {
+                    if (file.gameVersions && Array.isArray(file.gameVersions)) {
+                      file.gameVersions.forEach(version => allGameVersions.add(version));
+                    }
+                  });
+                  const gameVersionsArray = Array.from(allGameVersions);
+
+                  // Update the item with real Minecraft versions and description
+                  updatedItem.minecraftVersions = gameVersionsArray;
+                  updatedItem.description = mod.summary || mod.description || item.description;
+                } catch (fetchError) {
+                  console.error('CurseForge request timed out or failed:', fetchError);
+                  // If there's a timeout or other error, continue with original data
+                }
+              }
+            } catch (error) {
+              console.error('Error processing CurseForge item:', error);
+              // If there's an error, continue with original data
+            }
+          } else if (item.platform === 'modrinth') {
+            // For Modrinth items, fetch detailed information to get accurate description
+            try {
+              const projectId = item.id;
+
+              // Implement timeout for Modrinth request
+              const fetchWithTimeout = (promise: Promise<any>, timeoutMs: number) => {
+                return Promise.race([
+                  promise,
+                  new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
+                  )
+                ]);
+              };
+
+              try {
+                const project = await fetchWithTimeout(modrinthAPI.getProject(projectId), 10000);
+
+                // Update the item with the real description from Modrinth API
+                updatedItem.description = project.description || project.body || item.description;
+              } catch (fetchError) {
+                console.error('Modrinth request timed out or failed:', fetchError);
+                // If there's a timeout or other error, continue with original data
+              }
+            } catch (error) {
+              console.error('Error processing Modrinth item:', error);
+              // If there's an error, continue with original data
+            }
+          }
+
+          // Always set the selected content, whether the detailed data retrieval succeeded or failed
+          setSelectedContent(updatedItem);
+          await loadCompatibleVersionsAndLoaders(updatedItem);
+        } else {
+          setSelectedContent(null);
+          setCompatibleVersions([]);
+          setCompatibleLoaders([]);
+        }
+      } else {
+        setSelectedContent(null);
+        setCompatibleVersions([]);
+        setCompatibleLoaders([]);
       }
-    } else {
-      setSelectedContent(null);
-      setCompatibleVersions([]);
-      setCompatibleLoaders([]);
-    }
+    };
+
+    loadSelectedContent();
+
+    // Cleanup function
+    return () => {
+      controller.abort(); // Abort any ongoing requests when component unmounts
+    };
   }, [id, content]);
 
   // Función para cargar versiones y loaders compatibles desde la plataforma seleccionada
@@ -587,7 +1028,11 @@ const ContentPage: React.FC = () => {
     }
   }, [selectedContent, selectedPlatform]);
 
-  const handleContentClick = (item: ContentItem) => {
+  const handleContentClick = (itemId: string) => {
+    // Find the item in content array
+    const item = content.find(i => i.id === itemId);
+    if (!item) return;
+
     navigate(`/contenido/${type}/${item.id}`);
   };
 
@@ -595,7 +1040,7 @@ const ContentPage: React.FC = () => {
     navigate(`/contenido/${type}`);
   };
 
-  const handleDownload = async (item: ContentItem) => {
+  const handleDownloadAndInstall = async (item: ContentItem) => {
     setIsDownloading(prev => ({ ...prev, [item.id]: true }));
     setInstallationProgress(0); // Resetear progreso de instalación
 
@@ -907,7 +1352,7 @@ const ContentPage: React.FC = () => {
         <div className="lg:w-72 flex-shrink-0">
           <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-5 border border-gray-700/50 shadow-lg">
             {/* Platform Selection Buttons - Inside the Filter Box */}
-            <div className="flex flex-col items-center gap-3 mb-6 overflow-x-auto pb-2">
+            <div className="flex flex-col items-center gap-3 mb-6 overflow-x-auto pb-2 relative">
               {(['modrinth', 'curseforge'] as Platform[]).map((platform) => (
                 <button
                   key={platform}
@@ -938,6 +1383,19 @@ const ContentPage: React.FC = () => {
                   </span>
                 </button>
               ))}
+              {/* Help Tooltip */}
+              <div className="absolute top-0 right-0">
+                <Tooltip
+                  content={`Guía de instalación:\n\n1. Selecciona una plataforma (Modrinth o CurseForge)\n2. Elige el tipo de contenido\n3. Usa los filtros para encontrar lo que necesitas\n4. Haz clic en \"Detalles\" para ver información adicional\n5. Haz clic en \"Descargar\" para iniciar el proceso\n6. En la ventana modal, selecciona la versión y destino\n7. Confirma la descarga`}
+                  position="left"
+                >
+                  <button className="text-gray-400 hover:text-white p-1 rounded-full bg-gray-700/50">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                </Tooltip>
+              </div>
             </div>
 
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
@@ -1067,10 +1525,14 @@ const ContentPage: React.FC = () => {
         )}
 
         {/* Main Content */}
-        <div className="flex-1">
+        <div className="flex-1 relative">
+          {/* Download Progress Widget - Positioned at top-right of content area, but opens to the left */}
+          <div className="absolute top-0 right-0 z-10">
+            <ContentDownloadProgressWidget position="top-right" />
+          </div>
         {selectedContent ? (
           // Detail View
-          <div className="bg-gray-800/50 rounded-xl p-6">
+          <div className="bg-gray-800/50 rounded-xl p-6 mt-16">
             <button 
               onClick={handleBackToList}
               className="mb-4 flex items-center text-blue-400 hover:text-blue-300 transition-colors"
@@ -1081,251 +1543,102 @@ const ContentPage: React.FC = () => {
               Volver a la lista
             </button>
             
-            <div className="md:flex gap-6">
-              <div className="md:w-1/3">
-                <img
-                  src={selectedContent.imageUrl}
-                  alt={selectedContent.title}
-                  className="w-full rounded-lg shadow-lg mb-4"
-                  loading="lazy"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen';
-                  }}
-                />
-                <div className="bg-gray-700/50 p-4 rounded-lg">
-                  <h2 className="text-xl font-bold text-white mb-2">{selectedContent.title}</h2>
-                  <p className="text-gray-300 text-sm mb-4">por {selectedContent.author}</p>
-                  
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {selectedContent.categories.map((category, index) => (
-                      <span key={`${category}-${index}-${selectedContent.id}`} className="bg-blue-500/20 text-blue-300 text-xs px-2 py-1 rounded">
-                        {category}
-                      </span>
-                    ))}
-                  </div>
-                  
-                  <div className="text-sm text-gray-400 mb-4">
-                    <p><span className="font-medium">Versión:</span> {selectedContent.version}</p>
-                    <p><span className="font-medium">Actualizado:</span> {new Date(selectedContent.lastUpdated).toLocaleDateString()}</p>
-                    <p><span className="font-medium">Descargas:</span> {selectedContent.downloads.toLocaleString()}</p>
-                    <p><span className="font-medium">Versiones de Minecraft:</span> {selectedContent.minecraftVersions.join(', ')}</p>
-                  </div>
-
-                  {/* Selector de versión, loader e instancia/carpeta encima del botón de descarga */}
-                  <div className="space-y-3">
-                    {/* Selector de versión */}
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-300">
-                        Versión del contenido:
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={detailVersion || ''}
-                          onChange={(e) => setDetailVersion(e.target.value)}
-                          className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
-                        >
-                          <option value="">Selecciona una versión...</option>
-                          {compatibleVersions.map(version => (
-                            <option key={version} value={version}>
-                              {version}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-300">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Selector de loader (solo para mods) */}
-                    {(selectedContent?.type === 'modpacks' || selectedContent?.type === 'mods') ? (
-                      <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-300">
-                          Loader compatible:
-                        </label>
-                        <div className="relative">
-                          <select
-                            value={detailLoader}
-                            onChange={(e) => setDetailLoader(e.target.value)}
-                            className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
-                          >
-                            <option value="">Selecciona un loader...</option>
-                            {compatibleLoaders.includes('forge') && <option value="forge">Forge</option>}
-                            {compatibleLoaders.includes('fabric') && <option value="fabric">Fabric</option>}
-                            {compatibleLoaders.includes('quilt') && <option value="quilt">Quilt</option>}
-                            {compatibleLoaders.includes('neoforge') && <option value="neoforge">NeoForge</option>}
-                          </select>
-                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-300">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Selector de instancia o carpeta personalizada */}
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-300">
-                        Instancia de destino:
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={selectedInstanceId}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setSelectedInstanceId(value);
-                            setShowCustomFolder(value === 'custom');
-                          }}
-                          className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
-                        >
-                          <option value="">Seleccionar instancia...</option>
-                          {instances.map(instance => (
-                            <option key={instance.id} value={instance.id}>
-                              {instance.name} ({instance.version}) {instance.loader && ` - ${instance.loader}`}
-                            </option>
-                          ))}
-                          <option value="custom"> Carpeta personalizada...</option>
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-300">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Opción para carpeta personalizada */}
-                    {showCustomFolder && (
-                      <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-300">
-                          Ruta personalizada:
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={customFolderPath}
-                            onChange={(e) => setCustomFolderPath(e.target.value)}
-                            placeholder="Selecciona una carpeta..."
-                            className="flex-1 bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
-                          />
-                          <button
-                            className="bg-gradient-to-r from-blue-600 to-primary hover:from-blue-700 hover:to-primary/90 text-white py-3 px-6 rounded-xl font-medium transition-all duration-200 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                            onClick={async () => {
-                              // Lógica para seleccionar carpeta personalizada
-                              try {
-                                // Verificar si existe la API de diálogo
-                                if (window.api?.dialog?.showOpenDialog) {
-                                  const result = await window.api.dialog.showOpenDialog({
-                                    properties: ['openDirectory'],
-                                    title: 'Seleccionar carpeta de destino',
-                                    buttonLabel: 'Seleccionar'
-                                  });
-                                  if (!result.canceled && result.filePaths.length > 0) {
-                                    // Actualizar el estado con la ruta seleccionada
-                                    setCustomFolderPath(result.filePaths[0]);
-                                  } else {
-                                    console.log('Selección de carpeta cancelada o sin resultados');
-                                  }
-                                } else {
-                                  // Si no está disponible, mostrar mensaje de error más descriptivo
-                                  alert('La función de selección de carpetas no está disponible. Puede que necesites reconstruir la aplicación o verificar la instalación.');
-                                }
-                              } catch (error) {
-                                console.error('Error al seleccionar carpeta:', error);
-                                alert('Error al seleccionar la carpeta: ' + (error as Error).message);
-                              }
-                            }}
-                          >
-                            Explorar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => handleDownload(selectedContent)}
-                    disabled={isDownloading[selectedContent.id]}
-                    className="w-full relative overflow-hidden rounded-lg transition-all duration-300"
-                  >
-                    {/* Barra de progreso visual */}
-                    <div
-                      className={`absolute bottom-0 left-0 top-0 bg-gradient-to-r from-blue-400 to-blue-600 transition-all duration-300 ease-out ${
-                        isDownloading[selectedContent.id] ? 'opacity-100' : 'opacity-0'
-                      }`}
-                      style={{
-                        width: `${downloadProgress[selectedContent.id] || 0}%`,
-                        zIndex: 10,
-                        opacity: isDownloading[selectedContent.id] ? 0.8 : 0
+            {/* Contenido principal en una sola columna para que la información esté arriba y las pestañas abajo */}
+            <div className="space-y-6">
+              {/* Información principal del complemento - Fuera del recuadro de pestañas y arriba de ellas */}
+              <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl overflow-hidden border border-gray-700/50 shadow-2xl">
+                <div className="md:flex">
+                  <div className="md:w-1/3">
+                    <img
+                      src={selectedContent.imageUrl}
+                      alt={selectedContent.title}
+                      className="w-full h-64 md:h-full object-cover"
+                      loading="lazy"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = 'https://via.placeholder.com/600x400/1f2937/9ca3af?text=Sin+imagen';
                       }}
-                    ></div>
+                    />
+                  </div>
+                  <div className="md:w-2/3 p-6">
+                    <h2 className="text-3xl font-bold text-white mb-2">{selectedContent.title}</h2>
+                    <p className="text-blue-400 mb-4">por {selectedContent.author}</p>
 
-                    {/* Capa de fondo del botón */}
-                    <div
-                      className={`absolute inset-0 rounded-lg transition-all duration-300 ${
-                        isDownloading[selectedContent.id]
-                          ? 'bg-gray-800/80 backdrop-blur-sm'
-                          : (selectedInstanceId && instances.some(instance =>
-                              instance.id === selectedInstanceId &&
-                              // Comprueba si el contenido ya está instalado en la instancia (verificación simplificada)
-                              // En una implementación completa, esto se verificaría leyendo los archivos de la instancia
-                              false
-                            ))
-                            ? 'bg-gradient-to-r from-green-600 to-green-700' // Verde si ya está instalado
-                            : selectedInstanceId
-                              ? 'bg-gradient-to-r from-blue-600 to-blue-700'
-                              : 'bg-gradient-to-r from-blue-600 to-primary'
-                      }`}
-                      style={{ zIndex: 1 }}
-                    ></div>
-
-                    {/* Contenido del botón */}
-                    <div
-                      className="relative z-20 py-2 px-4 font-medium text-white flex items-center justify-center"
-                    >
-                      {isDownloading[selectedContent.id] ? (
-                        <div className="flex items-center justify-center">
-                          <span className="mr-2">
-                            {selectedInstanceId ? `Instalando... ${installationProgress}%` : `Descargando... ${downloadProgress[selectedContent.id] || 0}%`}
-                          </span>
-                          <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-                        </div>
-                      ) : (
-                        selectedInstanceId && selectedInstanceId !== 'custom' && selectedContent && installedContent.has(`${selectedInstanceId}-${selectedContent.id}`) ?
-                        'Ya instalado en instancia' :
-                        (selectedInstanceId ? (selectedInstanceId === 'custom' ? 'Instalar en Carpeta' : 'Instalar en Instancia') : 'Descargar')
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {selectedContent.categories.slice(0, 5).map((category, index) => (
+                        <span key={`${category}-${index}-${selectedContent.id}`} className="bg-blue-500/20 text-blue-300 text-sm px-3 py-1 rounded-full">
+                          {category}
+                        </span>
+                      ))}
+                      {selectedContent.categories.length > 5 && (
+                        <span className="bg-gray-600/30 text-gray-400 text-sm px-3 py-1 rounded-full">
+                          +{selectedContent.categories.length - 5}
+                        </span>
                       )}
                     </div>
-                  </button>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                      <div>
+                        <p className="text-gray-400">Versión</p>
+                        <p className="text-white font-medium">{selectedContent.version}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">Actualizado</p>
+                        <p className="text-white font-medium">{new Date(selectedContent.lastUpdated).toLocaleDateString('es-ES')}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">Descargas</p>
+                        <p className="text-white font-medium">{selectedContent.downloads.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">Plataforma</p>
+                        <p className="text-purple-400 font-medium capitalize">{selectedContent.platform}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium text-gray-300 mb-2">Loaders Compatibles</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {compatibleLoaders.slice(0, 6).map((loader, index) => (
+                            <span key={`${loader}-${index}`} className={`px-3 py-1.5 rounded-full text-sm ${
+                              selectedContent.platform === 'modrinth'
+                                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            }`}>
+                              {loader.charAt(0).toUpperCase() + loader.slice(1)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-medium text-gray-300 mb-2">Versiones de Minecraft</h4>
+                        <div className="flex flex-wrap gap-2 max-h-20 overflow-y-auto">
+                          {selectedContent.minecraftVersions.slice(0, 10).map((version, index) => (
+                            <span key={index} className="bg-gray-700/40 text-gray-300 px-2 py-1 rounded-lg text-sm border border-gray-600/30">
+                              {version}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              
-              <div className="md:w-2/3 mt-6 md:mt-0">
-                <div className="bg-gray-700/30 rounded-lg p-6 mb-6">
-                  <h3 className="text-lg font-semibold text-white mb-3">Descripción</h3>
-                  <p className="text-gray-300">{selectedContent.description}</p>
-                </div>
-                <div className="bg-gray-700/30 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-white mb-3">Instalación</h3>
-                  <ol className="list-decimal list-inside text-gray-300 space-y-2">
-                    <li>Descarga el archivo haciendo clic en el botón "Descargar"</li>
-                    <li>Abre Minecraft y ve a "Opciones"</li>
-                    <li>Selecciona "Paquetes de recursos" o "Mods" según corresponda</li>
-                    <li>Arrastra y suelta el archivo descargado</li>
-                    <li>Actívalo y haz clic en "Listo"</li>
-                    <li>¡Disfruta de tu nuevo contenido!</li>
-                  </ol>
-                </div>
+
+
+              {/* Pestañas abajo de la información principal */}
+              <div className="mt-6">
+                <ModernContentDetail
+                  selectedContent={selectedContent}
+                />
               </div>
             </div>
           </div>
         ) : (
           // List View
-          <div className="w-full">
+          <div className="w-full mt-16">
             {filteredContent.length === 0 ? (
               <div className="bg-gray-800/50 rounded-xl p-8 text-center">
                 <svg className="mx-auto h-12 w-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1424,43 +1737,22 @@ const ContentPage: React.FC = () => {
                 {/* Contenido paginado */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                   {paginatedContent.map((item) => (
-                    <div
+                    <ContentCard
                       key={item.id}
-                      onClick={() => handleContentClick(item)}
-                      className="bg-gray-700/50 rounded-xl overflow-hidden hover:bg-gray-700/70 transition-colors cursor-pointer group"
-                    >
-                      <div className="relative h-40 overflow-hidden">
-                        <img
-                          src={item.imageUrl}
-                          alt={item.title}
-                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          loading="lazy"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.src = 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen';
-                          }}
-                        />
-                        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                          {item.type}
-                        </div>
-                      </div>
-                      <div className="p-4">
-                        <h3 className="font-medium text-white mb-1">{item.title}</h3>
-                        <p className="text-sm text-gray-400 line-clamp-2 mb-2">{item.description}</p>
-                        <div className="flex flex-wrap gap-1">
-                          {item.minecraftVersions.slice(0, 2).map((version, index) => (
-                            <span key={`${version}-${index}-${item.id}`} className="bg-gray-600/50 text-gray-300 text-xs px-2 py-0.5 rounded">
-                              {version}
-                            </span>
-                          ))}
-                          {item.minecraftVersions.length > 2 && (
-                            <span key={`more-${item.id}`} className="bg-gray-600/50 text-gray-300 text-xs px-2 py-0.5 rounded">
-                              +{item.minecraftVersions.length - 2}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      id={item.id}
+                      title={item.title}
+                      description={item.description}
+                      author={item.author}
+                      downloads={item.downloads}
+                      lastUpdated={item.lastUpdated}
+                      imageUrl={item.imageUrl}
+                      type={item.type}
+                      platform={item.platform}
+                      onDownload={() => handleDownload(item)}
+                      onDetails={handleContentClick}
+                      isDownloading={isDownloading[item.id]}
+                      downloadProgress={downloadProgress[item.id]}
+                    />
                   ))}
                 </div>
 
@@ -1493,6 +1785,62 @@ const ContentPage: React.FC = () => {
         )}
       </div>
     </div>
+
+    {/* Download Selection Modal */}
+    <DownloadSelectionModal
+      isOpen={showDownloadSelectionModal}
+      onClose={() => setShowDownloadSelectionModal(false)}
+      onSingleDownload={handleSingleDownload}
+      onMultipleDownload={handleMultipleDownload}
+    />
+
+    {/* Single Download Modal */}
+    {selectedDownloadItem && (
+      <SingleDownloadModal
+        isOpen={showSingleDownloadModal}
+        onClose={() => setShowSingleDownloadModal(false)}
+        contentItem={selectedDownloadItem}
+        availableVersions={availableVersions}
+        availableLoaders={availableLoaders}
+        onStartDownload={handleStartSingleDownload}
+      />
+    )}
+
+    {/* Multiple Download Modal */}
+    {selectedDownloadItem && (
+      <MultipleDownloadModal
+        isOpen={showMultipleDownloadModal}
+        onClose={() => setShowMultipleDownloadModal(false)}
+        contentItems={[selectedDownloadItem]} // Pasar como array
+        onAddToQueue={handleAddToMultipleQueue}
+      />
+    )}
+
+    {/* Multiple Download Queue */}
+    <MultipleDownloadQueue
+      isVisible={showMultipleDownloadQueue}
+      onClose={() => setShowMultipleDownloadQueue(false)}
+      onStartDownload={handleStartMultipleDownload}
+    />
+
+    {/* Download Modals (originales) */}
+    {selectedModalProject && (
+      <DownloadModalModrinth
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        project={selectedModalProject}
+        onDownloadComplete={() => console.log('Download completed')}
+      />
+    )}
+
+    {selectedModalMod && (
+      <DownloadModalCurseForge
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        mod={selectedModalMod}
+        onDownloadComplete={() => console.log('Download completed')}
+      />
+    )}
   </div>
 );
 };

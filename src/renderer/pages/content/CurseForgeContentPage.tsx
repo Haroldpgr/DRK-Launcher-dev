@@ -1,0 +1,454 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { downloadService } from '../../services/downloadService';
+
+type ContentType = 'modpacks' | 'mods' | 'resourcepacks' | 'datapacks' | 'shaders';
+type SortBy = 'popular' | 'recent' | 'name';
+
+interface ContentItem {
+  id: string;
+  title: string;
+  description: string;
+  author: string;
+  downloads: number;
+  lastUpdated: string;
+  minecraftVersions: string[];
+  categories: string[];
+  imageUrl: string;
+  type: ContentType;
+  version: string;
+  downloadUrl?: string;
+}
+
+const CurseForgeContentPage: React.FC = () => {
+  const { type = 'mods' } = useParams<{ type?: ContentType }>();
+  const navigate = useNavigate();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [content, setContent] = useState<ContentItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [selectedGameVersion, setSelectedGameVersion] = useState<string>('');
+  const [selectedModLoader, setSelectedModLoader] = useState<string>('');
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>('');
+  const [showCustomFolder, setShowCustomFolder] = useState<boolean>(false);
+  const [customFolderPath, setCustomFolderPath] = useState<string>('');
+  const [instances, setInstances] = useState<any[]>([]);
+  const [availableFiles, setAvailableFiles] = useState<any[]>([]);
+  const [selectedFile, setSelectedFile] = useState<any>(null);
+
+  // Cargar instancias
+  useEffect(() => {
+    const loadInstances = async () => {
+      if (window.api?.instances) {
+        const userInstances = await window.api.instances.list();
+        setInstances(userInstances);
+      }
+    };
+    loadInstances();
+  }, []);
+
+  // Cargar contenido de CurseForge
+  useEffect(() => {
+    const loadContent = async () => {
+      setIsLoading(true);
+      try {
+        const results: ContentItem[] = await window.api.curseforge.search({
+          contentType: type,
+          search: searchQuery
+        });
+        setContent(results);
+      } catch (error) {
+        console.error('Error al cargar contenido de CurseForge:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    if (searchQuery || type) {
+      loadContent();
+    }
+  }, [type, searchQuery]);
+
+  const handleContentClick = (item: ContentItem) => {
+    setSelectedContent(item);
+  };
+
+  const openDownloadModal = async (item: ContentItem) => {
+    setSelectedContent(item);
+    
+    // Cargar las versiones disponibles para este contenido
+    try {
+      const files = await window.api.curseforge.getAvailableVersions(item.id);
+      setAvailableFiles(files);
+    } catch (error) {
+      console.error('Error al cargar versiones disponibles:', error);
+    }
+    
+    setShowDownloadModal(true);
+  };
+
+  const handleDownload = async () => {
+    if (!selectedContent) return;
+
+    // Lógica de descarga para CurseForge
+    if (!selectedInstanceId) {
+      // Descarga directa
+      try {
+        if (selectedFile) {
+          downloadService.downloadFile(
+            selectedFile.downloadUrl || selectedFile.url,
+            selectedFile.fileName,
+            selectedContent.title
+          );
+          alert(`Descarga iniciada para: ${selectedContent.title}`);
+        }
+      } catch (error) {
+        console.error('Error al descargar contenido de CurseForge:', error);
+        alert('Error al descargar el contenido');
+      }
+    } else {
+      // Instalación en instancia
+      try {
+        let instancePath = '';
+        if (selectedInstanceId === 'custom') {
+          instancePath = customFolderPath;
+        } else {
+          const selectedInstance = instances.find(instance => instance.id === selectedInstanceId);
+          if (selectedInstance) {
+            instancePath = selectedInstance.path;
+          }
+        }
+
+        await window.api.instances.installContent({
+          instancePath,
+          contentId: selectedContent.id,
+          contentType: selectedContent.type === 'resourcepacks' ? 'resourcepack' :
+                     selectedContent.type === 'shaders' ? 'shader' :
+                     selectedContent.type === 'datapacks' ? 'datapack' : 'mod',
+          mcVersion: selectedGameVersion || '1.20.1',
+          loader: selectedModLoader,
+          versionId: selectedFile?.id?.toString(),
+          platform: 'curseforge'
+        });
+
+        alert(`Contenido instalado en la instancia`);
+      } catch (error) {
+        console.error('Error al instalar contenido:', error);
+        alert('Error al instalar el contenido');
+      }
+    }
+
+    setShowDownloadModal(false);
+  };
+
+  return (
+    <div className="bg-gray-900 min-h-screen">
+      <div className="container mx-auto py-8">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold text-white capitalize">{type}</h1>
+          <input
+            type="text"
+            placeholder={`Buscar ${type}...`}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-gray-800 text-white px-4 py-2 rounded-lg w-64"
+          />
+        </div>
+
+        {isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {content.map((item) => (
+              <div 
+                key={item.id} 
+                className="bg-gray-800 rounded-xl p-4 hover:bg-gray-700 transition-colors duration-200 cursor-pointer"
+                onClick={() => handleContentClick(item)}
+              >
+                <div className="flex items-center space-x-4">
+                  <img 
+                    src={item.imageUrl} 
+                    alt={item.title} 
+                    className="w-16 h-16 rounded-lg object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = 'https://via.placeholder.com/64x64';
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-white font-semibold truncate">{item.title}</h3>
+                    <p className="text-gray-400 text-sm truncate">{item.author}</p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <p className="text-gray-300 text-sm line-clamp-2">{item.description}</p>
+                </div>
+                <div className="mt-3 flex justify-between items-center">
+                  <span className="text-xs text-gray-500">{item.downloads?.toLocaleString()} descargas</span>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDownloadModal(item);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-sm transition-colors duration-200"
+                  >
+                    Descargar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modal de descarga para CurseForge */}
+      {showDownloadModal && selectedContent && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl max-w-2xl w-full">
+            <div className="p-6 border-b border-gray-700">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white flex items-center">
+                  <img 
+                    src={selectedContent.imageUrl} 
+                    alt={selectedContent.title} 
+                    className="w-8 h-8 rounded mr-2 object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = 'https://via.placeholder.com/32x32';
+                    }}
+                  />
+                  {selectedContent.title}
+                </h2>
+                <button 
+                  onClick={() => setShowDownloadModal(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6">
+              <div className="space-y-4">
+                {/* Descargar archivo manualmente */}
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-2">Descargar el archivo manualmente</h3>
+                </div>
+                
+                {/* Seleccionar versión del juego */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Seleccionar la versión del juego
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedGameVersion}
+                      onChange={(e) => setSelectedGameVersion(e.target.value)}
+                      className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
+                    >
+                      <option value="">Todas las versiones del juego</option>
+                      {Array.from(new Set(availableFiles.flatMap(file => file.compatibleMinecraftVersions))).map((version, idx) => (
+                        <option key={idx} value={version}>{version}</option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-300">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Seleccionar cargadores de mods */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Seleccionar cargadores de mods
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedModLoader}
+                      onChange={(e) => setSelectedModLoader(e.target.value)}
+                      className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
+                    >
+                      <option value="">Todos los loaders de mods</option>
+                      {Array.from(new Set(availableFiles.flatMap(file => 
+                        file.compatibleLoaders.map((loader: string) => 
+                          loader.toLowerCase().includes('forge') ? 'forge' :
+                          loader.toLowerCase().includes('fabric') ? 'fabric' :
+                          loader.toLowerCase().includes('quilt') ? 'quilt' :
+                          loader.toLowerCase().includes('neoforge') ? 'neoforge' : null
+                        ).filter(Boolean)
+                      ))).map((loader, idx) => (
+                        <option key={idx} value={loader}>{loader.charAt(0).toUpperCase() + loader.slice(1)}</option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-300">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Lista de archivos disponibles */}
+                <div className="mt-4">
+                  <h4 className="text-md font-medium text-gray-300 mb-2">Archivos disponibles</h4>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {availableFiles
+                      .filter(file => 
+                        !selectedGameVersion || file.compatibleMinecraftVersions.includes(selectedGameVersion)
+                      )
+                      .filter(file => 
+                        !selectedModLoader || file.compatibleLoaders.some((loader: string) => 
+                          loader.toLowerCase().includes(selectedModLoader.toLowerCase())
+                        )
+                      )
+                      .map((file, index) => (
+                        <div 
+                          key={file.id || index}
+                          onClick={() => setSelectedFile(file)}
+                          className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                            selectedFile?.id === file.id 
+                              ? 'bg-blue-600/30 border border-blue-500' 
+                              : 'bg-gray-700/50 hover:bg-gray-700/70'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="font-medium text-white">{file.displayName || file.fileName}</p>
+                              <p className="text-sm text-gray-400">{file.fileDate?.split('T')[0]}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm text-gray-300">
+                                {file.compatibleMinecraftVersions.join(', ') || 'Any version'}
+                              </p>
+                              <p className="text-xs text-gray-400">
+                                {file.compatibleLoaders.join(', ') || 'Any loader'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+                
+                {/* Destino de instalación */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Destino de instalación
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedInstanceId}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setSelectedInstanceId(value);
+                        setShowCustomFolder(value === 'custom');
+                      }}
+                      className="w-full bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200 appearance-none"
+                    >
+                      <option value="">Seleccionar instancia...</option>
+                      {instances.map(instance => (
+                        <option key={instance.id} value={instance.id}>
+                          {instance.name} ({instance.version}) {instance.loader && ` - ${instance.loader}`}
+                        </option>
+                      ))}
+                      <option value="custom">Carpeta personalizada...</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-300">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Opción para carpeta personalizada */}
+                {showCustomFolder && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-300">
+                      Ruta personalizada:
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customFolderPath}
+                        onChange={(e) => setCustomFolderPath(e.target.value)}
+                        placeholder="Selecciona una carpeta..."
+                        className="flex-1 bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200"
+                      />
+                      <button
+                        className="bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-xl font-medium transition-all duration-200"
+                        onClick={async () => {
+                          try {
+                            if (window.api?.dialog?.showOpenDialog) {
+                              const result = await window.api.dialog.showOpenDialog({
+                                properties: ['openDirectory'],
+                                title: 'Seleccionar carpeta de destino',
+                                buttonLabel: 'Seleccionar'
+                              });
+                              if (!result.canceled && result.filePaths.length > 0) {
+                                setCustomFolderPath(result.filePaths[0]);
+                              }
+                            }
+                          } catch (error) {
+                            console.error('Error al seleccionar carpeta:', error);
+                          }
+                        }}
+                      >
+                        Explorar
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Archivo seleccionado */}
+                {selectedFile && (
+                  <div className="mt-4 p-3 bg-gray-700/50 rounded-lg">
+                    <h4 className="font-medium text-white mb-2">Archivo seleccionado</h4>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-300">
+                          {selectedFile.compatibleLoaders.join(', ')} - {selectedFile.compatibleMinecraftVersions.join(', ')} - {selectedFile.displayName || selectedFile.fileName}
+                        </p>
+                        <p className="text-xs text-gray-400">Último lanzamiento</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">{selectedFile.fileLength ? (selectedFile.fileLength / 1024).toFixed(1) + ' KB' : 'Tamaño desconocido'}</p>
+                        <p className="text-xs text-gray-400">{selectedFile.fileDate ? new Date(selectedFile.fileDate).toLocaleDateString() : 'Fecha desconocida'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDownloadModal(false)}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors duration-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDownload}
+                  disabled={!selectedFile || !selectedInstanceId}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors duration-200 disabled:opacity-50"
+                >
+                  Descargar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CurseForgeContentPage;
