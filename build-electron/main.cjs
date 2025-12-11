@@ -9522,6 +9522,24 @@ import_electron2.ipcMain.handle("instances:openFolder", async (_e, id) => {
   if (i) import_electron2.shell.openPath(i.path);
   return true;
 });
+import_electron2.ipcMain.handle("shell:showItemInFolder", async (_e, filePath) => {
+  try {
+    import_electron2.shell.showItemInFolder(filePath);
+    return true;
+  } catch (error) {
+    console.error("Error opening folder:", error);
+    return false;
+  }
+});
+import_electron2.ipcMain.handle("shell:openPath", async (_e, folderPath) => {
+  try {
+    await import_electron2.shell.openPath(folderPath);
+    return true;
+  } catch (error) {
+    console.error("Error opening path:", error);
+    return false;
+  }
+});
 import_electron2.ipcMain.handle("versions:list", async () => mojangVersions());
 import_electron2.ipcMain.handle("crash:analyze", async (_e, p) => {
   const i = listInstances().find((x) => x.id === p.instanceId);

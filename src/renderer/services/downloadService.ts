@@ -181,7 +181,34 @@ export class DownloadService {
       const raw = localStorage.getItem(this.STORAGE_KEY);
       if (!raw) return;
       const parsed: Download[] = JSON.parse(raw);
-      this.downloads = new Map(parsed.map(d => [d.id, d]));
+      
+      // Limpiar descargas completadas que tengan más de 15 días
+      const fifteenDaysAgo = Date.now() - (15 * 24 * 60 * 60 * 1000);
+      const filtered = parsed.filter(d => {
+        // Mantener descargas activas o recientes
+        if (d.status === 'downloading' || d.status === 'pending' || d.status === 'paused') {
+          return true;
+        }
+        // Si está completada, verificar que no tenga más de 15 días
+        if (d.status === 'completed' && d.endTime) {
+          return d.endTime > fifteenDaysAgo;
+        }
+        // Si está en error, mantener por 7 días
+        if (d.status === 'error' && d.endTime) {
+          const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+          return d.endTime > sevenDaysAgo;
+        }
+        return true;
+      });
+      
+      // Si se eliminaron descargas, guardar el estado actualizado
+      if (filtered.length < parsed.length) {
+        this.downloads = new Map(filtered.map(d => [d.id, d]));
+        this.persistDownloads();
+      } else {
+        this.downloads = new Map(filtered.map(d => [d.id, d]));
+      }
+      
       this.notifyObservers();
     } catch (e) {
       console.error('Error cargando historial de descargas', e);
@@ -206,6 +233,13 @@ export class DownloadService {
     if (!current) return true; // si no hay perfil actual, mostrar todo
     // Descargas antiguas sin perfil asignado se muestran para todos
     return download.profileUsername === current || !download.profileUsername;
+  }
+
+  // Método para agregar una descarga completada al historial manualmente
+  addDownloadToHistory(download: Download) {
+    this.downloads.set(download.id, download);
+    this.persistDownloads();
+    this.notifyObservers();
   }
 
   createDownload(url: string, name: string): Download {

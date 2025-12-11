@@ -91,6 +91,11 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   dialog: {
     showOpenDialog: (options) => import_electron.ipcRenderer.invoke("dialog:showOpenDialog", options)
   },
+  // API de shell del sistema
+  shell: {
+    showItemInFolder: (filePath) => import_electron.ipcRenderer.invoke("shell:showItemInFolder", filePath),
+    openPath: (folderPath) => import_electron.ipcRenderer.invoke("shell:openPath", folderPath)
+  },
   // API de modpacks
   modpack: {
     createTemporary: (originalPath) => import_electron.ipcRenderer.invoke("modpack:create-temporary", originalPath),

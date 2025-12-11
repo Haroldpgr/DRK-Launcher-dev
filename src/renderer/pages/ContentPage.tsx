@@ -633,15 +633,21 @@ const ContentPage: React.FC = () => {
   };
 
   const handleAddToMultipleQueue = (queueItems: Array<{
-    id: string;
+    originalId: string;
     name: string;
     version: string;
     loader?: string;
     targetPath: string;
     platform: string;
+    contentType?: 'mod' | 'resourcepack' | 'shader' | 'datapack' | 'modpack';
   }>) => {
     // Agregar los elementos a la cola de descargas múltiples
     console.log('Agregando a cola múltiple:', queueItems);
+
+    // Importar y usar el servicio de cola
+    import('../services/multipleDownloadQueueService').then(({ multipleDownloadQueueService }) => {
+      multipleDownloadQueueService.addToQueue(queueItems);
+    });
 
     // Cerrar el modal de descarga múltiple
     setShowMultipleDownloadModal(false);
@@ -1971,8 +1977,46 @@ const ContentPage: React.FC = () => {
 
         {/* Main Content */}
         <div className="flex-1 relative">
-          {/* Download Progress Widget - Positioned at top-right of content area, but opens to the left */}
-          <div className="absolute top-0 right-0 z-10">
+          {/* Download Progress Widget and History Button - Positioned at top-right of content area */}
+          <div className="absolute top-0 right-0 z-10 flex items-center gap-2">
+            <button
+              onClick={() => setShowDownloadHistoryModal(true)}
+              className="relative w-12 h-12 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 shadow-lg flex items-center justify-center hover:from-purple-700 hover:to-pink-700 transition-all duration-300 group"
+              title="Historial de Descargas"
+            >
+              <svg 
+                className="w-6 h-6 text-white" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  strokeWidth="2" 
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => setShowMultipleDownloadQueue(true)}
+              className="relative w-12 h-12 rounded-full bg-gradient-to-r from-green-600 to-emerald-600 shadow-lg flex items-center justify-center hover:from-green-700 hover:to-emerald-700 transition-all duration-300 group"
+              title="Iniciar Descargas Múltiples"
+            >
+              <svg 
+                className="w-6 h-6 text-white" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  strokeWidth="2" 
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+            </button>
             <ContentDownloadProgressWidget 
               position="top-right" 
               onShowHistory={() => setShowDownloadHistoryModal(true)}

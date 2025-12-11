@@ -77,6 +77,13 @@ declare global {
         downloadModpackFromModrinth: (projectId: string, targetPath: string, mcVersion: string, loader: string) => Promise<void>;
         downloadAndExtractFromUrl: (url: string, targetPath: string, onProgress?: (progress: number) => void) => Promise<void>;
       };
+      dialog: {
+        showOpenDialog: (options: any) => Promise<any>;
+      };
+      shell: {
+        showItemInFolder: (filePath: string) => Promise<boolean>;
+        openPath: (folderPath: string) => Promise<boolean>;
+      };
     };
   }
 }

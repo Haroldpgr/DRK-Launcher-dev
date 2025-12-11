@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { multipleDownloadQueueService, QueuedDownloadItem } from '../services/multipleDownloadQueueService';
+import { downloadService } from '../services/downloadService';
 
-interface QueuedDownloadItem {
-  id: string;
-  name: string;
-  version: string;
-  loader?: string;
-  targetPath: string;
-  platform: string;
-  status: 'pending' | 'downloading' | 'completed' | 'error';
-  progress?: number;
-  error?: string;
+// Interfaz extendida para incluir información del contenido original
+interface ExtendedQueuedItem extends QueuedDownloadItem {
+  originalItemId?: string; // ID original del contenido (sin el timestamp)
+  contentType?: 'mod' | 'resourcepack' | 'shader' | 'datapack' | 'modpack';
 }
 
 interface MultipleDownloadQueueProps {
@@ -23,85 +19,126 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
 }) => {
   const [queue, setQueue] = useState<QueuedDownloadItem[]>([]);
   const [isStarting, setIsStarting] = useState<boolean>(false);
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+  const [downloadMode, setDownloadMode] = useState<'sequential' | 'parallel'>('sequential');
 
-  // Cargar la cola de descargas desde localStorage o estado global
   useEffect(() => {
-    if (isVisible) {
-      const savedQueue = localStorage.getItem('multipleDownloadQueue');
-      if (savedQueue) {
-        try {
-          const parsedQueue = JSON.parse(savedQueue);
-          setQueue(parsedQueue);
-        } catch (error) {
-          console.error('Error parsing download queue:', error);
-          setQueue([]);
-        }
-      }
-    }
+    if (!isVisible) return;
+    
+    const unsubscribe = multipleDownloadQueueService.subscribe((updatedQueue) => {
+      setQueue(updatedQueue);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [isVisible]);
 
-  const addToQueue = (items: Array<Omit<QueuedDownloadItem, 'status'>>) => {
-    const newItems = items.map(item => ({
-      ...item,
-      status: 'pending' as const
-    }));
-    
-    setQueue(prev => [...prev, ...newItems]);
-    // Guardar en localStorage
-    localStorage.setItem('multipleDownloadQueue', JSON.stringify([...queue, ...newItems]));
+  const removeFromQueue = (id: string) => {
+    multipleDownloadQueueService.removeFromQueue(id);
   };
 
-  const removeFromQueue = (id: string) => {
-    const updatedQueue = queue.filter(item => item.id !== id);
-    setQueue(updatedQueue);
-    localStorage.setItem('multipleDownloadQueue', JSON.stringify(updatedQueue));
+  const toggleItemEnabled = (id: string) => {
+    multipleDownloadQueueService.toggleItemEnabled(id);
   };
 
   const clearCompleted = () => {
-    const updatedQueue = queue.filter(item => item.status !== 'completed');
-    setQueue(updatedQueue);
-    localStorage.setItem('multipleDownloadQueue', JSON.stringify(updatedQueue));
+    multipleDownloadQueueService.clearCompleted();
   };
 
   const startDownload = async () => {
     setIsStarting(true);
+    const enabledItems = multipleDownloadQueueService.getEnabledItems();
     
-    // Simular descarga de cada elemento en la cola
-    for (const item of queue) {
-      if (item.status === 'pending') {
+    const downloadItem = async (item: QueuedDownloadItem) => {
+      try {
+        multipleDownloadQueueService.updateItemStatus(item.id, 'downloading', 0);
+        
+        // Usar el ID original y tipo de contenido del item
+        const originalItemId = (item as any).originalId || item.id.split('-')[0];
+        const contentType = item.contentType || 'mod';
+        
+        // Verificar nuevamente que haya versiones compatibles antes de descargar
+        let compatibleVersions: any[] = [];
         try {
-          // Actualizar estado a descargando
-          setQueue(prev => prev.map(qItem => 
-            qItem.id === item.id ? { ...qItem, status: 'downloading' } : qItem
-          ));
-          
-          // Simular progreso de descarga
-          for (let progress = 0; progress <= 100; progress += 10) {
-            await new Promise(resolve => setTimeout(resolve, 200)); // Simular tiempo de descarga
-            setDownloadProgress(prev => ({ ...prev, [item.id]: progress }));
+          if (item.platform === 'modrinth') {
+            compatibleVersions = await window.api.modrinth.getCompatibleVersions({
+              projectId: originalItemId,
+              mcVersion: item.version,
+              loader: item.loader || undefined
+            });
+          } else if (item.platform === 'curseforge') {
+            compatibleVersions = await window.api.curseforge.getCompatibleVersions({
+              projectId: originalItemId,
+              mcVersion: item.version,
+              loader: item.loader || undefined
+            });
           }
-          
-          // Marcar como completado
-          setQueue(prev => prev.map(qItem => 
-            qItem.id === item.id ? { ...qItem, status: 'completed', progress: 100 } : qItem
-          ));
-          
-          // Remover de la cola después de completar (opcional)
-          // setQueue(prev => prev.filter(qItem => qItem.id !== item.id));
         } catch (error) {
-          // Marcar como error
-          setQueue(prev => prev.map(qItem => 
-            qItem.id === item.id ? { ...qItem, status: 'error', error: (error as Error).message } : qItem
-          ));
+          throw new Error(`Error al verificar versiones compatibles: ${error instanceof Error ? error.message : 'Error desconocido'}`);
         }
+        
+        if (compatibleVersions.length === 0) {
+          const loaderText = item.loader ? ` y ${item.loader}` : '';
+          throw new Error(`No hay versiones disponibles para ${item.version}${loaderText}. Este contenido no está disponible para esta combinación de versión y loader.`);
+        }
+        
+        // Actualizar progreso inicial
+        multipleDownloadQueueService.updateItemStatus(item.id, 'downloading', 10);
+        
+        // Realizar la descarga usando la API
+        await window.api.instances.installContent({
+          instancePath: item.targetPath,
+          contentId: originalItemId,
+          contentType: contentType,
+          mcVersion: item.version,
+          loader: item.loader || undefined,
+          versionId: undefined
+        });
+        
+        // Actualizar progreso final
+        multipleDownloadQueueService.updateItemStatus(item.id, 'downloading', 100);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        multipleDownloadQueueService.updateItemStatus(item.id, 'completed', 100);
+        
+        // Agregar al historial de descargas con la ruta correcta
+        downloadService.addDownloadToHistory({
+          id: `multiple-${item.id}-${Date.now()}`,
+          name: item.name,
+          url: '',
+          status: 'completed',
+          progress: 100,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          startTime: Date.now() - 2000,
+          endTime: Date.now(),
+          speed: 0,
+          path: item.targetPath, // Ruta donde se descargó
+          profileUsername: undefined
+        });
+      } catch (error) {
+        console.error(`Error descargando ${item.name}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+        multipleDownloadQueueService.updateItemStatus(item.id, 'error', undefined, errorMessage);
       }
+    };
+    
+    if (downloadMode === 'sequential') {
+      // Descargar en orden
+      for (const item of enabledItems) {
+        await downloadItem(item);
+      }
+    } else {
+      // Descargar en paralelo
+      const downloadPromises = enabledItems.map(item => downloadItem(item));
+      await Promise.all(downloadPromises);
     }
     
     setIsStarting(false);
   };
 
-  const hasPendingDownloads = queue.some(item => item.status === 'pending');
+  const enabledCount = queue.filter(item => item.enabled && item.status === 'pending').length;
+  const hasPendingDownloads = queue.some(item => item.enabled && item.status === 'pending');
   const completedDownloads = queue.filter(item => item.status === 'completed').length;
   const totalDownloads = queue.length;
 
@@ -144,57 +181,81 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
                 <div 
                   key={item.id} 
                   className={`p-4 rounded-xl border transition-all duration-200 ${
-                    item.status === 'completed' 
-                      ? 'bg-gradient-to-r from-green-900/20 to-emerald-900/20 border-green-500/30' 
-                      : item.status === 'error'
-                        ? 'bg-gradient-to-r from-red-900/20 to-rose-900/20 border-red-500/30' 
-                        : item.status === 'downloading'
-                          ? 'bg-gradient-to-r from-blue-900/20 to-indigo-900/20 border-blue-500/30' 
-                          : 'bg-gray-700/30 border-gray-600/30 hover:bg-gray-700/50'
+                    !item.enabled
+                      ? 'opacity-50 bg-gray-800/30 border-gray-700/30'
+                      : item.status === 'completed' 
+                        ? 'bg-gradient-to-r from-green-900/20 to-emerald-900/20 border-green-500/30' 
+                        : item.status === 'error'
+                          ? 'bg-gradient-to-r from-red-900/20 to-rose-900/20 border-red-500/30' 
+                          : item.status === 'downloading'
+                            ? 'bg-gradient-to-r from-blue-900/20 to-indigo-900/20 border-blue-500/30' 
+                            : 'bg-gray-700/30 border-gray-600/30 hover:bg-gray-700/50'
                   }`}
                 >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-white truncate">{item.name}</h4>
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          item.status === 'completed' 
-                            ? 'bg-green-500/20 text-green-300' 
-                            : item.status === 'error'
-                              ? 'bg-red-500/20 text-red-300' 
-                              : item.status === 'downloading'
-                                ? 'bg-blue-500/20 text-blue-300' 
-                                : 'bg-gray-500/20 text-gray-300'
-                        }`}>
-                          {item.status === 'pending' && 'Pendiente'}
-                          {item.status === 'downloading' && 'Descargando'}
-                          {item.status === 'completed' && 'Completado'}
-                          {item.status === 'error' && 'Error'}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-400">
-                        <span className="bg-gray-600/30 px-2 py-1 rounded">
-                          {item.version}
-                        </span>
-                        {item.loader && (
-                          <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded">
-                            {item.loader}
-                          </span>
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      {/* Toggle para activar/desactivar */}
+                      <button
+                        onClick={() => toggleItemEnabled(item.id)}
+                        className={`mt-1 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                          item.enabled
+                            ? 'bg-gradient-to-r from-green-500 to-emerald-500 border-green-400'
+                            : 'bg-gray-600 border-gray-500'
+                        }`}
+                        title={item.enabled ? 'Desactivar descarga' : 'Activar descarga'}
+                      >
+                        {item.enabled && (
+                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
                         )}
-                        <span className="bg-purple-500/20 text-purple-300 px-2 py-1 rounded">
-                          {item.platform}
-                        </span>
-                      </div>
-                      {item.error && (
-                        <div className="mt-2 text-sm text-red-400 bg-red-900/20 p-2 rounded-lg">
-                          Error: {item.error}
+                      </button>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className={`font-medium truncate ${item.enabled ? 'text-white' : 'text-gray-500'}`}>
+                            {item.name}
+                          </h4>
+                          <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
+                            item.status === 'completed' 
+                              ? 'bg-green-500/20 text-green-300' 
+                              : item.status === 'error'
+                                ? 'bg-red-500/20 text-red-300' 
+                                : item.status === 'downloading'
+                                  ? 'bg-blue-500/20 text-blue-300' 
+                                  : 'bg-gray-500/20 text-gray-300'
+                          }`}>
+                            {item.status === 'pending' && 'Pendiente'}
+                            {item.status === 'downloading' && 'Descargando'}
+                            {item.status === 'completed' && 'Completado'}
+                            {item.status === 'error' && 'Error'}
+                          </span>
                         </div>
-                      )}
+                        <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-400">
+                          <span className="bg-gray-600/30 px-2 py-1 rounded">
+                            {item.version}
+                          </span>
+                          {item.loader && (
+                            <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded">
+                              {item.loader}
+                            </span>
+                          )}
+                          <span className="bg-purple-500/20 text-purple-300 px-2 py-1 rounded">
+                            {item.platform}
+                          </span>
+                        </div>
+                        {item.error && (
+                          <div className="mt-2 text-sm text-red-400 bg-red-900/20 p-2 rounded-lg">
+                            Error: {item.error}
+                          </div>
+                        )}
+                      </div>
                     </div>
+                    
                     {item.status === 'pending' && (
                       <button
                         onClick={() => removeFromQueue(item.id)}
-                        className="ml-4 text-gray-400 hover:text-red-400 transition-colors p-1"
+                        className="text-gray-400 hover:text-red-400 transition-colors p-1 flex-shrink-0"
                         title="Remover de la cola"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -204,16 +265,16 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
                     )}
                   </div>
                   
-                  {item.status === 'downloading' && (
+                  {item.status === 'downloading' && item.progress !== undefined && (
                     <div className="mt-3">
                       <div className="w-full bg-gray-600 rounded-full h-2">
                         <div 
                           className="bg-gradient-to-r from-blue-500 to-indigo-600 h-2 rounded-full transition-all duration-300 ease-out"
-                          style={{ width: `${downloadProgress[item.id] || 0}%` }}
+                          style={{ width: `${item.progress}%` }}
                         ></div>
                       </div>
                       <div className="text-right text-xs text-gray-400 mt-1">
-                        {Math.round(downloadProgress[item.id] || 0)}%
+                        {Math.round(item.progress)}%
                       </div>
                     </div>
                   )}
@@ -224,40 +285,69 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
         </div>
 
         <div className="p-6 border-t border-gray-700/50 bg-gray-800/50">
-          <div className="flex justify-between items-center">
-            <div className="text-sm text-gray-400">
-              {completedDownloads} de {totalDownloads} completados
-            </div>
-            <div className="flex gap-3">
-              {queue.length > 0 && (
+          <div className="space-y-4">
+            {/* Selector de modo de descarga */}
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-400">Modo de descarga:</span>
+              <div className="flex gap-2">
                 <button
-                  onClick={clearCompleted}
-                  className="px-4 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all duration-200"
-                  disabled={completedDownloads === 0}
+                  onClick={() => setDownloadMode('sequential')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    downloadMode === 'sequential'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
                 >
-                  Limpiar completados
+                  En Orden
                 </button>
-              )}
-              <button
-                onClick={onClose}
-                className="px-4 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all duration-200"
-              >
-                Cerrar
-              </button>
-              <button
-                onClick={startDownload}
-                disabled={isStarting || !hasPendingDownloads}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-600 text-white font-medium transition-all duration-200 shadow-lg shadow-green-500/20 hover:shadow-green-500/30 disabled:shadow-none"
-              >
-                {isStarting ? (
-                  <div className="flex items-center">
-                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
-                    {isStarting ? 'Iniciando...' : 'Iniciar descargas'}
-                  </div>
-                ) : (
-                  `Iniciar ${queue.filter(item => item.status === 'pending').length} descargas`
+                <button
+                  onClick={() => setDownloadMode('parallel')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    downloadMode === 'parallel'
+                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  En Paralelo
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex justify-between items-center">
+              <div className="text-sm text-gray-400">
+                {completedDownloads} de {totalDownloads} completados | {enabledCount} activos
+              </div>
+              <div className="flex gap-3">
+                {queue.length > 0 && (
+                  <button
+                    onClick={clearCompleted}
+                    className="px-4 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all duration-200"
+                    disabled={completedDownloads === 0}
+                  >
+                    Limpiar completados
+                  </button>
                 )}
-              </button>
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all duration-200"
+                >
+                  Cerrar
+                </button>
+                <button
+                  onClick={startDownload}
+                  disabled={isStarting || !hasPendingDownloads}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-600 text-white font-medium transition-all duration-200 shadow-lg shadow-green-500/20 hover:shadow-green-500/30 disabled:shadow-none"
+                >
+                  {isStarting ? (
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                      Descargando...
+                    </div>
+                  ) : (
+                    `Descargar ${enabledCount} ${downloadMode === 'sequential' ? 'en orden' : 'en paralelo'}`
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

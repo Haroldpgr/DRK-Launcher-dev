@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { ContentItem } from '../types/content';
+
+// Definir ContentItem localmente o importarlo desde donde esté definido
+interface ContentItem {
+  id: string;
+  title: string;
+  type: string;
+  platform: string;
+  minecraftVersions?: string[];
+  [key: string]: any;
+}
 
 interface MultipleDownloadModalProps {
   isOpen: boolean;
@@ -8,12 +17,13 @@ interface MultipleDownloadModalProps {
   availableVersions?: string[]; // Prop opcional para versiones disponibles
   availableLoaders?: string[];  // Prop opcional para loaders disponibles
   onAddToQueue: (queueItems: Array<{
-    id: string;
+    originalId: string;
     name: string;
     version: string;
     loader?: string;
     targetPath: string;
     platform: string;
+    contentType?: 'mod' | 'resourcepack' | 'shader' | 'datapack' | 'modpack';
   }>) => void;
 }
 
@@ -33,6 +43,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
   const [isCustomGlobalPath, setIsCustomGlobalPath] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [itemDetailsLoaded, setItemDetailsLoaded] = useState<Set<string>>(new Set());
+  const [animatingItems, setAnimatingItems] = useState<Set<string>>(new Set());
 
   // Inicializar configuraciones por defecto para cada ítem
   useEffect(() => {
@@ -110,36 +121,151 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
     }));
   };
 
-  const handleAddToQueue = () => {
-    const queueItems = Array.from(selectedItems).map(id => {
-      const item = contentItems.find(i => i.id === id);
-      const config = downloadConfigs[id];
-      if (!item || !config) return null;
-      
-      return {
-        id: item.id,
-        name: item.title,
-        version: config.version,
-        loader: config.loader,
-        targetPath: config.targetPath,
-        platform: item.platform
-      };
-    }).filter(Boolean) as Array<{
-      id: string;
+  const handleAddToQueue = async () => {
+    setIsProcessing(true);
+    
+    // Validar versiones compatibles antes de agregar a la cola
+    const validItems: Array<{
+      originalId: string;
       name: string;
       version: string;
       loader?: string;
       targetPath: string;
       platform: string;
-    }>;
+      contentType?: 'mod' | 'resourcepack' | 'shader' | 'datapack' | 'modpack';
+    }> = [];
+    
+    const invalidItems: Array<{ name: string; reason: string }> = [];
+    
+    for (const id of selectedItems) {
+      const item = contentItems.find(i => i.id === id);
+      const config = downloadConfigs[id];
+      if (!item || !config) continue;
+      
+      // Determinar el tipo de contenido
+      let contentType: 'mod' | 'resourcepack' | 'shader' | 'datapack' | 'modpack' = 'mod';
+      if (item.type === 'resourcepacks') {
+        contentType = 'resourcepack';
+      } else if (item.type === 'shaders') {
+        contentType = 'shader';
+      } else if (item.type === 'datapacks') {
+        contentType = 'datapack';
+      } else if (item.type === 'modpacks') {
+        contentType = 'modpack';
+      }
+      
+      // Validar que haya versiones compatibles
+      try {
+        let compatibleVersions: any[] = [];
+        
+        if (item.platform === 'modrinth') {
+          compatibleVersions = await window.api.modrinth.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: config.version,
+            loader: config.loader || undefined
+          });
+        } else if (item.platform === 'curseforge') {
+          compatibleVersions = await window.api.curseforge.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: config.version,
+            loader: config.loader || undefined
+          });
+        }
+        
+        if (compatibleVersions.length === 0) {
+          const loaderText = config.loader ? ` y ${config.loader}` : '';
+          invalidItems.push({
+            name: item.title,
+            reason: `No hay versiones disponibles para ${config.version}${loaderText}`
+          });
+          continue;
+        }
+        
+        // Si hay versiones compatibles, agregar a la lista válida
+        validItems.push({
+          originalId: item.id,
+          name: item.title,
+          version: config.version,
+          loader: config.loader,
+          targetPath: config.targetPath,
+          platform: item.platform,
+          contentType: contentType
+        });
+      } catch (error) {
+        console.error(`Error validando ${item.title}:`, error);
+        invalidItems.push({
+          name: item.title,
+          reason: error instanceof Error ? error.message : 'Error al verificar compatibilidad'
+        });
+      }
+    }
+    
+    setIsProcessing(false);
+    
+    // Mostrar mensajes de error si hay items inválidos
+    if (invalidItems.length > 0) {
+      const errorMessages = invalidItems.map(item => `• ${item.name}: ${item.reason}`).join('\n');
+      alert(`Los siguientes items no se pudieron agregar a la cola:\n\n${errorMessages}\n\n${validItems.length > 0 ? 'Los items válidos se agregarán a la cola.' : 'Por favor, selecciona versiones y loaders compatibles.'}`);
+    }
+    
+    if (validItems.length === 0) {
+      return; // No hay items válidos para agregar
+    }
 
-    onAddToQueue(queueItems);
-    onClose();
+    if (validItems.length > 0) {
+      // Iniciar animación de envío
+      setAnimatingItems(new Set(selectedItems));
+      
+      // Animar cada item con un pequeño delay para efecto cascada
+      validItems.forEach((item, index) => {
+        setTimeout(() => {
+          // Remover del set de animación después de la animación
+          setTimeout(() => {
+            setAnimatingItems(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(item.originalId);
+              return newSet;
+            });
+          }, 600); // Duración de la animación
+        }, index * 50); // Delay escalonado
+      });
+      
+      // Llamar al callback después de un pequeño delay para que se vea la animación
+      setTimeout(() => {
+        onAddToQueue(validItems);
+        // Solo remover los items válidos de la selección
+        setSelectedItems(prev => {
+          const newSet = new Set(prev);
+          validItems.forEach(item => newSet.delete(item.originalId));
+          return newSet;
+        });
+        if (invalidItems.length === 0) {
+          onClose();
+        }
+      }, validItems.length * 50 + 300);
+    }
   };
 
   if (!isOpen) return null;
 
   return (
+    <>
+      <style>{`
+        @keyframes slideOut {
+          0% {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+          }
+          50% {
+            opacity: 0.7;
+            transform: translateX(20px) scale(0.98);
+          }
+          100% {
+            opacity: 0;
+            transform: translateX(100px) scale(0.95);
+          }
+        }
+      `}</style>
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
       <div className="bg-gray-800/90 backdrop-blur-xl rounded-2xl border border-gray-700/80 shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="p-6 border-b border-gray-700/50">
@@ -237,6 +363,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
             <div className="space-y-4">
               {contentItems.map((item) => {
                 const isSelected = selectedItems.has(item.id);
+                const isAnimating = animatingItems.has(item.id);
                 const config = downloadConfigs[item.id] || { 
                   version: '', 
                   loader: '', 
@@ -248,11 +375,16 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                 return (
                   <div 
                     key={item.id}
-                    className={`p-5 rounded-xl border transition-all duration-200 ${
-                      isSelected 
-                        ? 'bg-gradient-to-br from-blue-900/40 to-indigo-900/40 border-blue-500/60 shadow-lg shadow-blue-500/10' 
-                        : 'bg-gray-700/30 border-gray-600/40 hover:bg-gray-700/40 hover:border-gray-500/50'
+                    className={`p-5 rounded-xl border transition-all duration-300 ${
+                      isAnimating
+                        ? 'animate-pulse bg-gradient-to-br from-green-900/60 to-emerald-900/60 border-green-500/80 shadow-lg shadow-green-500/30 transform scale-105'
+                        : isSelected 
+                          ? 'bg-gradient-to-br from-blue-900/40 to-indigo-900/40 border-blue-500/60 shadow-lg shadow-blue-500/10' 
+                          : 'bg-gray-700/30 border-gray-600/40 hover:bg-gray-700/40 hover:border-gray-500/50'
                     }`}
+                    style={isAnimating ? {
+                      animation: 'slideOut 0.6s ease-out forwards'
+                    } : {}}
                   >
                     <div className="flex items-start gap-4">
                       <div className="flex-shrink-0 mt-1">
@@ -545,6 +677,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };
 

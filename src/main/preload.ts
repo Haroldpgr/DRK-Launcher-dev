@@ -108,6 +108,12 @@ contextBridge.exposeInMainWorld('api', {
     showOpenDialog: (options: any) => ipcRenderer.invoke('dialog:showOpenDialog', options)
   },
 
+  // API de shell del sistema
+  shell: {
+    showItemInFolder: (filePath: string) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
+    openPath: (folderPath: string) => ipcRenderer.invoke('shell:openPath', folderPath)
+  },
+
   // API de modpacks
   modpack: {
     createTemporary: (originalPath: string) => ipcRenderer.invoke('modpack:create-temporary', originalPath),
@@ -192,6 +198,10 @@ declare global {
       };
       dialog: {
         showOpenDialog: (options: any) => Promise<any>;
+      };
+      shell: {
+        showItemInFolder: (filePath: string) => Promise<boolean>;
+        openPath: (folderPath: string) => Promise<boolean>;
       };
     };
   }

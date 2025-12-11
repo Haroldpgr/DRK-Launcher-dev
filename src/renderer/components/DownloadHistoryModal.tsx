@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { downloadService, Download } from '../services/downloadService';
+import { multipleDownloadQueueService, QueuedDownloadItem } from '../services/multipleDownloadQueueService';
 
 interface DownloadHistoryModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
   const [filteredDownloads, setFilteredDownloads] = useState<Download[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'error'>('all');
+  const [multipleQueue, setMultipleQueue] = useState<QueuedDownloadItem[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -51,8 +53,14 @@ const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
       setAllDownloads(contentDownloads);
     });
 
+    // Suscribirse a la cola de descargas múltiples
+    const unsubscribeMultiple = multipleDownloadQueueService.subscribe((queue) => {
+      setMultipleQueue(queue);
+    });
+
     return () => {
       unsubscribe();
+      unsubscribeMultiple();
     };
   }, [isOpen]);
 

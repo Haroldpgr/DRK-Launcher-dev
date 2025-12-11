@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { downloadService } from '../services/downloadService';
+import { multipleDownloadQueueService, QueuedDownloadItem } from '../services/multipleDownloadQueueService';
 
 interface ContentDownloadProgressWidgetProps {
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
@@ -40,6 +41,7 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
   const [completedDownloads, setCompletedDownloads] = useState<Download[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<'single' | 'multiple'>('single');
+  const [multipleQueue, setMultipleQueue] = useState<QueuedDownloadItem[]>([]);
 
   useEffect(() => {
     const unsubscribe = downloadService.subscribe(downloads => {
@@ -77,12 +79,25 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
         d.status === 'downloading' || d.status === 'pending' || d.status === 'paused'
       );
 
+      // Solo mostrar descargas completadas que tengan menos de 1 hora (para no mostrar todas al iniciar)
+      const oneHourAgo = Date.now() - (60 * 60 * 1000);
       const completed = contentDownloads.filter(d =>
-        d.status === 'completed'
+        d.status === 'completed' && d.endTime && d.endTime > oneHourAgo
       );
 
       setActiveDownloads(active);
       setCompletedDownloads(completed);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Suscribirse a la cola de descargas múltiples
+  useEffect(() => {
+    const unsubscribe = multipleDownloadQueueService.subscribe((queue) => {
+      setMultipleQueue(queue);
     });
 
     return () => {
@@ -119,6 +134,10 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
       try {
         if (window.api?.shell?.showItemInFolder) {
           await window.api.shell.showItemInFolder(download.path);
+        } else if (window.api?.shell?.openPath) {
+          // Fallback: abrir la carpeta contenedora
+          const dirPath = download.path.substring(0, download.path.lastIndexOf('\\') || download.path.lastIndexOf('/'));
+          await window.api.shell.openPath(dirPath);
         } else {
           console.warn('Shell API not available to open folder');
         }
@@ -311,19 +330,84 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
               </div>
             ) : (
               /* Multiple Downloads Tab */
-              <div className="p-6 text-center text-gray-400">
-                <div className="text-4xl mb-3">📦</div>
-                <h3 className="font-medium text-white mb-2">Descargas Múltiples</h3>
-                <p className="text-sm mb-4">
-                  Característica en desarrollo.<br />
-                  Similar a PrismLauncher u otros launchers avanzados.
-                </p>
-                <div className="inline-flex items-center px-4 py-2 bg-gray-700/70 rounded-lg text-sm">
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Próximamente
-                </div>
+              <div className="divide-y divide-gray-700/50">
+                {multipleQueue.length === 0 ? (
+                  <div className="p-6 text-center text-gray-400">
+                    <div className="text-4xl mb-3">📦</div>
+                    <h3 className="font-medium text-white mb-2">Descargas Múltiples</h3>
+                    <p className="text-sm">
+                      No hay descargas en cola.<br />
+                      Agrega elementos desde la vista de contenido.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {multipleQueue.map((item) => (
+                      <div 
+                        key={item.id} 
+                        className={`p-3 hover:bg-gray-700/50 transition-colors ${
+                          !item.enabled ? 'opacity-50' : ''
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 flex-1 min-w-0">
+                            <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                              item.enabled
+                                ? 'bg-gradient-to-r from-green-500 to-emerald-500 border-green-400'
+                                : 'bg-gray-600 border-gray-500'
+                            }`}>
+                              {item.enabled && (
+                                <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h4 className={`font-medium text-sm truncate ${
+                                  item.status === 'completed' 
+                                    ? 'text-green-400' 
+                                    : item.status === 'downloading'
+                                      ? 'text-blue-400'
+                                      : item.status === 'error'
+                                        ? 'text-red-400'
+                                        : item.enabled
+                                          ? 'text-white'
+                                          : 'text-gray-500'
+                                }`}>
+                                  {item.name}
+                                </h4>
+                                {item.status === 'completed' && (
+                                  <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 mt-1 text-xs text-gray-400">
+                                <span>{item.version}</span>
+                                {item.loader && <span>• {item.loader}</span>}
+                                <span>• {item.platform}</span>
+                              </div>
+                              {item.status === 'downloading' && item.progress !== undefined && (
+                                <div className="mt-2">
+                                  <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div
+                                      className="bg-gradient-to-r from-blue-500 to-indigo-600 h-1.5 rounded-full transition-all duration-300 ease-out"
+                                      style={{ width: `${item.progress}%` }}
+                                    ></div>
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-0.5">
+                                    {Math.round(item.progress)}%
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>

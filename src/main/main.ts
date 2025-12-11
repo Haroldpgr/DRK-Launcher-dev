@@ -330,6 +330,28 @@ ipcMain.handle('instances:delete', async (_e, id: string) => {
 })
 ipcMain.handle('instances:openFolder', async (_e, id: string) => { const i = listInstances().find(x => x.id === id); if (i) shell.openPath(i.path); return true })
 
+// Handler para abrir carpeta desde una ruta de archivo
+ipcMain.handle('shell:showItemInFolder', async (_e, filePath: string) => {
+  try {
+    shell.showItemInFolder(filePath);
+    return true;
+  } catch (error) {
+    console.error('Error opening folder:', error);
+    return false;
+  }
+});
+
+// Handler para abrir una ruta de carpeta
+ipcMain.handle('shell:openPath', async (_e, folderPath: string) => {
+  try {
+    await shell.openPath(folderPath);
+    return true;
+  } catch (error) {
+    console.error('Error opening path:', error);
+    return false;
+  }
+});
+
 ipcMain.handle('versions:list', async () => mojangVersions())
 
 ipcMain.handle('crash:analyze', async (_e, p: { instanceId: string; logPath?: string }) => {
