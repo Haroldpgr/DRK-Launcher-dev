@@ -3,6 +3,7 @@ import { downloadService } from '../services/downloadService';
 
 interface ContentDownloadProgressWidgetProps {
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  onShowHistory?: () => void;
 }
 
 interface Download {
@@ -34,7 +35,7 @@ interface ProgressStatus {
   details?: string;
 }
 
-const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps> = ({ position = 'top-left' }) => {
+const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps> = ({ position = 'top-left', onShowHistory }) => {
   const [activeDownloads, setActiveDownloads] = useState<Download[]>([]);
   const [completedDownloads, setCompletedDownloads] = useState<Download[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -42,15 +43,35 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
 
   useEffect(() => {
     const unsubscribe = downloadService.subscribe(downloads => {
-      // Filtrar descargas de contenido (mods, resourcepacks, shaders, datapacks)
-      const contentDownloads = downloads.filter(d =>
-        d.name.toLowerCase().includes('mod') ||
-        d.name.toLowerCase().includes('resourcepack') ||
-        d.name.toLowerCase().includes('shader') ||
-        d.name.toLowerCase().includes('datapack') ||
-        d.name.toLowerCase().includes('texture') ||
-        d.name.toLowerCase().includes('pack')
-      );
+      // Filtrar SOLO descargas de complementos (mods, resourcepacks, shaders, datapacks)
+      // Mejorar el filtro para ser más preciso
+      const contentDownloads = downloads.filter(d => {
+        const nameLower = d.name.toLowerCase();
+        const urlLower = d.url?.toLowerCase() || '';
+        
+        // Verificar si es un complemento basado en nombre o URL
+        return (
+          nameLower.includes('.jar') && (
+            nameLower.includes('mod') ||
+            nameLower.includes('fabric') ||
+            nameLower.includes('forge') ||
+            nameLower.includes('quilt') ||
+            nameLower.includes('neoforge')
+          )
+        ) ||
+        nameLower.includes('resourcepack') ||
+        nameLower.includes('resource-pack') ||
+        nameLower.includes('texture') ||
+        nameLower.includes('shader') ||
+        nameLower.includes('datapack') ||
+        nameLower.includes('data-pack') ||
+        urlLower.includes('/mod/') ||
+        urlLower.includes('/resourcepack/') ||
+        urlLower.includes('/shader/') ||
+        urlLower.includes('/datapack/') ||
+        urlLower.includes('modrinth.com') ||
+        urlLower.includes('curseforge.com');
+      });
 
       const active = contentDownloads.filter(d =>
         d.status === 'downloading' || d.status === 'pending' || d.status === 'paused'
@@ -147,14 +168,30 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
           <div className="p-4 border-b border-gray-700/50">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold text-white">Progreso de Descargas</h3>
-              <button 
-                onClick={() => setIsExpanded(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-2">
+                {onShowHistory && (
+                  <button
+                    onClick={() => {
+                      setIsExpanded(false);
+                      onShowHistory();
+                    }}
+                    className="p-1.5 text-gray-400 hover:text-white transition-colors"
+                    title="Ver historial"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                )}
+                <button 
+                  onClick={() => setIsExpanded(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
             
             {/* Tabs */}
@@ -230,11 +267,17 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
                     {/* Completed downloads */}
                     {completedDownloads.map(download => (
                       <div key={download.id} className="p-3 hover:bg-gray-700/50 transition-colors border-t border-gray-700/50">
-                        <div className="flex items-start justify-between">
+                        <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <h4 className="font-medium text-green-400 text-sm truncate">
-                              {download.name}
-                            </h4>
+                            <div className="flex items-center gap-2 mb-1">
+                              {/* Checkmark verde */}
+                              <svg className="w-5 h-5 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                              <h4 className="font-medium text-green-400 text-sm truncate">
+                                {download.name}
+                              </h4>
+                            </div>
                             <div className="mt-1">
                               <div className="w-full bg-gray-700 rounded-full h-2">
                                 <div
@@ -252,7 +295,7 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
                           {download.path && (
                             <button
                               onClick={() => handleOpenFolder(download)}
-                              className="ml-2 p-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 rounded text-white hover:from-blue-700 hover:to-indigo-700 transition-all duration-200"
+                              className="ml-2 p-2 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg text-white hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 flex-shrink-0"
                               title="Abrir carpeta"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

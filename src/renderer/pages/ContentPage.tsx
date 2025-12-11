@@ -14,6 +14,7 @@ import DownloadSelectionModal from '../components/DownloadSelectionModal';
 import SingleDownloadModal from '../components/SingleDownloadModal';
 import MultipleDownloadModal from '../components/MultipleDownloadModal';
 import MultipleDownloadQueue from '../components/MultipleDownloadQueue';
+import DownloadHistoryModal from '../components/DownloadHistoryModal';
 
 type ContentType = 'modpacks' | 'mods' | 'resourcepacks' | 'datapacks' | 'shaders';
 type SortBy = 'popular' | 'recent' | 'name';
@@ -143,6 +144,7 @@ const ContentPage: React.FC = () => {
   const [showMultipleDownloadModal, setShowMultipleDownloadModal] = useState<boolean>(false);
   const [showMultipleDownloadQueue, setShowMultipleDownloadQueue] = useState<boolean>(false);
   const [selectedDownloadItem, setSelectedDownloadItem] = useState<ContentItem | null>(null);
+  const [showDownloadHistoryModal, setShowDownloadHistoryModal] = useState<boolean>(false);
 
   const handleDownload = (item: ContentItem) => {
     // Mostrar el modal de selección de tipo de descarga (individual o múltiple)
@@ -571,6 +573,12 @@ const ContentPage: React.FC = () => {
             : [];
         }
 
+        // Actualizar los estados con las versiones y loaders obtenidos
+        setAvailableVersions(versionsToUse);
+        setAvailableLoaders(loadersToUse);
+
+        console.log('Datos cargados para el modal múltiple:', { versions: versionsToUse, loaders: loadersToUse });
+
         setShowMultipleDownloadModal(true);
       } catch (error) {
         console.error('Error general en handleMultipleDownload:', error);
@@ -614,11 +622,11 @@ const ContentPage: React.FC = () => {
       setSelectedInstanceId(''); // No se ha seleccionado ninguna instancia
     }
 
-    setSelectedVersion(downloadInfo.version);
-    setSelectedLoader(downloadInfo.loader || '');
-
-    // Usar la función principal de descarga e instalación
-    await handleDownloadAndInstall(item);
+    // NO actualizar los filtros de la página principal cuando se selecciona en el modal
+    // Los filtros deben mantenerse independientes de las selecciones del modal
+    // Usar la función auxiliar que acepta parámetros sin afectar los filtros globales
+    // Pasar el targetPath para evitar el diálogo de confirmación
+    await handleDownloadAndInstallWithParams(item, downloadInfo.version, downloadInfo.loader, downloadInfo.targetPath);
 
     // Cerrar el modal
     setShowSingleDownloadModal(false);
@@ -681,7 +689,7 @@ const ContentPage: React.FC = () => {
                   loader: selectedLoader
                 });
               } else if (item.platform === 'curseforge') {
-                compatibleVersions = await curseForgeAPI.getCompatibleVersions({
+                compatibleVersions = await window.api.curseforge.getCompatibleVersions({
                   projectId: item.id,
                   mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
                   loader: selectedLoader
@@ -1234,6 +1242,249 @@ const ContentPage: React.FC = () => {
     navigate(`/contenido/${type}`);
   };
 
+  // Función auxiliar que acepta parámetros sin afectar los filtros globales
+  const handleDownloadAndInstallWithParams = async (
+    item: ContentItem,
+    mcVersion: string,
+    loader?: string,
+    targetPathParam?: string
+  ) => {
+    setIsDownloading(prev => ({ ...prev, [item.id]: true }));
+    setInstallationProgress(0);
+
+    try {
+      let contentType: 'mod' | 'resourcepack' | 'shader' | 'datapack' | 'modpack';
+      switch (item.type) {
+        case 'resourcepacks':
+          contentType = 'resourcepack';
+          break;
+        case 'shaders':
+          contentType = 'shader';
+          break;
+        case 'datapacks':
+          contentType = 'datapack';
+          break;
+        case 'modpacks':
+          contentType = 'modpack';
+          break;
+        default:
+          contentType = 'mod';
+      }
+
+      // Si se pasó un targetPath desde el modal, usarlo directamente sin mostrar diálogo
+      const hasTargetPath = targetPathParam && targetPathParam.trim() !== '';
+      
+      if (!selectedInstanceId && !hasTargetPath) {
+        const userChoice = confirm(`No has seleccionado una instancia.\n¿Quieres descargar "${item.title}" directamente a la zona de descargas?\n\nCancela para seleccionar una instancia en su lugar.`);
+        if (!userChoice) {
+          alert('Por favor, selecciona una instancia para instalar el contenido.');
+          return;
+        }
+
+        let compatibleVersions: any[] = [];
+        if (selectedPlatform === 'modrinth') {
+          compatibleVersions = await window.api.modrinth.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: mcVersion || item.minecraftVersions[0] || '1.20.1',
+            loader: loader
+          });
+        } else if (selectedPlatform === 'curseforge') {
+          compatibleVersions = await window.api.curseforge.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: mcVersion || item.minecraftVersions[0] || '1.20.1',
+            loader: loader
+          });
+        }
+
+        if (compatibleVersions.length === 0) {
+          alert('No se encontraron versiones compatibles para descargar');
+          return;
+        }
+
+        const targetVersion = compatibleVersions[0];
+        let primaryFile: any = null;
+        if (selectedPlatform === 'modrinth') {
+          primaryFile = targetVersion.files.find((f: any) => f.primary) || targetVersion.files[0];
+        } else if (selectedPlatform === 'curseforge') {
+          primaryFile = targetVersion.files ? targetVersion.files[0] : null;
+        }
+
+        if (!primaryFile) {
+          alert('No se encontraron archivos para descargar');
+          return;
+        }
+
+        downloadService.downloadFile(
+          primaryFile.url || primaryFile.downloadUrl,
+          primaryFile.filename || primaryFile.fileName,
+          item.title
+        );
+
+        alert(`¡Contenido iniciado para descarga!\n${item.title} se está descargando en la zona de descargas.`);
+      } else {
+        // Si hay targetPath desde el modal, validar solo versión y loader, luego proceder directamente
+        if (hasTargetPath) {
+          // Validaciones mínimas cuando hay targetPath desde el modal
+          if (!mcVersion || mcVersion === 'all' || mcVersion === '') {
+            alert('Por favor, selecciona una versión de Minecraft.');
+            return;
+          }
+
+          if ((contentType === 'mod' || contentType === 'modpack') && !loader) {
+            alert('Por favor, selecciona un loader compatible.');
+            return;
+          }
+
+          // Obtener versiones compatibles para verificar
+          let compatibleVersionsCheck: any[] = [];
+          if (selectedPlatform === 'modrinth' && window.api.modrinth.getCompatibleVersions) {
+            compatibleVersionsCheck = await window.api.modrinth.getCompatibleVersions({
+              projectId: item.id,
+              mcVersion: mcVersion,
+              loader: loader || undefined
+            });
+          } else if (selectedPlatform === 'curseforge' && window.api.curseforge.getCompatibleVersions) {
+            compatibleVersionsCheck = await window.api.curseforge.getCompatibleVersions({
+              projectId: item.id,
+              mcVersion: mcVersion,
+              loader: loader || undefined
+            });
+          }
+
+          if (compatibleVersionsCheck.length === 0) {
+            alert(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+            return;
+          }
+        } else {
+          // Validaciones completas solo si no hay targetPath desde el modal
+          if (selectedInstanceId && selectedInstanceId !== 'custom') {
+            if (selectedContent && installedContent.has(`${selectedInstanceId}-${selectedContent.id}`)) {
+              alert(`El contenido "${item.title}" ya está instalado en la instancia seleccionada.`);
+              return;
+            }
+          }
+
+          if (!mcVersion || mcVersion === 'all' || mcVersion === '') {
+            alert('Por favor, selecciona una versión de Minecraft.');
+            return;
+          }
+
+          if ((contentType === 'mod' || contentType === 'modpack') && !loader) {
+            alert('Por favor, selecciona un loader compatible.');
+            return;
+          }
+
+          let compatibleVersionsCheck: any[] = [];
+          if (selectedPlatform === 'modrinth' && window.api.modrinth.getCompatibleVersions) {
+            compatibleVersionsCheck = await window.api.modrinth.getCompatibleVersions({
+              projectId: item.id,
+              mcVersion: mcVersion,
+              loader: loader || undefined
+            });
+          } else if (selectedPlatform === 'curseforge' && window.api.curseforge.getCompatibleVersions) {
+            compatibleVersionsCheck = await window.api.curseforge.getCompatibleVersions({
+              projectId: item.id,
+              mcVersion: mcVersion,
+              loader: loader || undefined
+            });
+          }
+
+          if (compatibleVersionsCheck.length === 0) {
+            alert(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+            return;
+          }
+
+          if (contentType === 'modpack') {
+            let hasSpecificVersion = false;
+            if (selectedPlatform === 'modrinth') {
+              hasSpecificVersion = compatibleVersionsCheck.some(version =>
+                version.game_versions.includes(mcVersion) &&
+                (!loader || version.loaders.includes(loader))
+              );
+            } else if (selectedPlatform === 'curseforge') {
+              hasSpecificVersion = compatibleVersionsCheck.length > 0;
+            }
+
+            if (!hasSpecificVersion) {
+              alert(`El modpack no tiene una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}. Por favor selecciona combinaciones diferentes.`);
+              return;
+            }
+          }
+        }
+
+        let instancePath = '';
+        
+        // Si hay un targetPath desde el modal, usarlo directamente sin validar instancias
+        if (hasTargetPath) {
+          instancePath = targetPathParam!;
+        } else if (selectedInstanceId === 'custom') {
+          if (customFolderPath) {
+            instancePath = customFolderPath;
+          } else {
+            alert('Por favor, selecciona una carpeta personalizada.');
+            return;
+          }
+        } else {
+          const selectedInstance = instances.find(instance => instance.id === selectedInstanceId);
+          if (selectedInstance) {
+            instancePath = selectedInstance.path;
+          }
+        }
+
+        // Solo validar si no hay targetPath desde el modal
+        if (!instancePath && !hasTargetPath) {
+          alert('No se pudo encontrar la instancia seleccionada.');
+          return;
+        }
+
+        const versionToUse = mcVersion && mcVersion !== 'all' && mcVersion !== '' ? mcVersion : item.minecraftVersions[0] || '1.20.1';
+        const requiresLoader = contentType === 'mod' || contentType === 'modpack';
+        const loaderToUse = requiresLoader && loader ? loader : undefined;
+
+        const progressInterval = setInterval(() => {
+          setInstallationProgress(prev => {
+            if (prev >= 95) {
+              clearInterval(progressInterval);
+              return 95;
+            }
+            return prev + 1;
+          });
+        }, 200);
+
+        try {
+          await window.api.instances.installContent({
+            instancePath: instancePath,
+            contentId: item.id,
+            contentType: contentType,
+            mcVersion: versionToUse,
+            loader: loaderToUse,
+            versionId: undefined
+          });
+
+          if (selectedInstanceId !== 'custom') {
+            setInstalledContent(prev => new Set(prev).add(`${selectedInstanceId}-${item.id}`));
+          }
+
+          setInstallationProgress(100);
+          clearInterval(progressInterval);
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          alert(`¡Contenido instalado!\n${item.title} ha sido instalado en la ubicación seleccionada.`);
+        } catch (error) {
+          clearInterval(progressInterval);
+          setInstallationProgress(0);
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error('Error al manejar el contenido:', error);
+      alert(`Error: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    } finally {
+      setIsDownloading(prev => ({ ...prev, [item.id]: false }));
+      setInstallationProgress(0);
+    }
+  };
+
   const handleDownloadAndInstall = async (item: ContentItem) => {
     setIsDownloading(prev => ({ ...prev, [item.id]: true }));
     setInstallationProgress(0); // Resetear progreso de instalación
@@ -1722,7 +1973,10 @@ const ContentPage: React.FC = () => {
         <div className="flex-1 relative">
           {/* Download Progress Widget - Positioned at top-right of content area, but opens to the left */}
           <div className="absolute top-0 right-0 z-10">
-            <ContentDownloadProgressWidget position="top-right" />
+            <ContentDownloadProgressWidget 
+              position="top-right" 
+              onShowHistory={() => setShowDownloadHistoryModal(true)}
+            />
           </div>
         {selectedContent ? (
           // Detail View
@@ -1996,7 +2250,7 @@ const ContentPage: React.FC = () => {
         contentItem={selectedDownloadItem}
         availableVersions={availableVersions}
         availableLoaders={availableLoaders}
-        onStartDownload={handleStartSingleDownload}
+        onDownloadStart={handleStartSingleDownload}
       />
     )}
 
@@ -2016,7 +2270,6 @@ const ContentPage: React.FC = () => {
     <MultipleDownloadQueue
       isVisible={showMultipleDownloadQueue}
       onClose={() => setShowMultipleDownloadQueue(false)}
-      onStartDownload={handleStartMultipleDownload}
     />
 
     {/* Download Modals (originales) */}
@@ -2037,6 +2290,12 @@ const ContentPage: React.FC = () => {
         onDownloadComplete={() => console.log('Download completed')}
       />
     )}
+
+    {/* Download History Modal */}
+    <DownloadHistoryModal
+      isOpen={showDownloadHistoryModal}
+      onClose={() => setShowDownloadHistoryModal(false)}
+    />
   </div>
 );
 };
