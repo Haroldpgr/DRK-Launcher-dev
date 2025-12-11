@@ -273,29 +273,31 @@ export class CurseForgeService {
             return;
           }
 
+          // Obtener información del archivo una vez (fuera del loop de versiones)
+          const fileId = file.id;
+          const fileName = file.fileName || file.displayName || `curseforge-${projectId}.jar`;
+          let fileDownloadUrl = file.downloadUrl;
+          
+          // Si no hay downloadUrl pero hay fileId, construirla
+          if (!fileDownloadUrl && fileId) {
+            fileDownloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${fileName}`;
+          }
+          
           // Procesar cada versión de juego encontrada - NO FILTRAR AQUÍ
           // Devolver TODAS las versiones y loaders disponibles
           gameVersionList.forEach((version: string) => {
             // Solo incluir versiones válidas de Minecraft (empiezan con "1.")
             if (version.startsWith('1.')) {
-              // Obtener URL de descarga del archivo
-              let downloadUrl = file.downloadUrl;
-              if (!downloadUrl && file.id) {
-                // Construir URL de descarga usando el ID del archivo
-                const fileId = file.id;
-                const fileName = file.fileName || file.displayName || `curseforge-${projectId}.jar`;
-                downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${fileName}`;
-              }
-              
               // Crear un objeto por cada combinación versión-loader, igual que Modrinth
+              // SIEMPRE incluir fileId y downloadUrl para que estén disponibles
               compatibilityInfo.push({
                 game_versions: [version], // Array como Modrinth
                 loaders: [extractedModLoader!], // Array como Modrinth
                 gameVersion: version, // Mantener para compatibilidad
                 modLoader: extractedModLoader!, // Mantener para compatibilidad
-                downloadUrl: downloadUrl || null, // URL de descarga
-                fileId: file.id || null, // ID del archivo
-                fileName: file.fileName || file.displayName || null // Nombre del archivo
+                downloadUrl: fileDownloadUrl || null, // URL de descarga (siempre intentar incluir)
+                fileId: fileId || null, // ID del archivo (SIEMPRE incluir si está disponible)
+                fileName: fileName || null // Nombre del archivo
               });
             }
           });
@@ -337,8 +339,18 @@ export class CurseForgeService {
     const http = await import('http');
 
     try {
-      // Obtener versiones compatibles
+      // Obtener versiones compatibles (NO filtra por mcVersion/loader, devuelve todas)
       const compatibleVersions = await this.getCompatibleVersions(projectId, mcVersion, loader);
+      
+      console.log(`[downloadContent] Total versiones compatibles obtenidas: ${compatibleVersions.length}`);
+      if (compatibleVersions.length > 0) {
+        console.log(`[downloadContent] Primeras 3 versiones:`, compatibleVersions.slice(0, 3).map((v: any) => ({
+          game_versions: v.game_versions,
+          loaders: v.loaders,
+          hasDownloadUrl: !!v.downloadUrl,
+          hasFileId: !!v.fileId
+        })));
+      }
       
       if (compatibleVersions.length === 0) {
         throw new Error(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}`);
@@ -354,6 +366,8 @@ export class CurseForgeService {
         return versionMatch && loaderMatch;
       });
       
+      console.log(`[downloadContent] Versiones que coinciden con ${mcVersion}${loader ? ` y ${loader}` : ''}: ${matchingVersions.length}`);
+      
       if (matchingVersions.length === 0) {
         throw new Error(`No se encontró una versión compatible para ${mcVersion} y ${loader || 'cualquier loader'}`);
       }
@@ -363,17 +377,188 @@ export class CurseForgeService {
       
       // Obtener URL de descarga
       let downloadUrl = targetVersion.downloadUrl;
-      if (!downloadUrl && targetVersion.fileId) {
-        // Construir URL de descarga usando el ID del archivo si no está disponible
-        const fileId = targetVersion.fileId;
-        const fileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
-        downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${fileName}`;
+      const fileId = targetVersion.fileId;
+      const targetFileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
+      
+      console.log(`[downloadContent] targetVersion completo:`, JSON.stringify(targetVersion, null, 2));
+      
+      // SIEMPRE intentar construir la URL si tenemos fileId, incluso si ya hay downloadUrl
+      // (por si la URL directa no funciona)
+      if (fileId) {
+        const constructedUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${targetFileName}`;
+        if (!downloadUrl) {
+          downloadUrl = constructedUrl;
+          console.log(`[downloadContent] Construida URL de descarga desde fileId: ${downloadUrl}`);
+        } else {
+          console.log(`[downloadContent] URL de descarga disponible: ${downloadUrl}, también construida: ${constructedUrl}`);
+        }
+      }
+      
+      // Si no hay downloadUrl pero tenemos fileId, usar el endpoint oficial
+      if (!downloadUrl && fileId) {
+        // Usar el endpoint oficial de CurseForge para obtener la URL de descarga
+        // Según la documentación: GET /v1/mods/{modId}/files/{fileId}/download-url
+        try {
+          console.log(`[downloadContent] Obteniendo URL de descarga oficial desde API para fileId ${fileId}...`);
+          const downloadUrlResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}/download-url`, {
+            headers: this.headers
+          });
+          
+          if (downloadUrlResponse.ok) {
+            const downloadUrlData = await downloadUrlResponse.json();
+            if (downloadUrlData.data && typeof downloadUrlData.data === 'string') {
+              downloadUrl = downloadUrlData.data;
+              console.log(`[downloadContent] ✅ URL de descarga obtenida desde endpoint oficial: ${downloadUrl}`);
+            } else {
+              console.warn(`[downloadContent] ⚠️ Endpoint oficial no devolvió URL válida:`, downloadUrlData);
+            }
+          } else {
+            const errorText = await downloadUrlResponse.text();
+            console.warn(`[downloadContent] ⚠️ Endpoint oficial de download-url falló (${downloadUrlResponse.status}):`, errorText);
+          }
+        } catch (apiError) {
+          console.error(`[downloadContent] ❌ Error al obtener URL de descarga desde API:`, apiError);
+        }
+      }
+      
+      // Si aún no hay downloadUrl pero tenemos fileId, intentar método alternativo
+      if (!downloadUrl && fileId) {
+        try {
+          console.log(`[downloadContent] Intentando método alternativo: obtener información del archivo ${fileId}...`);
+          const fileResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}`, {
+            headers: this.headers
+          });
+          
+          if (fileResponse.ok) {
+            const fileData = await fileResponse.json();
+            if (fileData.data && fileData.data.downloadUrl) {
+              downloadUrl = fileData.data.downloadUrl;
+              console.log(`[downloadContent] ✅ URL de descarga obtenida desde información del archivo: ${downloadUrl}`);
+            } else if (fileData.data && fileData.data.id) {
+              // Construir URL usando el ID del archivo como último recurso
+              const apiFileId = fileData.data.id;
+              const apiFileName = fileData.data.fileName || fileData.data.displayName || targetFileName;
+              downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(apiFileId / 1000)}/${apiFileId % 1000}/${apiFileName}`;
+              console.log(`[downloadContent] ✅ URL de descarga construida desde API fileId: ${downloadUrl}`);
+            }
+          }
+        } catch (fileError) {
+          console.error(`[downloadContent] ❌ Error al obtener información del archivo:`, fileError);
+        }
       }
       
       if (!downloadUrl) {
-        // Si aún no hay URL, intentar obtener el archivo directamente desde la API
-        console.warn(`No se encontró URL de descarga en la versión compatible, intentando obtener archivo directamente...`);
-        throw new Error(`No se encontró URL de descarga para la versión compatible. Por favor, intenta con otra versión o loader.`);
+        // Si aún no hay URL, intentar obtener todos los archivos y buscar uno compatible
+        try {
+          console.log(`[downloadContent] Obteniendo todos los archivos del proyecto para buscar uno compatible...`);
+          const allFilesResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files`, {
+            headers: this.headers
+          });
+          
+          if (allFilesResponse.ok) {
+            const allFilesData = await allFilesResponse.json();
+            if (allFilesData.data && Array.isArray(allFilesData.data)) {
+              // Buscar un archivo que coincida con la versión y loader
+              const matchingFile = allFilesData.data.find((f: any) => {
+                const hasVersion = f.gameVersions && Array.isArray(f.gameVersions) && 
+                                  f.gameVersions.some((v: string) => v === mcVersion || v.startsWith(mcVersion));
+                const hasLoader = !loader || (f.gameVersionTypeIds && Array.isArray(f.gameVersionTypeIds));
+                return hasVersion && hasLoader;
+              });
+              
+              if (matchingFile) {
+                downloadUrl = matchingFile.downloadUrl;
+                if (!downloadUrl && matchingFile.id) {
+                  // Intentar usar el endpoint oficial de download-url según la documentación
+                  // GET /v1/mods/{modId}/files/{fileId}/download-url
+                  try {
+                    console.log(`[downloadContent] Obteniendo URL de descarga oficial para archivo compatible ${matchingFile.id}...`);
+                    const downloadUrlResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${matchingFile.id}/download-url`, {
+                      headers: this.headers
+                    });
+                    
+                    if (downloadUrlResponse.ok) {
+                      const downloadUrlData = await downloadUrlResponse.json();
+                      if (downloadUrlData.data && typeof downloadUrlData.data === 'string') {
+                        downloadUrl = downloadUrlData.data;
+                        console.log(`[downloadContent] URL de descarga obtenida desde endpoint oficial: ${downloadUrl}`);
+                      }
+                    }
+                  } catch (downloadUrlError) {
+                    console.warn(`[downloadContent] Error al obtener URL oficial, usando método alternativo:`, downloadUrlError);
+                  }
+                  
+                  // Si aún no hay URL, construirla manualmente como último recurso
+                  if (!downloadUrl) {
+                    const matchFileId = matchingFile.id;
+                    const matchFileName = matchingFile.fileName || matchingFile.displayName || targetFileName;
+                    downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(matchFileId / 1000)}/${matchFileId % 1000}/${matchFileName}`;
+                    console.log(`[downloadContent] URL de descarga construida manualmente: ${downloadUrl}`);
+                  }
+                }
+                console.log(`[downloadContent] URL de descarga encontrada en archivos: ${downloadUrl}`);
+              }
+            }
+          }
+        } catch (allFilesError) {
+          console.error(`[downloadContent] Error al obtener todos los archivos:`, allFilesError);
+        }
+      }
+      
+      if (!downloadUrl) {
+        // Último intento: obtener el archivo directamente desde la API usando el primer archivo disponible
+        console.log(`[downloadContent] Intentando obtener archivo directamente desde la API...`);
+        try {
+          const directFilesResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files`, {
+            headers: this.headers
+          });
+          
+          if (directFilesResponse.ok) {
+            const directFilesData = await directFilesResponse.json();
+            if (directFilesData.data && Array.isArray(directFilesData.data) && directFilesData.data.length > 0) {
+              // Buscar un archivo que tenga la versión y loader correctos
+              for (const directFile of directFilesData.data) {
+                const hasVersion = directFile.gameVersions && Array.isArray(directFile.gameVersions) && 
+                                  directFile.gameVersions.some((v: string) => v === mcVersion || v.startsWith(mcVersion.split('.')[0] + '.' + mcVersion.split('.')[1]));
+                
+                if (hasVersion) {
+                  // Verificar loader si se especificó
+                  if (loader) {
+                    const hasLoader = directFile.gameVersionTypeIds && Array.isArray(directFile.gameVersionTypeIds);
+                    if (hasLoader) {
+                      const loaderTypeMap: Record<number, string> = { 1: 'forge', 4: 'fabric', 5: 'quilt', 6: 'neoforge' };
+                      const fileLoader = directFile.gameVersionTypeIds.find((id: number) => loaderTypeMap[id] === loader);
+                      if (!fileLoader) continue;
+                    } else {
+                      continue;
+                    }
+                  }
+                  
+                  // Encontramos un archivo compatible
+                  downloadUrl = directFile.downloadUrl;
+                  if (!downloadUrl && directFile.id) {
+                    const directFileId = directFile.id;
+                    const directFileName = directFile.fileName || directFile.displayName || targetFileName;
+                    downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(directFileId / 1000)}/${directFileId % 1000}/${directFileName}`;
+                  }
+                  
+                  if (downloadUrl) {
+                    console.log(`[downloadContent] URL de descarga encontrada en búsqueda directa: ${downloadUrl}`);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (directError) {
+          console.error(`[downloadContent] Error en búsqueda directa:`, directError);
+        }
+      }
+      
+      if (!downloadUrl) {
+        console.error(`[downloadContent] No se pudo obtener URL de descarga después de todos los intentos`);
+        console.error(`[downloadContent] targetVersion completo:`, JSON.stringify(targetVersion, null, 2));
+        throw new Error(`No se encontró URL de descarga para la versión compatible ${mcVersion}${loader ? ` y ${loader}` : ''}. Por favor, intenta con otra versión o loader.`);
       }
 
       // Determinar carpeta de destino según tipo de contenido
@@ -401,14 +586,14 @@ export class CurseForgeService {
       }
 
       // Obtener nombre del archivo
-      const fileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
-      const filePath = path.join(targetDir, fileName);
+      const finalFileName = targetVersion.fileName || targetFileName || `curseforge-${projectId}.jar`;
+      const filePath = path.join(targetDir, finalFileName);
 
       // Si el archivo ya existe, generar nombre único
       let finalPath = filePath;
       if (fs.existsSync(filePath)) {
-        const ext = path.extname(fileName);
-        const nameWithoutExt = path.basename(fileName, ext);
+        const ext = path.extname(finalFileName);
+        const nameWithoutExt = path.basename(finalFileName, ext);
         let counter = 1;
         let uniqueFileName;
 
@@ -421,7 +606,7 @@ export class CurseForgeService {
 
       // Descargar archivo
       await this.downloadFileToPath(downloadUrl, finalPath);
-      console.log(`Descargado ${fileName} en ${targetDir}`);
+      console.log(`Descargado ${finalFileName} en ${targetDir}`);
     } catch (error) {
       console.error(`Error al descargar contenido ${contentType} ${projectId}:`, error);
       throw error;

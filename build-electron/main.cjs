@@ -7655,6 +7655,12 @@ var CurseForgeService = class {
           if (!extractedModLoader) {
             return;
           }
+          const fileId = file.id;
+          const fileName = file.fileName || file.displayName || `curseforge-${projectId}.jar`;
+          let fileDownloadUrl = file.downloadUrl;
+          if (!fileDownloadUrl && fileId) {
+            fileDownloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1e3)}/${fileId % 1e3}/${fileName}`;
+          }
           gameVersionList.forEach((version) => {
             if (version.startsWith("1.")) {
               compatibilityInfo.push({
@@ -7664,8 +7670,14 @@ var CurseForgeService = class {
                 // Array como Modrinth
                 gameVersion: version,
                 // Mantener para compatibilidad
-                modLoader: extractedModLoader
+                modLoader: extractedModLoader,
                 // Mantener para compatibilidad
+                downloadUrl: fileDownloadUrl || null,
+                // URL de descarga (siempre intentar incluir)
+                fileId: fileId || null,
+                // ID del archivo (SIEMPRE incluir si está disponible)
+                fileName: fileName || null
+                // Nombre del archivo
               });
             }
           });
@@ -7697,18 +7709,176 @@ var CurseForgeService = class {
     const http = await import("http");
     try {
       const compatibleVersions = await this.getCompatibleVersions(projectId, mcVersion, loader);
+      console.log(`[downloadContent] Total versiones compatibles obtenidas: ${compatibleVersions.length}`);
+      if (compatibleVersions.length > 0) {
+        console.log(`[downloadContent] Primeras 3 versiones:`, compatibleVersions.slice(0, 3).map((v) => ({
+          game_versions: v.game_versions,
+          loaders: v.loaders,
+          hasDownloadUrl: !!v.downloadUrl,
+          hasFileId: !!v.fileId
+        })));
+      }
       if (compatibleVersions.length === 0) {
         throw new Error(`No se encontr\xF3 una versi\xF3n compatible para ${mcVersion} y ${loader || "cualquier loader"}`);
       }
-      const targetVersion = compatibleVersions[0];
+      const matchingVersions = compatibleVersions.filter((v) => {
+        const versionMatch = v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(mcVersion) || v.gameVersion === mcVersion;
+        const loaderMatch = !loader || v.loaders && Array.isArray(v.loaders) && v.loaders.includes(loader) || v.modLoader && v.modLoader.toLowerCase() === loader.toLowerCase();
+        return versionMatch && loaderMatch;
+      });
+      console.log(`[downloadContent] Versiones que coinciden con ${mcVersion}${loader ? ` y ${loader}` : ""}: ${matchingVersions.length}`);
+      if (matchingVersions.length === 0) {
+        throw new Error(`No se encontr\xF3 una versi\xF3n compatible para ${mcVersion} y ${loader || "cualquier loader"}`);
+      }
+      const targetVersion = matchingVersions[0];
       let downloadUrl = targetVersion.downloadUrl;
-      if (!downloadUrl && targetVersion.fileId) {
-        const fileId = targetVersion.fileId;
-        const fileName2 = targetVersion.fileName || `curseforge-${projectId}.jar`;
-        downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1e3)}/${fileId % 1e3}/${fileName2}`;
+      const fileId = targetVersion.fileId;
+      const targetFileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
+      console.log(`[downloadContent] targetVersion completo:`, JSON.stringify(targetVersion, null, 2));
+      if (fileId) {
+        const constructedUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1e3)}/${fileId % 1e3}/${targetFileName}`;
+        if (!downloadUrl) {
+          downloadUrl = constructedUrl;
+          console.log(`[downloadContent] Construida URL de descarga desde fileId: ${downloadUrl}`);
+        } else {
+          console.log(`[downloadContent] URL de descarga disponible: ${downloadUrl}, tambi\xE9n construida: ${constructedUrl}`);
+        }
+      }
+      if (!downloadUrl && fileId) {
+        try {
+          console.log(`[downloadContent] Obteniendo URL de descarga oficial desde API para fileId ${fileId}...`);
+          const downloadUrlResponse = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}/download-url`, {
+            headers: this.headers
+          });
+          if (downloadUrlResponse.ok) {
+            const downloadUrlData = await downloadUrlResponse.json();
+            if (downloadUrlData.data && typeof downloadUrlData.data === "string") {
+              downloadUrl = downloadUrlData.data;
+              console.log(`[downloadContent] \u2705 URL de descarga obtenida desde endpoint oficial: ${downloadUrl}`);
+            } else {
+              console.warn(`[downloadContent] \u26A0\uFE0F Endpoint oficial no devolvi\xF3 URL v\xE1lida:`, downloadUrlData);
+            }
+          } else {
+            const errorText = await downloadUrlResponse.text();
+            console.warn(`[downloadContent] \u26A0\uFE0F Endpoint oficial de download-url fall\xF3 (${downloadUrlResponse.status}):`, errorText);
+          }
+        } catch (apiError) {
+          console.error(`[downloadContent] \u274C Error al obtener URL de descarga desde API:`, apiError);
+        }
+      }
+      if (!downloadUrl && fileId) {
+        try {
+          console.log(`[downloadContent] Intentando m\xE9todo alternativo: obtener informaci\xF3n del archivo ${fileId}...`);
+          const fileResponse = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}`, {
+            headers: this.headers
+          });
+          if (fileResponse.ok) {
+            const fileData = await fileResponse.json();
+            if (fileData.data && fileData.data.downloadUrl) {
+              downloadUrl = fileData.data.downloadUrl;
+              console.log(`[downloadContent] \u2705 URL de descarga obtenida desde informaci\xF3n del archivo: ${downloadUrl}`);
+            } else if (fileData.data && fileData.data.id) {
+              const apiFileId = fileData.data.id;
+              const apiFileName = fileData.data.fileName || fileData.data.displayName || targetFileName;
+              downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(apiFileId / 1e3)}/${apiFileId % 1e3}/${apiFileName}`;
+              console.log(`[downloadContent] \u2705 URL de descarga construida desde API fileId: ${downloadUrl}`);
+            }
+          }
+        } catch (fileError) {
+          console.error(`[downloadContent] \u274C Error al obtener informaci\xF3n del archivo:`, fileError);
+        }
       }
       if (!downloadUrl) {
-        throw new Error(`No se encontr\xF3 URL de descarga para la versi\xF3n compatible`);
+        try {
+          console.log(`[downloadContent] Obteniendo todos los archivos del proyecto para buscar uno compatible...`);
+          const allFilesResponse = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files`, {
+            headers: this.headers
+          });
+          if (allFilesResponse.ok) {
+            const allFilesData = await allFilesResponse.json();
+            if (allFilesData.data && Array.isArray(allFilesData.data)) {
+              const matchingFile = allFilesData.data.find((f) => {
+                const hasVersion = f.gameVersions && Array.isArray(f.gameVersions) && f.gameVersions.some((v) => v === mcVersion || v.startsWith(mcVersion));
+                const hasLoader = !loader || f.gameVersionTypeIds && Array.isArray(f.gameVersionTypeIds);
+                return hasVersion && hasLoader;
+              });
+              if (matchingFile) {
+                downloadUrl = matchingFile.downloadUrl;
+                if (!downloadUrl && matchingFile.id) {
+                  try {
+                    console.log(`[downloadContent] Obteniendo URL de descarga oficial para archivo compatible ${matchingFile.id}...`);
+                    const downloadUrlResponse = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${matchingFile.id}/download-url`, {
+                      headers: this.headers
+                    });
+                    if (downloadUrlResponse.ok) {
+                      const downloadUrlData = await downloadUrlResponse.json();
+                      if (downloadUrlData.data && typeof downloadUrlData.data === "string") {
+                        downloadUrl = downloadUrlData.data;
+                        console.log(`[downloadContent] URL de descarga obtenida desde endpoint oficial: ${downloadUrl}`);
+                      }
+                    }
+                  } catch (downloadUrlError) {
+                    console.warn(`[downloadContent] Error al obtener URL oficial, usando m\xE9todo alternativo:`, downloadUrlError);
+                  }
+                  if (!downloadUrl) {
+                    const matchFileId = matchingFile.id;
+                    const matchFileName = matchingFile.fileName || matchingFile.displayName || targetFileName;
+                    downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(matchFileId / 1e3)}/${matchFileId % 1e3}/${matchFileName}`;
+                    console.log(`[downloadContent] URL de descarga construida manualmente: ${downloadUrl}`);
+                  }
+                }
+                console.log(`[downloadContent] URL de descarga encontrada en archivos: ${downloadUrl}`);
+              }
+            }
+          }
+        } catch (allFilesError) {
+          console.error(`[downloadContent] Error al obtener todos los archivos:`, allFilesError);
+        }
+      }
+      if (!downloadUrl) {
+        console.log(`[downloadContent] Intentando obtener archivo directamente desde la API...`);
+        try {
+          const directFilesResponse = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files`, {
+            headers: this.headers
+          });
+          if (directFilesResponse.ok) {
+            const directFilesData = await directFilesResponse.json();
+            if (directFilesData.data && Array.isArray(directFilesData.data) && directFilesData.data.length > 0) {
+              for (const directFile of directFilesData.data) {
+                const hasVersion = directFile.gameVersions && Array.isArray(directFile.gameVersions) && directFile.gameVersions.some((v) => v === mcVersion || v.startsWith(mcVersion.split(".")[0] + "." + mcVersion.split(".")[1]));
+                if (hasVersion) {
+                  if (loader) {
+                    const hasLoader = directFile.gameVersionTypeIds && Array.isArray(directFile.gameVersionTypeIds);
+                    if (hasLoader) {
+                      const loaderTypeMap = { 1: "forge", 4: "fabric", 5: "quilt", 6: "neoforge" };
+                      const fileLoader = directFile.gameVersionTypeIds.find((id) => loaderTypeMap[id] === loader);
+                      if (!fileLoader) continue;
+                    } else {
+                      continue;
+                    }
+                  }
+                  downloadUrl = directFile.downloadUrl;
+                  if (!downloadUrl && directFile.id) {
+                    const directFileId = directFile.id;
+                    const directFileName = directFile.fileName || directFile.displayName || targetFileName;
+                    downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(directFileId / 1e3)}/${directFileId % 1e3}/${directFileName}`;
+                  }
+                  if (downloadUrl) {
+                    console.log(`[downloadContent] URL de descarga encontrada en b\xFAsqueda directa: ${downloadUrl}`);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (directError) {
+          console.error(`[downloadContent] Error en b\xFAsqueda directa:`, directError);
+        }
+      }
+      if (!downloadUrl) {
+        console.error(`[downloadContent] No se pudo obtener URL de descarga despu\xE9s de todos los intentos`);
+        console.error(`[downloadContent] targetVersion completo:`, JSON.stringify(targetVersion, null, 2));
+        throw new Error(`No se encontr\xF3 URL de descarga para la versi\xF3n compatible ${mcVersion}${loader ? ` y ${loader}` : ""}. Por favor, intenta con otra versi\xF3n o loader.`);
       }
       let targetDir;
       switch (contentType) {
@@ -7730,12 +7900,12 @@ var CurseForgeService = class {
       if (!fs14.existsSync(targetDir)) {
         fs14.mkdirSync(targetDir, { recursive: true });
       }
-      const fileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
-      const filePath = path15.join(targetDir, fileName);
+      const finalFileName = targetVersion.fileName || targetFileName || `curseforge-${projectId}.jar`;
+      const filePath = path15.join(targetDir, finalFileName);
       let finalPath = filePath;
       if (fs14.existsSync(filePath)) {
-        const ext = path15.extname(fileName);
-        const nameWithoutExt = path15.basename(fileName, ext);
+        const ext = path15.extname(finalFileName);
+        const nameWithoutExt = path15.basename(finalFileName, ext);
         let counter = 1;
         let uniqueFileName;
         do {
@@ -7745,7 +7915,7 @@ var CurseForgeService = class {
         } while (fs14.existsSync(finalPath));
       }
       await this.downloadFileToPath(downloadUrl, finalPath);
-      console.log(`Descargado ${fileName} en ${targetDir}`);
+      console.log(`Descargado ${finalFileName} en ${targetDir}`);
     } catch (error) {
       console.error(`Error al descargar contenido ${contentType} ${projectId}:`, error);
       throw error;
