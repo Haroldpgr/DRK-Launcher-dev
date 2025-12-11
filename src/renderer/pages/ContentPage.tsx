@@ -137,6 +137,8 @@ const ContentPage: React.FC = () => {
   // Estados para manejar el contenido filtrado y original
   const [displayedContent, setDisplayedContent] = useState<ContentItem[]>([]);
   const [originalContent, setOriginalContent] = useState<ContentItem[]>([]);
+  // Caché para verificaciones de compatibilidad
+  const compatibilityCache = React.useRef<Map<string, boolean>>(new Map());
 
   // Estados para los nuevos modales de descarga
   const [showDownloadSelectionModal, setShowDownloadSelectionModal] = useState<boolean>(false);
@@ -288,25 +290,57 @@ const ContentPage: React.FC = () => {
             console.log('Respuesta de CurseForge:', response);
 
             if (response && Array.isArray(response)) {
-              const processedInfo = extractCurseForgeCompatibilityInfo(response);
-              console.log('Información procesada de CurseForge:', processedInfo);
+              // Procesar igual que Modrinth - extraer versiones desde game_versions
+              const extractedVersionsFromResponse = new Set<string>();
+
+              for (const item of response) {
+                // Intentar diferentes propiedades que pueden contener versiones
+                if (item.game_versions && Array.isArray(item.game_versions)) {
+                  for (const version of item.game_versions) {
+                    if (typeof version === 'string' && version.startsWith('1.') &&
+                        !version.includes('w') && !version.includes('pre') &&
+                        !version.includes('rc') && !version.includes('snapshot')) {
+                      extractedVersionsFromResponse.add(version);
+                    }
+                  }
+                }
+                // Comprobar también otras propiedades comunes
+                else if (item.gameVersion && typeof item.gameVersion === 'string') {
+                  if (item.gameVersion.startsWith('1.') &&
+                      !item.gameVersion.includes('w') && !item.gameVersion.includes('pre') &&
+                      !item.gameVersion.includes('rc') && !item.gameVersion.includes('snapshot')) {
+                    extractedVersionsFromResponse.add(item.gameVersion);
+                  }
+                }
+                else if (Array.isArray(item.versions)) {
+                  for (const version of item.versions) {
+                    if (typeof version === 'string' && version.startsWith('1.') &&
+                        !version.includes('w') && !version.includes('pre') &&
+                        !version.includes('rc') && !version.includes('snapshot')) {
+                      extractedVersionsFromResponse.add(version);
+                    }
+                  }
+                }
+              }
 
               // Combinar versiones de la API con las versiones del contenido original
+              // para tener una lista más completa de versiones posibles
               const allPossibleVersions = new Set<string>([
-                ...processedInfo.gameVersions,
+                ...extractedVersionsFromResponse,
                 ...selectedDownloadItem.minecraftVersions
               ]);
 
               // Filtrar todas las versiones para incluir solo versiones estables
               versionsToUse = Array.from(allPossibleVersions)
-                .filter((version: string) =>
+                .filter(version =>
                   typeof version === 'string' &&
                   version.startsWith('1.') &&
                   !version.includes('w') &&
                   !version.includes('pre') &&
                   !version.includes('rc') &&
-                  !version.includes('snapshot'))
-                .sort((a: string, b: string) => {
+                  !version.includes('snapshot')
+                )
+                .sort((a, b) => {
                   // Dividir versiones por puntos y convertir a números para ordenar correctamente
                   const aParts = a.split('.').map(Number);
                   const bParts = b.split('.').map(Number);
@@ -319,19 +353,53 @@ const ContentPage: React.FC = () => {
                   return bParts.length - aParts.length; // Si todo es igual, más largo primero
                 });
 
-              console.log('Versiones extraídas de CurseForge (después de filtrar):', versionsToUse);
+              console.log('Versiones extraídas de CurseForge (antes de ordenar):', Array.from(extractedVersionsFromResponse));
+              console.log('Todas las posibles versiones combinadas:', Array.from(allPossibleVersions));
+              console.log('Versiones filtradas finales:', versionsToUse);
 
-              // Usar loaders apropiados para el tipo de contenido
-              if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
-                // Filtrar solo loaders válidos para mods y modpacks
-                loadersToUse = processedInfo.modLoaders.filter((loader: string) =>
-                  ['forge', 'fabric', 'quilt', 'neoforge'].includes(loader)
-                );
-              } else {
-                // Para otros tipos de contenido, usar los loaders disponibles o dejarlo vacío
-                loadersToUse = processedInfo.modLoaders;
+              // Extraer loaders - considerar el tipo de contenido (igual que Modrinth)
+              const extractedLoaders = new Set<string>();
+              for (const item of response) {
+                if (item.loaders && Array.isArray(item.loaders)) {
+                  for (const loader of item.loaders) {
+                    if (typeof loader === 'string') {
+                      // Para diferentes tipos de contenido, usar loaders específicos
+                      if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                        // Para mods y modpacks, usar loaders específicos
+                        if (['forge', 'fabric', 'quilt', 'neoforge'].includes(loader)) {
+                          extractedLoaders.add(loader);
+                        }
+                      } else {
+                        // Para otros tipos, fabric puede ser suficiente o ninguno
+                        extractedLoaders.add(loader);
+                      }
+                    }
+                  }
+                }
+                // Comprobar otras propiedades posibles para loaders
+                else if (item.loader && typeof item.loader === 'string') {
+                  if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                    if (['forge', 'fabric', 'quilt', 'neoforge'].includes(item.loader)) {
+                      extractedLoaders.add(item.loader);
+                    }
+                  } else {
+                    extractedLoaders.add(item.loader);
+                  }
+                }
+                // También verificar modLoader para compatibilidad
+                else if (item.modLoader && typeof item.modLoader === 'string') {
+                  const loaderLower = item.modLoader.toLowerCase();
+                  if (selectedDownloadItem.type === 'modpacks' || selectedDownloadItem.type === 'mods') {
+                    if (['forge', 'fabric', 'quilt', 'neoforge'].includes(loaderLower)) {
+                      extractedLoaders.add(loaderLower);
+                    }
+                  } else {
+                    extractedLoaders.add(loaderLower);
+                  }
+                }
               }
 
+              loadersToUse = Array.from(extractedLoaders);
               console.log('Loaders extraídos de CurseForge:', loadersToUse);
             }
           } catch (curseError) {
@@ -670,43 +738,60 @@ const ContentPage: React.FC = () => {
     setDisplayedContent(content);
   }, [content, type, selectedPlatform]);
 
-  // Verificar compatibilidad de loader cuando cambia
+  // Verificar compatibilidad de versión y loader cuando cambian
   useEffect(() => {
-    const checkLoaderCompatibility = async () => {
-      if (!selectedLoader) {
-        // Si no hay loader seleccionado, mostrar todo el contenido original
+    const checkCompatibility = async () => {
+      // Limpiar caché cuando cambian los filtros
+      compatibilityCache.current.clear();
+      
+      // Si no hay filtros de loader o versión, mostrar todo
+      if (!selectedLoader && selectedVersion === 'all') {
         setDisplayedContent([...originalContent]);
         return;
       }
 
-      // Filtrar contenido basado en compatibilidad real con el loader
+      // Solo aplicar filtros de compatibilidad para mods y modpacks
       if (originalContent.length > 0 && (type === 'modpacks' || type === 'mods')) {
         setIsLoading(true);
         try {
-          // Usar un enfoque más eficiente: promesas en paralelo en lugar de secuencial
+          const versionToCheck = selectedVersion !== 'all' ? selectedVersion : null;
+          
+          // Verificar compatibilidad en paralelo
           const compatibilityChecks = originalContent.map(async (item) => {
             try {
+              // Crear clave de caché
+              const cacheKey = `${item.id}-${item.platform}-${versionToCheck || 'any'}-${selectedLoader || 'any'}`;
+              
+              // Verificar caché
+              if (compatibilityCache.current.has(cacheKey)) {
+                return compatibilityCache.current.get(cacheKey) ? item : null;
+              }
+              
               let compatibleVersions: any[] = [];
+              const mcVersion = versionToCheck || item.minecraftVersions?.[0] || '1.20.1';
 
               if (item.platform === 'modrinth') {
                 compatibleVersions = await modrinthAPI.getCompatibleVersions({
                   projectId: item.id,
-                  mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
-                  loader: selectedLoader
+                  mcVersion: mcVersion,
+                  loader: selectedLoader || undefined
                 });
               } else if (item.platform === 'curseforge') {
                 compatibleVersions = await window.api.curseforge.getCompatibleVersions({
                   projectId: item.id,
-                  mcVersion: selectedVersion !== 'all' ? selectedVersion : item.minecraftVersions[0] || '1.20.1',
-                  loader: selectedLoader
+                  mcVersion: mcVersion,
+                  loader: selectedLoader || undefined
                 });
               }
 
-              return compatibleVersions.length > 0 ? item : null;
+              const isCompatible = compatibleVersions.length > 0;
+              compatibilityCache.current.set(cacheKey, isCompatible);
+              
+              return isCompatible ? item : null;
             } catch (error) {
               console.error(`Error checking compatibility for item ${item.id}:`, error);
-              // Si hay error verificando, asumir que es compatible
-              return item;
+              // Si hay error verificando, asumir que NO es compatible para evitar mostrar contenido no disponible
+              return null;
             }
           });
 
@@ -717,33 +802,46 @@ const ContentPage: React.FC = () => {
           const filteredResults = results.filter(item => item !== null) as ContentItem[];
 
           setDisplayedContent(filteredResults);
+        } catch (error) {
+          console.error('Error en verificación de compatibilidad:', error);
+          setDisplayedContent([...originalContent]);
         } finally {
           setIsLoading(false);
         }
       } else {
-        // Si no es modpacks o mods, no aplicar filtro de loader
-        setDisplayedContent([...originalContent]);
+        // Para otros tipos de contenido, aplicar solo filtro de versión si está seleccionado
+        if (selectedVersion !== 'all') {
+          const filtered = originalContent.filter(item =>
+            item.minecraftVersions?.includes(selectedVersion)
+          );
+          setDisplayedContent(filtered);
+        } else {
+          setDisplayedContent([...originalContent]);
+        }
       }
     };
 
-    checkLoaderCompatibility();
+    checkCompatibility();
   }, [selectedLoader, selectedVersion, selectedPlatform, originalContent, type]);
 
-  // Filter and sort content
+  // Filter and sort content (versión ya filtrada en displayedContent, solo aplicar categoría y ordenamiento)
   const filteredContent = React.useMemo(() => {
     let result = [...displayedContent];
-
-    // Apply version filter
-    if (selectedVersion !== 'all') {
-      result = result.filter(item =>
-        item.minecraftVersions.includes(selectedVersion)
-      );
-    }
 
     // Apply category filter
     if (selectedCategory !== 'all') {
       result = result.filter(item =>
-        item.categories.includes(selectedCategory)
+        item.categories && item.categories.includes(selectedCategory)
+      );
+    }
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(item =>
+        item.title.toLowerCase().includes(query) ||
+        item.description?.toLowerCase().includes(query) ||
+        item.author?.toLowerCase().includes(query)
       );
     }
 
@@ -751,9 +849,9 @@ const ContentPage: React.FC = () => {
     result.sort((a, b) => {
       switch (sortBy) {
         case 'popular':
-          return b.downloads - a.downloads;
+          return (b.downloads || 0) - (a.downloads || 0);
         case 'recent':
-          return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
+          return new Date(b.lastUpdated || 0).getTime() - new Date(a.lastUpdated || 0).getTime();
         case 'name':
           return a.title.localeCompare(b.title);
         default:
@@ -762,7 +860,7 @@ const ContentPage: React.FC = () => {
     });
 
     return result;
-  }, [displayedContent, selectedVersion, selectedCategory, sortBy]);
+  }, [displayedContent, selectedCategory, sortBy, searchQuery]);
 
   // Get paginated content
   const paginatedContent = React.useMemo(() => {
@@ -1447,13 +1545,36 @@ const ContentPage: React.FC = () => {
         const requiresLoader = contentType === 'mod' || contentType === 'modpack';
         const loaderToUse = requiresLoader && loader ? loader : undefined;
 
+        // Crear entrada en downloadService para rastrear la descarga
+        const downloadId = `content-${item.id}-${Date.now()}`;
+        const startTime = Date.now();
+        downloadService.addDownloadToHistory({
+          id: downloadId,
+          name: item.title,
+          url: `content://${item.platform}/${item.id}`,
+          status: 'downloading',
+          progress: 0,
+          downloadedBytes: 0,
+          totalBytes: 1000000, // Valor estimado
+          startTime: startTime,
+          speed: 0,
+          path: instancePath,
+          profileUsername: undefined
+        });
+
         const progressInterval = setInterval(() => {
           setInstallationProgress(prev => {
-            if (prev >= 95) {
-              clearInterval(progressInterval);
-              return 95;
+            const newProgress = prev >= 95 ? 95 : prev + 1;
+            // Actualizar progreso en downloadService
+            const currentDownload = downloadService.getAllDownloads().find(d => d.id === downloadId);
+            if (currentDownload) {
+              downloadService.addDownloadToHistory({
+                ...currentDownload,
+                progress: newProgress,
+                downloadedBytes: Math.round((newProgress / 100) * (currentDownload.totalBytes || 1000000))
+              });
             }
-            return prev + 1;
+            return newProgress;
           });
         }, 200);
 
@@ -1473,12 +1594,46 @@ const ContentPage: React.FC = () => {
 
           setInstallationProgress(100);
           clearInterval(progressInterval);
+          
+          // Marcar como completada en downloadService
+          downloadService.addDownloadToHistory({
+            id: downloadId,
+            name: item.title,
+            url: `content://${item.platform}/${item.id}`,
+            status: 'completed',
+            progress: 100,
+            downloadedBytes: 1000000,
+            totalBytes: 1000000,
+            startTime: startTime,
+            endTime: Date.now(),
+            speed: 0,
+            path: instancePath,
+            profileUsername: undefined
+          });
+          
           await new Promise(resolve => setTimeout(resolve, 300));
 
           alert(`¡Contenido instalado!\n${item.title} ha sido instalado en la ubicación seleccionada.`);
         } catch (error) {
           clearInterval(progressInterval);
           setInstallationProgress(0);
+          
+          // Marcar como error en downloadService
+          downloadService.addDownloadToHistory({
+            id: downloadId,
+            name: item.title,
+            url: `content://${item.platform}/${item.id}`,
+            status: 'error',
+            progress: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            startTime: startTime,
+            endTime: Date.now(),
+            speed: 0,
+            path: instancePath,
+            profileUsername: undefined
+          });
+          
           throw error;
         }
       }
@@ -1740,18 +1895,21 @@ const ContentPage: React.FC = () => {
 
   useEffect(() => {
     const unsubscribe = downloadService.subscribe(downloads => {
-      const newProgress: { [key: string]: number } = {};
-      const newDownloading: { [key: string]: boolean } = {};
-      
-      downloads.forEach(download => {
-        newProgress[download.id] = download.progress;
-        if (download.status === 'downloading' || download.status === 'pending') {
-          newDownloading[download.id] = true;
-        }
-      });
+      // Usar setTimeout para evitar actualizar durante el renderizado
+      setTimeout(() => {
+        const newProgress: { [key: string]: number } = {};
+        const newDownloading: { [key: string]: boolean } = {};
+        
+        downloads.forEach(download => {
+          newProgress[download.id] = download.progress;
+          if (download.status === 'downloading' || download.status === 'pending') {
+            newDownloading[download.id] = true;
+          }
+        });
 
-      setDownloadProgress(newProgress);
-      setIsDownloading(newDownloading);
+        setDownloadProgress(newProgress);
+        setIsDownloading(newDownloading);
+      }, 0);
     });
 
     return () => {

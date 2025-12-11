@@ -36,7 +36,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
   onAddToQueue
 }) => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [downloadConfigs, setDownloadConfigs] = useState<Record<string, { version: string; loader?: string; targetPath: string; availableVersions: string[]; availableLoaders: string[] }>>({});
+  const [downloadConfigs, setDownloadConfigs] = useState<Record<string, { version: string; loader?: string; targetPath: string; availableVersions: string[]; availableLoaders: string[]; filteredLoaders: string[] }>>({});
   const [showVersionOptions, setShowVersionOptions] = useState<Record<string, boolean>>({});
   const [showLoaderOptions, setShowLoaderOptions] = useState<Record<string, boolean>>({});
   const [globalTargetPath, setGlobalTargetPath] = useState<string>('');
@@ -44,11 +44,12 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [itemDetailsLoaded, setItemDetailsLoaded] = useState<Set<string>>(new Set());
   const [animatingItems, setAnimatingItems] = useState<Set<string>>(new Set());
+  const [loadingLoaders, setLoadingLoaders] = useState<Record<string, boolean>>({});
 
   // Inicializar configuraciones por defecto para cada ítem
   useEffect(() => {
     if (isOpen) {
-      const initialConfigs: Record<string, { version: string; loader?: string; targetPath: string; availableVersions: string[]; availableLoaders: string[] }> = {};
+      const initialConfigs: Record<string, { version: string; loader?: string; targetPath: string; availableVersions: string[]; availableLoaders: string[]; filteredLoaders: string[] }> = {};
       const initialShowVersionOptions: Record<string, boolean> = {};
       const initialShowLoaderOptions: Record<string, boolean> = {};
 
@@ -70,7 +71,8 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
           loader: '',
           targetPath: globalTargetPath || '',
           availableVersions: itemVersions,
-          availableLoaders: itemLoaders
+          availableLoaders: itemLoaders,
+          filteredLoaders: itemLoaders // Inicialmente mostrar todos
         };
         initialShowVersionOptions[item.id] = false;
         initialShowLoaderOptions[item.id] = false;
@@ -121,6 +123,85 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
     }));
   };
 
+  // Filtrar loaders disponibles cuando se selecciona una versión para un item
+  const filterLoadersForItemVersion = async (itemId: string, version: string) => {
+    const item = contentItems.find(i => i.id === itemId);
+    if (!item || (item.type !== 'mods' && item.type !== 'modpacks') || !version) {
+      return;
+    }
+
+    setLoadingLoaders(prev => ({ ...prev, [itemId]: true }));
+    const compatibleLoaders: string[] = [];
+    const allLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
+
+      // Verificar cada loader para ver si tiene versiones disponibles
+      for (const loader of allLoaders) {
+        try {
+          let compatibleVersions: any[] = [];
+          
+        if (item.platform === 'modrinth') {
+          compatibleVersions = await window.api.modrinth.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: version,
+            loader: loader
+          });
+          
+          // Para Modrinth, verificar que haya versiones que coincidan con versión y loader
+          if (Array.isArray(compatibleVersions) && compatibleVersions.length > 0) {
+            // Verificar que al menos una versión tenga la versión de Minecraft seleccionada y el loader
+            const matchingVersions = compatibleVersions.filter((v: any) => {
+              const versionMatch = v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(version);
+              const loaderMatch = v.loaders && Array.isArray(v.loaders) && v.loaders.includes(loader);
+              return versionMatch && loaderMatch;
+            });
+            
+            if (matchingVersions.length > 0) {
+              compatibleLoaders.push(loader);
+            }
+          }
+        } else if (item.platform === 'curseforge') {
+          compatibleVersions = await window.api.curseforge.getCompatibleVersions({
+            projectId: item.id,
+            mcVersion: version,
+            loader: loader
+          });
+          
+          // Para CurseForge, verificar que haya versiones que coincidan exactamente con versión y loader
+          if (Array.isArray(compatibleVersions) && compatibleVersions.length > 0) {
+            const matchingVersions = compatibleVersions.filter((v: any) => {
+              // Verificar game_versions (array) o gameVersion (string)
+              const versionMatch = (v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(version)) ||
+                                   (v.gameVersion === version);
+              // Verificar loaders (array) o modLoader (string)
+              const loaderMatch = (v.loaders && Array.isArray(v.loaders) && v.loaders.includes(loader)) ||
+                                  (v.modLoader && v.modLoader.toLowerCase() === loader.toLowerCase());
+              return versionMatch && loaderMatch;
+            });
+            
+            if (matchingVersions.length > 0) {
+              compatibleLoaders.push(loader);
+            }
+          }
+        }
+        } catch (error) {
+          console.error(`Error verificando loader ${loader} para ${item.title}:`, error);
+        }
+      }
+
+    setDownloadConfigs(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        filteredLoaders: compatibleLoaders,
+        loader: prev[itemId].loader && compatibleLoaders.includes(prev[itemId].loader || '') 
+          ? prev[itemId].loader 
+          : '' // Limpiar loader si no está disponible
+      }
+    }));
+
+    setLoadingLoaders(prev => ({ ...prev, [itemId]: false }));
+  };
+
   const handleAddToQueue = async () => {
     setIsProcessing(true);
     
@@ -164,15 +245,48 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
             mcVersion: config.version,
             loader: config.loader || undefined
           });
+          
+          // Para Modrinth, verificar que haya versiones que coincidan exactamente
+          if (Array.isArray(compatibleVersions) && compatibleVersions.length > 0) {
+            const matchingVersions = compatibleVersions.filter((v: any) => {
+              const versionMatch = v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(config.version);
+              const loaderMatch = !config.loader || (v.loaders && Array.isArray(v.loaders) && v.loaders.includes(config.loader));
+              return versionMatch && loaderMatch;
+            });
+            
+            // Si no hay coincidencias exactas, considerar que no hay versiones compatibles
+            if (matchingVersions.length === 0) {
+              compatibleVersions = [];
+            }
+          }
         } else if (item.platform === 'curseforge') {
           compatibleVersions = await window.api.curseforge.getCompatibleVersions({
             projectId: item.id,
             mcVersion: config.version,
             loader: config.loader || undefined
           });
+          
+          // Para CurseForge, verificar que haya versiones que coincidan exactamente
+          if (Array.isArray(compatibleVersions) && compatibleVersions.length > 0) {
+            const matchingVersions = compatibleVersions.filter((v: any) => {
+              // Verificar game_versions (array) o gameVersion (string)
+              const versionMatch = (v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(config.version)) ||
+                                   (v.gameVersion === config.version);
+              // Verificar loaders (array) o modLoader (string)
+              const loaderMatch = !config.loader || 
+                                  (v.loaders && Array.isArray(v.loaders) && v.loaders.includes(config.loader)) ||
+                                  (v.modLoader && v.modLoader.toLowerCase() === config.loader.toLowerCase());
+              return versionMatch && loaderMatch;
+            });
+            
+            // Si no hay coincidencias exactas, considerar que no hay versiones compatibles
+            if (matchingVersions.length === 0) {
+              compatibleVersions = [];
+            }
+          }
         }
         
-        if (compatibleVersions.length === 0) {
+        if (!compatibleVersions || compatibleVersions.length === 0) {
           const loaderText = config.loader ? ` y ${config.loader}` : '';
           invalidItems.push({
             name: item.title,
@@ -369,7 +483,8 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                   loader: '', 
                   targetPath: '',
                   availableVersions: propsAvailableVersions.length > 0 ? propsAvailableVersions : item.minecraftVersions,
-                  availableLoaders: propsAvailableLoaders
+                  availableLoaders: propsAvailableLoaders,
+                  filteredLoaders: propsAvailableLoaders
                 };
                 
                 return (
@@ -480,9 +595,11 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                                             className={`flex items-center px-4 py-3 cursor-pointer hover:bg-gray-600/60 transition-colors duration-150 ${
                                               config.version === version ? 'bg-blue-600/30' : ''
                                             }`}
-                                            onClick={() => {
-                                              updateItemConfig(item.id, { ...config, version });
+                                            onClick={async () => {
+                                              updateItemConfig(item.id, { ...config, version, loader: '' }); // Limpiar loader al cambiar versión
                                               setShowVersionOptions(prev => ({ ...prev, [item.id]: false }));
+                                              // Filtrar loaders disponibles para esta versión
+                                              await filterLoadersForItemVersion(item.id, version);
                                             }}
                                           >
                                             <span className="mr-3 flex-shrink-0">
@@ -515,7 +632,9 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                                       Loader Compatible
                                     </label>
                                     <span className="text-xs text-gray-400">
-                                      {(config.availableLoaders || []).length} disponibles
+                                      {loadingLoaders[item.id] 
+                                        ? 'Verificando...' 
+                                        : `${(config.filteredLoaders || config.availableLoaders || []).length} disponibles`}
                                     </span>
                                   </div>
                                   <div className="relative">
@@ -558,8 +677,10 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
 
                                     {showLoaderOptions[item.id] && (
                                       <div className="absolute z-20 w-full mt-2 bg-gray-700/95 backdrop-blur-sm border border-gray-600 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
-                                        {(config.availableLoaders || []).length > 0 ? (
-                                          (config.availableLoaders || []).map((loader, idx) => (
+                                        {loadingLoaders[item.id] ? (
+                                          <div className="px-4 py-3 text-gray-400 text-center text-sm">Verificando loaders disponibles...</div>
+                                        ) : (config.filteredLoaders || config.availableLoaders || []).length > 0 ? (
+                                          (config.filteredLoaders || config.availableLoaders || []).map((loader, idx) => (
                                             <div
                                               key={idx}
                                               className={`flex items-center px-4 py-3 cursor-pointer hover:bg-gray-600/60 transition-colors duration-150 ${
@@ -583,10 +704,12 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                                                 {loader.charAt(0).toUpperCase() + loader.slice(1)}
                                               </span>
                                             </div>
-                                          ))
-                                        ) : (
-                                          <div className="px-4 py-3 text-gray-400 text-sm">No hay loaders disponibles</div>
-                                        )}
+                                        ))
+                                      ) : config.version ? (
+                                        <div className="px-4 py-3 text-gray-400 text-sm">No hay loaders disponibles para {config.version}</div>
+                                      ) : (
+                                        <div className="px-4 py-3 text-gray-400 text-sm">Selecciona una versión primero</div>
+                                      )}
                                       </div>
                                     )}
                                   </div>

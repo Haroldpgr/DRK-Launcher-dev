@@ -752,8 +752,16 @@ ipcMain.handle('instance:install-content', async (_e, payload: {
   versionId?: string;  // Nuevo parámetro para versión específica
 }) => {
   try {
+    // Detectar si es CurseForge (ID numérico) o Modrinth (ID alfanumérico)
+    // Los IDs de CurseForge son siempre numéricos, los de Modrinth son alfanuméricos
+    const contentIdStr = String(payload.contentId);
+    const isCurseForge = /^\d+$/.test(contentIdStr);
+    
+    console.log(`[install-content] contentId: ${payload.contentId} (${typeof payload.contentId}), isCurseForge: ${isCurseForge}, contentType: ${payload.contentType}`);
+    
     if (payload.contentType === 'modpack') {
       // Para modpacks, usar el método existente
+      console.log(`[install-content] Instalando modpack usando instanceCreationService`);
       await instanceCreationService.installContentToInstance(
         payload.instancePath,
         payload.contentId,
@@ -761,8 +769,19 @@ ipcMain.handle('instance:install-content', async (_e, payload: {
         payload.mcVersion,
         payload.loader
       );
+    } else if (isCurseForge) {
+      // Para CurseForge, usar el servicio de CurseForge
+      console.log(`[install-content] Instalando contenido de CurseForge (ID: ${payload.contentId}) usando curseforgeService`);
+      await curseforgeService.downloadContent(
+        payload.contentId,
+        payload.instancePath,
+        payload.mcVersion,
+        payload.loader,
+        payload.contentType
+      );
     } else {
-      // Para otros contenidos, usar el nuevo método con selección de versión
+      // Para Modrinth, usar el servicio de Modrinth
+      console.log(`[install-content] Instalando contenido de Modrinth (ID: ${payload.contentId}) usando modrinthDownloadService`);
       await modrinthDownloadService.downloadContent(
         payload.contentId,
         payload.instancePath,

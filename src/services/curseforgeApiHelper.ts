@@ -216,21 +216,36 @@ export function extractCurseForgeCompatibilityInfo(curseForgeResponse: any[]) {
 
   if (Array.isArray(curseForgeResponse)) {
     curseForgeResponse.forEach((item: any) => {
-      // Extraer versiones de juego
+      // Extraer versiones de juego - puede venir de diferentes estructuras
       if (item.gameVersion) {
-        gameVersions.add(item.gameVersion);
+        // Si es un string directo
+        if (typeof item.gameVersion === 'string') {
+          gameVersions.add(item.gameVersion);
+        }
+        // Si es un array
+        else if (Array.isArray(item.gameVersion)) {
+          item.gameVersion.forEach((version: string) => {
+            if (typeof version === 'string' && version.startsWith('1.')) {
+              gameVersions.add(version);
+            }
+          });
+        }
       }
-      // También puede estar en otros campos posibles
-      else if (item.gameVersions && Array.isArray(item.gameVersions)) {
-        item.gameVersions.forEach((version: string) => gameVersions.add(version));
+      
+      // También puede estar en gameVersions (array)
+      if (item.gameVersions && Array.isArray(item.gameVersions)) {
+        item.gameVersions.forEach((version: string) => {
+          if (typeof version === 'string' && version.startsWith('1.')) {
+            gameVersions.add(version);
+          }
+        });
       }
 
-      // Extraer modLoaders
+      // Extraer modLoaders - puede venir de diferentes estructuras
       if (item.modLoader) {
-        // Asegurar que el loader es uno de los tipos válidos
-        const validLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
-        const loaderLower = item.modLoader.toLowerCase();
-        if (validLoaders.some(valid => loaderLower.includes(valid))) {
+        // Si es un string directo
+        if (typeof item.modLoader === 'string') {
+          const loaderLower = item.modLoader.toLowerCase();
           if (loaderLower.includes('forge') && !loaderLower.includes('neo')) {
             modLoaders.add('forge');
           } else if (loaderLower.includes('fabric')) {
@@ -241,22 +256,34 @@ export function extractCurseForgeCompatibilityInfo(curseForgeResponse: any[]) {
             modLoaders.add('neoforge');
           }
         }
+        // Si es un objeto
+        else if (typeof item.modLoader === 'object') {
+          const loaderName = (item.modLoader.name || item.modLoader.type || '').toLowerCase();
+          if (loaderName.includes('forge') && !loaderName.includes('neo')) {
+            modLoaders.add('forge');
+          } else if (loaderName.includes('fabric')) {
+            modLoaders.add('fabric');
+          } else if (loaderName.includes('quilt')) {
+            modLoaders.add('quilt');
+          } else if (loaderName.includes('neoforge') || loaderName.includes('neo-forge')) {
+            modLoaders.add('neoforge');
+          }
+        }
       }
-      // También puede estar en otros formatos
-      else if (item.loaders && Array.isArray(item.loaders)) {
-        item.loaders.forEach((loader: string) => {
-          const validLoaders = ['forge', 'fabric', 'quilt', 'neoforge'];
-          const loaderLower = loader.toLowerCase();
-          if (validLoaders.some(valid => loaderLower.includes(valid))) {
-            if (loaderLower.includes('forge') && !loaderLower.includes('neo')) {
-              modLoaders.add('forge');
-            } else if (loaderLower.includes('fabric')) {
-              modLoaders.add('fabric');
-            } else if (loaderLower.includes('quilt')) {
-              modLoaders.add('quilt');
-            } else if (loaderLower.includes('neoforge') || loaderLower.includes('neo-forge')) {
-              modLoaders.add('neoforge');
-            }
+      
+      // También puede estar en loaders (array)
+      if (item.loaders && Array.isArray(item.loaders)) {
+        item.loaders.forEach((loader: any) => {
+          const loaderStr = typeof loader === 'string' ? loader : (loader.name || loader.type || '');
+          const loaderLower = loaderStr.toLowerCase();
+          if (loaderLower.includes('forge') && !loaderLower.includes('neo')) {
+            modLoaders.add('forge');
+          } else if (loaderLower.includes('fabric')) {
+            modLoaders.add('fabric');
+          } else if (loaderLower.includes('quilt')) {
+            modLoaders.add('quilt');
+          } else if (loaderLower.includes('neoforge') || loaderLower.includes('neo-forge')) {
+            modLoaders.add('neoforge');
           }
         });
       }
@@ -264,7 +291,17 @@ export function extractCurseForgeCompatibilityInfo(curseForgeResponse: any[]) {
   }
 
   return {
-    gameVersions: Array.from(gameVersions),
+    gameVersions: Array.from(gameVersions).sort((a, b) => {
+      // Ordenar versiones de forma descendente
+      const aParts = a.split('.').map(Number);
+      const bParts = b.split('.').map(Number);
+      for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+        if (aParts[i] !== bParts[i]) {
+          return bParts[i] - aParts[i];
+        }
+      }
+      return bParts.length - aParts.length;
+    }),
     modLoaders: Array.from(modLoaders)
   };
 }

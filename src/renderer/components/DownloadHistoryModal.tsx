@@ -25,29 +25,35 @@ const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
       const contentDownloads = downloads.filter(d => {
         const nameLower = d.name.toLowerCase();
         const urlLower = d.url?.toLowerCase() || '';
+        const idLower = d.id?.toLowerCase() || '';
         
-        // Verificar si es un complemento basado en nombre o URL
+        // Verificar si es un complemento basado en:
+        // 1. ID que empiece con "content-" o "multiple-" (descargas de contenido)
+        // 2. Nombre o URL que contenga palabras clave de complementos
         return (
-          nameLower.includes('.jar') && (
+          idLower.startsWith('content-') ||
+          idLower.startsWith('multiple-') ||
+          (nameLower.includes('.jar') && (
             nameLower.includes('mod') ||
             nameLower.includes('fabric') ||
             nameLower.includes('forge') ||
             nameLower.includes('quilt') ||
             nameLower.includes('neoforge')
-          )
-        ) ||
-        nameLower.includes('resourcepack') ||
-        nameLower.includes('resource-pack') ||
-        nameLower.includes('texture') ||
-        nameLower.includes('shader') ||
-        nameLower.includes('datapack') ||
-        nameLower.includes('data-pack') ||
-        urlLower.includes('/mod/') ||
-        urlLower.includes('/resourcepack/') ||
-        urlLower.includes('/shader/') ||
-        urlLower.includes('/datapack/') ||
-        urlLower.includes('modrinth.com') ||
-        urlLower.includes('curseforge.com');
+          )) ||
+          nameLower.includes('resourcepack') ||
+          nameLower.includes('resource-pack') ||
+          nameLower.includes('texture') ||
+          nameLower.includes('shader') ||
+          nameLower.includes('datapack') ||
+          nameLower.includes('data-pack') ||
+          urlLower.includes('/mod/') ||
+          urlLower.includes('/resourcepack/') ||
+          urlLower.includes('/shader/') ||
+          urlLower.includes('/datapack/') ||
+          urlLower.includes('modrinth.com') ||
+          urlLower.includes('curseforge.com') ||
+          urlLower.startsWith('content://')
+        );
       });
       
       setAllDownloads(contentDownloads);

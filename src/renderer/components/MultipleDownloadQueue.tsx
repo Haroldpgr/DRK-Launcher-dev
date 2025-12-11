@@ -82,8 +82,40 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
           throw new Error(`No hay versiones disponibles para ${item.version}${loaderText}. Este contenido no está disponible para esta combinación de versión y loader.`);
         }
         
+        // Crear entrada de descarga al inicio
+        const downloadId = `multiple-${item.id}-${Date.now()}`;
+        const startTime = Date.now();
+        
+        // Agregar entrada inicial
+        downloadService.addDownloadToHistory({
+          id: downloadId,
+          name: item.name,
+          url: `content://${item.platform}/${originalItemId}`,
+          status: 'downloading',
+          progress: 0,
+          downloadedBytes: 0,
+          totalBytes: 1000000,
+          startTime: startTime,
+          speed: 0,
+          path: item.targetPath,
+          profileUsername: undefined
+        });
+        
         // Actualizar progreso inicial
         multipleDownloadQueueService.updateItemStatus(item.id, 'downloading', 10);
+        downloadService.addDownloadToHistory({
+          id: downloadId,
+          name: item.name,
+          url: `content://${item.platform}/${originalItemId}`,
+          status: 'downloading',
+          progress: 10,
+          downloadedBytes: 100000,
+          totalBytes: 1000000,
+          startTime: startTime,
+          speed: 0,
+          path: item.targetPath,
+          profileUsername: undefined
+        });
         
         // Realizar la descarga usando la API
         await window.api.instances.installContent({
@@ -95,22 +127,41 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
           versionId: undefined
         });
         
+        // Actualizar progreso durante la descarga
+        for (let progress = 30; progress < 100; progress += 20) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          multipleDownloadQueueService.updateItemStatus(item.id, 'downloading', progress);
+          downloadService.addDownloadToHistory({
+            id: downloadId,
+            name: item.name,
+            url: `content://${item.platform}/${originalItemId}`,
+            status: 'downloading',
+            progress: progress,
+            downloadedBytes: Math.round((progress / 100) * 1000000),
+            totalBytes: 1000000,
+            startTime: startTime,
+            speed: 0,
+            path: item.targetPath,
+            profileUsername: undefined
+          });
+        }
+        
         // Actualizar progreso final
         multipleDownloadQueueService.updateItemStatus(item.id, 'downloading', 100);
         await new Promise(resolve => setTimeout(resolve, 300));
         
         multipleDownloadQueueService.updateItemStatus(item.id, 'completed', 100);
         
-        // Agregar al historial de descargas con la ruta correcta
+        // Marcar como completada
         downloadService.addDownloadToHistory({
-          id: `multiple-${item.id}-${Date.now()}`,
+          id: downloadId,
           name: item.name,
-          url: '',
+          url: `content://${item.platform}/${originalItemId}`,
           status: 'completed',
           progress: 100,
-          downloadedBytes: 0,
-          totalBytes: 0,
-          startTime: Date.now() - 2000,
+          downloadedBytes: 1000000,
+          totalBytes: 1000000,
+          startTime: startTime,
           endTime: Date.now(),
           speed: 0,
           path: item.targetPath, // Ruta donde se descargó
@@ -177,9 +228,9 @@ const MultipleDownloadQueue: React.FC<MultipleDownloadQueueProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {queue.map((item) => (
+              {queue.map((item, index) => (
                 <div 
-                  key={item.id} 
+                  key={`queue-${item.id}-${index}`} 
                   className={`p-4 rounded-xl border transition-all duration-200 ${
                     !item.enabled
                       ? 'opacity-50 bg-gray-800/30 border-gray-700/30'

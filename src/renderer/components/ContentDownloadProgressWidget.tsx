@@ -45,48 +45,65 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
 
   useEffect(() => {
     const unsubscribe = downloadService.subscribe(downloads => {
-      // Filtrar SOLO descargas de complementos (mods, resourcepacks, shaders, datapacks)
-      // Mejorar el filtro para ser más preciso
-      const contentDownloads = downloads.filter(d => {
-        const nameLower = d.name.toLowerCase();
-        const urlLower = d.url?.toLowerCase() || '';
+      // Usar setTimeout para evitar actualizar durante el renderizado
+      setTimeout(() => {
+        // Debug: ver todas las descargas
+        console.log('Total descargas recibidas:', downloads.length);
         
-        // Verificar si es un complemento basado en nombre o URL
-        return (
-          nameLower.includes('.jar') && (
-            nameLower.includes('mod') ||
-            nameLower.includes('fabric') ||
-            nameLower.includes('forge') ||
-            nameLower.includes('quilt') ||
-            nameLower.includes('neoforge')
-          )
-        ) ||
-        nameLower.includes('resourcepack') ||
-        nameLower.includes('resource-pack') ||
-        nameLower.includes('texture') ||
-        nameLower.includes('shader') ||
-        nameLower.includes('datapack') ||
-        nameLower.includes('data-pack') ||
-        urlLower.includes('/mod/') ||
-        urlLower.includes('/resourcepack/') ||
-        urlLower.includes('/shader/') ||
-        urlLower.includes('/datapack/') ||
-        urlLower.includes('modrinth.com') ||
-        urlLower.includes('curseforge.com');
-      });
+        // Filtrar SOLO descargas de complementos (mods, resourcepacks, shaders, datapacks)
+        // Mejorar el filtro para ser más preciso
+        const contentDownloads = downloads.filter(d => {
+          const nameLower = d.name.toLowerCase();
+          const urlLower = d.url?.toLowerCase() || '';
+          const idLower = d.id?.toLowerCase() || '';
+          
+          // Verificar si es un complemento basado en:
+          // 1. ID que empiece con "content-" (descargas de contenido individual)
+          // 2. ID que empiece con "multiple-" (descargas múltiples)
+          // 3. Nombre o URL que contenga palabras clave de complementos
+          const isContentDownload = idLower.startsWith('content-') || idLower.startsWith('multiple-');
+          const hasContentUrl = urlLower.startsWith('content://');
+          const hasContentKeywords = (
+            (nameLower.includes('.jar') && (
+              nameLower.includes('mod') ||
+              nameLower.includes('fabric') ||
+              nameLower.includes('forge') ||
+              nameLower.includes('quilt') ||
+              nameLower.includes('neoforge')
+            )) ||
+            nameLower.includes('resourcepack') ||
+            nameLower.includes('resource-pack') ||
+            nameLower.includes('texture') ||
+            nameLower.includes('shader') ||
+            nameLower.includes('datapack') ||
+            nameLower.includes('data-pack') ||
+            urlLower.includes('/mod/') ||
+            urlLower.includes('/resourcepack/') ||
+            urlLower.includes('/shader/') ||
+            urlLower.includes('/datapack/') ||
+            urlLower.includes('modrinth.com') ||
+            urlLower.includes('curseforge.com')
+          );
+          
+          return isContentDownload || hasContentUrl || hasContentKeywords;
+        });
+        
+        // Debug: ver descargas filtradas
+        console.log('Descargas de contenido filtradas:', contentDownloads.length, contentDownloads.map(d => ({ id: d.id, name: d.name, status: d.status })));
 
-      const active = contentDownloads.filter(d =>
-        d.status === 'downloading' || d.status === 'pending' || d.status === 'paused'
-      );
+        const active = contentDownloads.filter(d =>
+          d.status === 'downloading' || d.status === 'pending' || d.status === 'paused'
+        );
 
-      // Solo mostrar descargas completadas que tengan menos de 1 hora (para no mostrar todas al iniciar)
-      const oneHourAgo = Date.now() - (60 * 60 * 1000);
-      const completed = contentDownloads.filter(d =>
-        d.status === 'completed' && d.endTime && d.endTime > oneHourAgo
-      );
+        // Mostrar descargas completadas recientes (últimas 24 horas para ver más historial)
+        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+        const completed = contentDownloads.filter(d =>
+          d.status === 'completed' && d.endTime && d.endTime > oneDayAgo
+        );
 
-      setActiveDownloads(active);
-      setCompletedDownloads(completed);
+        setActiveDownloads(active);
+        setCompletedDownloads(completed);
+      }, 0);
     });
 
     return () => {
@@ -250,8 +267,8 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
                 ) : (
                   <>
                     {/* Active downloads */}
-                    {activeDownloads.map(download => (
-                      <div key={download.id} className="p-3 hover:bg-gray-700/50 transition-colors">
+                    {activeDownloads.map((download, index) => (
+                      <div key={`active-${download.id}-${index}`} className="p-3 hover:bg-gray-700/50 transition-colors">
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0">
                             <h4 className="font-medium text-white text-sm truncate">
@@ -284,8 +301,8 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
                     ))}
 
                     {/* Completed downloads */}
-                    {completedDownloads.map(download => (
-                      <div key={download.id} className="p-3 hover:bg-gray-700/50 transition-colors border-t border-gray-700/50">
+                    {completedDownloads.map((download, index) => (
+                      <div key={`completed-${download.id}-${index}`} className="p-3 hover:bg-gray-700/50 transition-colors border-t border-gray-700/50">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
@@ -342,9 +359,9 @@ const ContentDownloadProgressWidget: React.FC<ContentDownloadProgressWidgetProps
                   </div>
                 ) : (
                   <>
-                    {multipleQueue.map((item) => (
+                    {multipleQueue.map((item, index) => (
                       <div 
-                        key={item.id} 
+                        key={`multiple-${item.id}-${index}`} 
                         className={`p-3 hover:bg-gray-700/50 transition-colors ${
                           !item.enabled ? 'opacity-50' : ''
                         }`}

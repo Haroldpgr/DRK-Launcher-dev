@@ -7587,6 +7587,9 @@ var CurseForgeService = class {
     return imageUrl;
   }
   // Get compatible versions for a specific project
+  // Retorna estructura similar a Modrinth para compatibilidad
+  // NO filtra por mcVersion ni loader - devuelve TODAS las versiones disponibles
+  // El filtrado lo hace ContentPage igual que con Modrinth
   async getCompatibleVersions(projectId, mcVersion, loader) {
     try {
       const response = await (0, import_node_fetch6.default)(`${CURSEFORGE_API_URL}/mods/${projectId}/files`, {
@@ -7596,64 +7599,31 @@ var CurseForgeService = class {
         throw new Error(`Error fetching files for project ${projectId}: ${response.statusText}`);
       }
       const data = await response.json();
-      console.log("CurseForge files response FULL:", JSON.stringify(data, null, 2));
-      console.log("CurseForge files structure keys:", Object.keys(data));
-      if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
-        console.log("CurseForge first file example:", JSON.stringify(data.data[0], null, 2));
-      }
       if (data && data.data && Array.isArray(data.data)) {
         const compatibilityInfo = [];
         console.log(`CurseForge: Procesando ${data.data.length} archivos...`);
-        data.data.forEach((file, index) => {
-          if (index < 3) {
-            console.log(`CurseForge: Archivo ${index + 1} - Keys:`, Object.keys(file));
-            console.log(`CurseForge: Archivo ${index + 1} - Ejemplo de props importantes:`, {
-              fileName: file.fileName || file.displayName,
-              gameVersions: file.gameVersions,
-              modLoader: file.modLoader,
-              modLoaders: file.modLoaders,
-              categories: file.categories,
-              dependencies: file.dependencies
-            });
+        data.data.forEach((file) => {
+          if (!file.gameVersions || !Array.isArray(file.gameVersions)) {
+            return;
           }
-          if (file.gameVersions && Array.isArray(file.gameVersions)) {
-            let modLoaderType = null;
-            if (file.modLoader) {
-              modLoaderType = file.modLoader;
-            } else if (file.modLoaders && Array.isArray(file.modLoaders) && file.modLoaders.length > 0) {
-              modLoaderType = file.modLoaders[0];
-            } else if (file.fileFingerprint && typeof file.fileFingerprint === "object" && file.fileFingerprint.modLoader) {
-              modLoaderType = file.fileFingerprint.modLoader;
-            } else if (file.dependencies && Array.isArray(file.dependencies)) {
-              const loaderDep = file.dependencies.find(
-                (dep) => dep.type === 1 && (dep.slug.includes("forge") || dep.slug.includes("fabric") || dep.slug.includes("quilt"))
-              );
-              if (loaderDep) {
-                if (loaderDep.slug.includes("forge")) modLoaderType = "forge";
-                else if (loaderDep.slug.includes("fabric")) modLoaderType = "fabric";
-                else if (loaderDep.slug.includes("quilt")) modLoaderType = "quilt";
+          let extractedModLoader = null;
+          if (file.gameVersionTypeIds && Array.isArray(file.gameVersionTypeIds) && file.gameVersionTypeIds.length > 0) {
+            const loaderTypeMap = {
+              1: "forge",
+              4: "fabric",
+              5: "quilt",
+              6: "neoforge"
+            };
+            for (const typeId of file.gameVersionTypeIds) {
+              if (loaderTypeMap[typeId]) {
+                extractedModLoader = loaderTypeMap[typeId];
+                break;
               }
             }
-            let extractedModLoader = null;
-            const gameVersionList = [];
-            file.gameVersions.forEach((versionOrLoader) => {
-              const lowerVersion = versionOrLoader.toLowerCase();
-              if (lowerVersion.includes("forge") || lowerVersion.includes("fabric") || lowerVersion.includes("quilt") || lowerVersion.includes("neoforge")) {
-                if (lowerVersion.includes("forge") && !lowerVersion.includes("neo")) {
-                  extractedModLoader = "forge";
-                } else if (lowerVersion.includes("fabric")) {
-                  extractedModLoader = "fabric";
-                } else if (lowerVersion.includes("quilt")) {
-                  extractedModLoader = "quilt";
-                } else if (lowerVersion.includes("neoforge") || lowerVersion.includes("neo-forge")) {
-                  extractedModLoader = "neoforge";
-                }
-              } else if (versionOrLoader.startsWith("1.")) {
-                gameVersionList.push(versionOrLoader);
-              }
-            });
-            if (!extractedModLoader && modLoaderType) {
-              const loaderLower = modLoaderType.toLowerCase();
+          }
+          if (!extractedModLoader) {
+            if (file.modLoader) {
+              const loaderLower = file.modLoader.toLowerCase();
               if (loaderLower.includes("forge") && !loaderLower.includes("neo")) {
                 extractedModLoader = "forge";
               } else if (loaderLower.includes("fabric")) {
@@ -7664,26 +7634,163 @@ var CurseForgeService = class {
                 extractedModLoader = "neoforge";
               }
             }
-            gameVersionList.forEach((version) => {
-              if (version.startsWith("1.")) {
-                compatibilityInfo.push({
-                  gameVersion: version,
-                  modLoader: extractedModLoader,
-                  // Usar el loader extraído directamente del array gameVersions
-                  fileName: file.fileName || file.displayName || null,
-                  downloadUrl: file.downloadUrl || file.downloadUrl || null
-                });
-              }
-            });
           }
+          const gameVersionList = [];
+          file.gameVersions.forEach((versionOrLoader) => {
+            if (typeof versionOrLoader === "string" && versionOrLoader.startsWith("1.")) {
+              gameVersionList.push(versionOrLoader);
+            } else if (typeof versionOrLoader === "string") {
+              const lower = versionOrLoader.toLowerCase();
+              if (lower.includes("forge") && !lower.includes("neo") && !extractedModLoader) {
+                extractedModLoader = "forge";
+              } else if (lower.includes("fabric") && !extractedModLoader) {
+                extractedModLoader = "fabric";
+              } else if (lower.includes("quilt") && !extractedModLoader) {
+                extractedModLoader = "quilt";
+              } else if ((lower.includes("neoforge") || lower.includes("neo-forge")) && !extractedModLoader) {
+                extractedModLoader = "neoforge";
+              }
+            }
+          });
+          if (!extractedModLoader) {
+            return;
+          }
+          gameVersionList.forEach((version) => {
+            if (version.startsWith("1.")) {
+              compatibilityInfo.push({
+                game_versions: [version],
+                // Array como Modrinth
+                loaders: [extractedModLoader],
+                // Array como Modrinth
+                gameVersion: version,
+                // Mantener para compatibilidad
+                modLoader: extractedModLoader
+                // Mantener para compatibilidad
+              });
+            }
+          });
         });
-        return compatibilityInfo;
+        return compatibilityInfo.sort((a, b) => {
+          const aParts = a.game_versions[0].split(".").map(Number);
+          const bParts = b.game_versions[0].split(".").map(Number);
+          for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+            if (aParts[i] !== bParts[i]) {
+              return bParts[i] - aParts[i];
+            }
+          }
+          return bParts.length - aParts.length;
+        });
       }
       return [];
     } catch (error) {
       console.error(`Error getting compatible versions for project ${projectId}:`, error);
       return [];
     }
+  }
+  /**
+   * Descarga contenido de CurseForge a una instancia
+   */
+  async downloadContent(projectId, instancePath, mcVersion, loader, contentType = "mod") {
+    const fs14 = await import("fs");
+    const path15 = await import("path");
+    const https = await import("https");
+    const http = await import("http");
+    try {
+      const compatibleVersions = await this.getCompatibleVersions(projectId, mcVersion, loader);
+      if (compatibleVersions.length === 0) {
+        throw new Error(`No se encontr\xF3 una versi\xF3n compatible para ${mcVersion} y ${loader || "cualquier loader"}`);
+      }
+      const targetVersion = compatibleVersions[0];
+      let downloadUrl = targetVersion.downloadUrl;
+      if (!downloadUrl && targetVersion.fileId) {
+        const fileId = targetVersion.fileId;
+        const fileName2 = targetVersion.fileName || `curseforge-${projectId}.jar`;
+        downloadUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1e3)}/${fileId % 1e3}/${fileName2}`;
+      }
+      if (!downloadUrl) {
+        throw new Error(`No se encontr\xF3 URL de descarga para la versi\xF3n compatible`);
+      }
+      let targetDir;
+      switch (contentType) {
+        case "mod":
+          targetDir = path15.join(instancePath, "mods");
+          break;
+        case "resourcepack":
+          targetDir = path15.join(instancePath, "resourcepacks");
+          break;
+        case "shader":
+          targetDir = path15.join(instancePath, "shaderpacks");
+          break;
+        case "datapack":
+          targetDir = path15.join(instancePath, "datapacks");
+          break;
+        default:
+          throw new Error(`Tipo de contenido no soportado: ${contentType}`);
+      }
+      if (!fs14.existsSync(targetDir)) {
+        fs14.mkdirSync(targetDir, { recursive: true });
+      }
+      const fileName = targetVersion.fileName || `curseforge-${projectId}.jar`;
+      const filePath = path15.join(targetDir, fileName);
+      let finalPath = filePath;
+      if (fs14.existsSync(filePath)) {
+        const ext = path15.extname(fileName);
+        const nameWithoutExt = path15.basename(fileName, ext);
+        let counter = 1;
+        let uniqueFileName;
+        do {
+          uniqueFileName = `${nameWithoutExt}_${counter}${ext}`;
+          finalPath = path15.join(targetDir, uniqueFileName);
+          counter++;
+        } while (fs14.existsSync(finalPath));
+      }
+      await this.downloadFileToPath(downloadUrl, finalPath);
+      console.log(`Descargado ${fileName} en ${targetDir}`);
+    } catch (error) {
+      console.error(`Error al descargar contenido ${contentType} ${projectId}:`, error);
+      throw error;
+    }
+  }
+  /**
+   * Descarga un archivo desde una URL a una ruta local
+   */
+  async downloadFileToPath(url, filePath) {
+    const fs14 = await import("fs");
+    const https = await import("https");
+    const http = await import("http");
+    return new Promise((resolve, reject) => {
+      const file = fs14.createWriteStream(filePath);
+      const protocol = url.startsWith("https") ? https : http;
+      protocol.get(url, (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          return this.downloadFileToPath(response.headers.location, filePath).then(resolve).catch(reject);
+        }
+        if (response.statusCode !== 200) {
+          file.close();
+          fs14.unlinkSync(filePath);
+          reject(new Error(`Error al descargar: ${response.statusCode} ${response.statusMessage}`));
+          return;
+        }
+        response.pipe(file);
+        file.on("finish", () => {
+          file.close();
+          resolve();
+        });
+        file.on("error", (err) => {
+          file.close();
+          if (fs14.existsSync(filePath)) {
+            fs14.unlinkSync(filePath);
+          }
+          reject(err);
+        });
+      }).on("error", (err) => {
+        file.close();
+        if (fs14.existsSync(filePath)) {
+          fs14.unlinkSync(filePath);
+        }
+        reject(err);
+      });
+    });
   }
 };
 var curseforgeService = new CurseForgeService();
@@ -9826,7 +9933,11 @@ import_electron2.ipcMain.handle("instances:scan-and-register", async () => {
 });
 import_electron2.ipcMain.handle("instance:install-content", async (_e, payload) => {
   try {
+    const contentIdStr = String(payload.contentId);
+    const isCurseForge = /^\d+$/.test(contentIdStr);
+    console.log(`[install-content] contentId: ${payload.contentId} (${typeof payload.contentId}), isCurseForge: ${isCurseForge}, contentType: ${payload.contentType}`);
     if (payload.contentType === "modpack") {
+      console.log(`[install-content] Instalando modpack usando instanceCreationService`);
       await instanceCreationService.installContentToInstance(
         payload.instancePath,
         payload.contentId,
@@ -9834,7 +9945,17 @@ import_electron2.ipcMain.handle("instance:install-content", async (_e, payload) 
         payload.mcVersion,
         payload.loader
       );
+    } else if (isCurseForge) {
+      console.log(`[install-content] Instalando contenido de CurseForge (ID: ${payload.contentId}) usando curseforgeService`);
+      await curseforgeService.downloadContent(
+        payload.contentId,
+        payload.instancePath,
+        payload.mcVersion,
+        payload.loader,
+        payload.contentType
+      );
     } else {
+      console.log(`[install-content] Instalando contenido de Modrinth (ID: ${payload.contentId}) usando modrinthDownloadService`);
       await modrinthDownloadService.downloadContent(
         payload.contentId,
         payload.instancePath,
