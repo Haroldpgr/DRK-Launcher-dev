@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { downloadService } from '../services/downloadService';
 import { extractCurseForgeCompatibilityInfo } from '../../services/curseforgeApiHelper';
 import { modrinthAPI, ModrinthProject } from '../services/ModrinthAPI_Handler';
@@ -41,6 +41,7 @@ interface ContentItem {
 const ContentPage: React.FC = () => {
   const { type = 'modpacks', id } = useParams<{ type?: ContentType; id?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVersion, setSelectedVersion] = useState<string>('all');
@@ -64,6 +65,15 @@ const ContentPage: React.FC = () => {
   const [installedContent, setInstalledContent] = useState<Set<string>>(new Set()); // Contenido ya instalado
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('modrinth'); // New state to track selected platform
+
+  // Leer el parámetro platform de la URL al cargar
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const platformParam = searchParams.get('platform');
+    if (platformParam === 'curseforge' || platformParam === 'modrinth') {
+      setSelectedPlatform(platformParam as Platform);
+    }
+  }, [location.search]);
   const [selectedModalProject, setSelectedModalProject] = useState<ModrinthProject | null>(null);
   const [selectedModalMod, setSelectedModalMod] = useState<CurseForgeMod | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -2215,7 +2225,7 @@ const ContentPage: React.FC = () => {
                       loading="lazy"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
-                        target.src = 'https://via.placeholder.com/600x400/1f2937/9ca3af?text=Sin+imagen';
+                        target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMWYyOTM3Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzljYTNhZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk1pbmVjcmFmdDwvdGV4dD48L3N2Zz4=';
                       }}
                     />
                   </div>

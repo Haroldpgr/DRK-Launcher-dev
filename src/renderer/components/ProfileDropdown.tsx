@@ -7,7 +7,7 @@ interface ProfileDropdownProps {
   currentUser: string | null;
   profiles: Profile[];
   onSelectAccount: (username: string) => void;
-  onAddAccount: () => void;
+  onAddAccount?: () => void;
   onDeleteAccount: (username: string) => void;
   onLoginClick: () => void;
 }
@@ -65,7 +65,11 @@ export default function ProfileDropdown({
   }, []);
 
   const handleAddAccount = () => {
-    onLoginClick();
+    if (onAddAccount) {
+      onAddAccount();
+    } else {
+      onLoginClick();
+    }
     setIsOpen(false);
   };
 
@@ -112,6 +116,8 @@ export default function ProfileDropdown({
               <div className="text-xs text-gray-400">
                 {profiles.find(p => p.username === currentUser)?.type === 'microsoft' 
                   ? 'Cuenta Microsoft' 
+                  : profiles.find(p => p.username === currentUser)?.type === 'elyby'
+                  ? 'Cuenta Ely.by'
                   : 'Cuenta no premium'}
               </div>
             </div>
@@ -160,7 +166,11 @@ export default function ProfileDropdown({
                   <div>
                     <div className="text-white text-sm font-medium">{profile.username}</div>
                     <div className="text-xs text-gray-400">
-                      {profile.type === 'microsoft' ? 'Microsoft' : 'No premium'}
+                      {profile.type === 'microsoft' 
+                        ? 'Microsoft' 
+                        : profile.type === 'elyby'
+                        ? 'Ely.by'
+                        : 'No premium'}
                     </div>
                   </div>
                 </div>

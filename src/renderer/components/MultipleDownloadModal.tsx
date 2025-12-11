@@ -524,7 +524,7 @@ const MultipleDownloadModal: React.FC<MultipleDownloadModalProps> = ({
                               className="w-16 h-16 object-cover rounded-lg border border-gray-600/50 flex-shrink-0"
                               onError={(e) => {
                                 const target = e.target as HTMLImageElement;
-                                target.src = 'https://via.placeholder.com/64x64/1f2937/9ca3af?text=Sin+imagen';
+                                target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzFmMjkzNyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5Y2EzYWYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5NPC90ZXh0Pjwvc3ZnPg==';
                               }}
                             />
                             <div className="flex-1 min-w-0">

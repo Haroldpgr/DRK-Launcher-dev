@@ -119,7 +119,7 @@ export default function App() {
     }
   };
 
-  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' = 'non-premium') => {
+  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' | 'elyby' = 'non-premium') => {
     const newProfile = profileService.addProfile(username, type);
     setAccounts([...accounts, newProfile]);
     setCurrentUser(username);
@@ -158,6 +158,14 @@ export default function App() {
 
   const handleNonPremiumLogin = (username: string) => {
     const newProfile = profileService.addProfile(username, 'non-premium');
+    setAccounts([...accounts, newProfile]);
+    setCurrentUser(username);
+    profileService.setCurrentProfile(username); // Ensure the newly added profile is set as current
+    handleCloseLoginModal();
+  };
+
+  const handleElyByLogin = (username: string) => {
+    const newProfile = profileService.addProfile(username, 'elyby');
     setAccounts([...accounts, newProfile]);
     setCurrentUser(username);
     profileService.setCurrentProfile(username); // Ensure the newly added profile is set as current
@@ -219,6 +227,7 @@ export default function App() {
         onClose={handleCloseLoginModal}
         onMicrosoftLogin={handleMicrosoftLogin}
         onNonPremiumLogin={handleNonPremiumLogin}
+        onElyByLogin={handleElyByLogin}
       />
       <NotificationContainer />
     </div>

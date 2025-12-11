@@ -174,7 +174,7 @@ const SingleDownloadModal: React.FC<SingleDownloadModalProps> = ({
                 className="w-32 h-32 object-cover rounded-xl border border-gray-600 shadow-lg"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
-                  target.src = 'https://via.placeholder.com/128x128/1f2937/9ca3af?text=Sin+imagen';
+                  target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMWYyOTM3Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxOCIgZmlsbD0iIzljYTNhZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk08L3RleHQ+PC9zdmc+';
                 }}
               />
             </div>

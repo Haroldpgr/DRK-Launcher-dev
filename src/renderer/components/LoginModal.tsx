@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import Button from './Button'; // Assuming Button component is available
+import { elyByService } from '../services/elyByService';
+import { showModernAlert } from '../utils/uiUtils';
 
 type LoginModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onMicrosoftLogin: () => void;
   onNonPremiumLogin: (username: string) => void;
+  onElyByLogin?: (username: string) => void;
 };
 
-export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPremiumLogin }: LoginModalProps) {
+export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPremiumLogin, onElyByLogin }: LoginModalProps) {
   const [nonPremiumUsername, setNonPremiumUsername] = useState('');
-  const [selectedLoginType, setSelectedLoginType] = useState<'none' | 'microsoft' | 'non-premium'>('none');
+  const [elyByUsername, setElyByUsername] = useState('');
+  const [selectedLoginType, setSelectedLoginType] = useState<'none' | 'microsoft' | 'non-premium' | 'elyby'>('none');
 
   if (!isOpen) {
     return null;
@@ -68,6 +72,37 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
                 selectedLoginType === 'microsoft' ? 'border-blue-500 bg-blue-500' : 'border-gray-500'
               }`}>
                 {selectedLoginType === 'microsoft' && (
+                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Ely.by Option */}
+          <div
+            onClick={() => setSelectedLoginType('elyby')}
+            className={`w-full cursor-pointer p-4 rounded-xl transition-all duration-300 shadow-lg border-2 ${
+              selectedLoginType === 'elyby'
+                ? 'border-purple-500 bg-purple-900/30'
+                : 'border-gray-700 bg-gray-700/50 hover:border-gray-600 hover:bg-gray-700/70'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <svg className="w-6 h-6 text-purple-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path>
+                </svg>
+                <div className="text-left">
+                  <div className="text-white font-semibold">Iniciar sesión con Ely.by</div>
+                  <div className="text-xs text-gray-400">Sistema alternativo de skins y autenticación</div>
+                </div>
+              </div>
+              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                selectedLoginType === 'elyby' ? 'border-purple-500 bg-purple-500' : 'border-gray-500'
+              }`}>
+                {selectedLoginType === 'elyby' && (
                   <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path>
                   </svg>
@@ -168,7 +203,117 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
             </div>
           )}
 
-          {(selectedLoginType === 'microsoft' || selectedLoginType === 'non-premium') && (
+          {selectedLoginType === 'elyby' && (
+            <div className="space-y-4 mt-2">
+              <div className="bg-gradient-to-br from-purple-900/90 to-pink-900/90 text-white p-5 rounded-xl shadow-xl border border-purple-700/40 backdrop-blur-sm">
+                <div className="flex justify-center mb-3">
+                  <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path>
+                  </svg>
+                </div>
+                <div className="text-center mb-4">
+                  <h3 className="text-lg font-bold mb-2">Inicio de Sesión con Ely.by</h3>
+                  <p className="text-purple-200 text-sm mb-3">Sistema alternativo de skins y autenticación para Minecraft</p>
+                  <a 
+                    href="https://ely.by/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-block bg-purple-700/80 text-purple-100 px-4 py-1.5 rounded-full text-sm font-semibold mx-auto hover:bg-purple-600/80 transition-colors mb-3"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open('https://ely.by/', '_blank');
+                    }}
+                  >
+                    Visitar Ely.by
+                  </a>
+                </div>
+              </div>
+              <div className="relative mx-auto max-w-full">
+                <input
+                  type="text"
+                  placeholder="Nombre de usuario de Ely.by"
+                  className="w-full p-4 rounded-xl bg-gray-800/80 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-lg text-lg transition-all duration-300"
+                  value={elyByUsername}
+                  onChange={(e) => setElyByUsername(e.target.value)}
+                  onKeyPress={async (e) => {
+                    if (e.key === 'Enter' && elyByUsername.trim() && onElyByLogin) {
+                      try {
+                        // Verificar que el usuario existe en Ely.by
+                        const userExists = await elyByService.verifyUsername(elyByUsername.trim());
+                        
+                        if (userExists) {
+                          // Usuario válido, agregar al perfil
+                          onElyByLogin(elyByUsername.trim());
+                          setElyByUsername('');
+                          setSelectedLoginType('none');
+                        } else {
+                          // Usuario no encontrado
+                          await showModernAlert(
+                            'Usuario no encontrado',
+                            `El usuario "${elyByUsername.trim()}" no existe en Ely.by. Por favor, verifica el nombre de usuario o crea una cuenta en https://ely.by/`,
+                            'error'
+                          );
+                        }
+                      } catch (error) {
+                        console.error('Error al verificar usuario en Ely.by:', error);
+                        await showModernAlert(
+                          'Error de conexión',
+                          'No se pudo verificar el usuario con Ely.by. Por favor, verifica tu conexión e inténtalo de nuevo.',
+                          'error'
+                        );
+                      }
+                    }
+                  }}
+                />
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                  </svg>
+                </div>
+              </div>
+              <Button
+                onClick={async () => {
+                  if (elyByUsername.trim() && onElyByLogin) {
+                    try {
+                      // Verificar que el usuario existe en Ely.by
+                      const userExists = await elyByService.verifyUsername(elyByUsername.trim());
+                      
+                      if (userExists) {
+                        // Usuario válido, agregar al perfil
+                        onElyByLogin(elyByUsername.trim());
+                        setElyByUsername('');
+                        setSelectedLoginType('none');
+                      } else {
+                        // Usuario no encontrado
+                        await showModernAlert(
+                          'Usuario no encontrado',
+                          `El usuario "${elyByUsername.trim()}" no existe en Ely.by. Por favor, verifica el nombre de usuario o crea una cuenta en https://ely.by/`,
+                          'error'
+                        );
+                      }
+                    } catch (error) {
+                      console.error('Error al verificar usuario en Ely.by:', error);
+                      await showModernAlert(
+                        'Error de conexión',
+                        'No se pudo verificar el usuario con Ely.by. Por favor, verifica tu conexión e inténtalo de nuevo.',
+                        'error'
+                      );
+                    }
+                  }
+                }}
+                disabled={!elyByUsername.trim()}
+                className={`w-full py-4 px-4 rounded-xl transition-all duration-300 shadow-lg text-lg font-semibold ${
+                  elyByUsername.trim()
+                    ? 'bg-gradient-to-r from-purple-600 to-pink-700 hover:from-purple-700 hover:to-pink-800 text-white shadow-purple-500/40 hover:shadow-purple-500/50 transform hover:-translate-y-0.5'
+                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                Iniciar sesión con Ely.by
+              </Button>
+            </div>
+          )}
+
+          {(selectedLoginType === 'microsoft' || selectedLoginType === 'non-premium' || selectedLoginType === 'elyby') && (
             <div className="pt-3">
               <Button
                 variant="secondary"

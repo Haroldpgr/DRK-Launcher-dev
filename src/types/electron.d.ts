@@ -59,6 +59,10 @@ declare global {
       };
       curseforge: {
         search: (options: { contentType: string; search: string }) => Promise<any[]>;
+        getCompatibleVersions: (payload: { projectId: string, mcVersion: string, loader?: string }) => Promise<any[]>;
+      };
+      elyby: {
+        verifyUsername: (username: string) => Promise<{ exists: boolean; user: { id: string; name: string } | null }>;
       };
       download: {
         start: (data: { url: string; filename: string; itemId: string }) => void;

@@ -60,7 +60,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
           loading="lazy"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
-            target.src = 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen';
+            target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMWYyOTM3Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzljYTNhZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk1pbmVjcmFmdDwvdGV4dD48L3N2Zz4=';
           }}
         />
         <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">

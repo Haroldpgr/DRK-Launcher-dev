@@ -175,7 +175,7 @@ export class CurseForgeService {
       item.thumbnailUrl ||
       item.thumbnail?.url ||
       item.imageUrl ||
-      'https://via.placeholder.com/400x200';
+      null;
 
     return imageUrl;
   }

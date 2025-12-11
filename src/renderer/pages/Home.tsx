@@ -5,12 +5,13 @@ import IconButton from '../components/IconButton'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { Profile } from '../services/profileService';
 import HomeServerCard from '../components/HomeServerCard';
+import { getDefaultPlaceholder } from '../utils/imagePlaceholder';
 
 type NewsItem = { id: string; title: string; body: string }
 type Instance = { id: string; name: string; version: string; loader?: string }
 
 type HomeProps = {
-  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium') => void;
+  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium' | 'elyby') => void;
   onDeleteAccount: (username: string) => void;
   onSelectAccount: (username: string) => void;
   onLoginClick: () => void;
@@ -22,16 +23,20 @@ type HomeProps = {
 export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, onLoginClick, onPlay, currentUser, accounts }: HomeProps) {
   const [feed, setFeed] = useState<NewsItem[]>([])
   const [instances, setInstances] = useState<Instance[]>([])
-  const [modpacks, setModpacks] = useState<any[]>([]); // Estado para almacenar modpacks
-  const [shaders, setShaders] = useState<any[]>([]); // Estado para almacenar shaders
+  const [modpacks, setModpacks] = useState<any[]>([]); // Estado para almacenar modpacks de Modrinth
+  const [modpacksCurseForge, setModpacksCurseForge] = useState<any[]>([]); // Estado para almacenar modpacks de CurseForge
+  const [shaders, setShaders] = useState<any[]>([]); // Estado para almacenar shaders de Modrinth
+  const [shadersCurseForge, setShadersCurseForge] = useState<any[]>([]); // Estado para almacenar shaders de CurseForge
   const [servers, setServers] = useState<any[]>([]); // Estado para almacenar servidores
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const last = useMemo(() => instances[instances.length - 1], [instances])
 
   useEffect(() => {
     setFeed([
-      { id: 'welcome', title: 'Bienvenido a DRK Launcher', body: 'Crea tu primera instancia y explora modpacks.' },
-      { id: 'tips', title: 'Consejo', body: 'Configura Java y RAM desde Ajustes para mejor rendimiento.' }
+      { id: 'welcome', title: '🎮 ¡Bienvenido a DRK Launcher!', body: 'Explora miles de mods, modpacks, shaders y más. Crea tu primera instancia y comienza tu aventura.' },
+      { id: 'update', title: '✨ Nueva Actualización Disponible', body: 'Mejoras de rendimiento, nuevas funciones y correcciones de errores. ¡Actualiza ahora desde Ajustes!' },
+      { id: 'tips', title: '💡 Consejo del Día', body: 'Configura Java y RAM desde Ajustes para mejor rendimiento. Usa al menos 4GB de RAM para modpacks grandes.' },
+      { id: 'community', title: '👥 Únete a la Comunidad', body: 'Comparte tus creaciones, pide ayuda y descubre nuevas formas de jugar con otros jugadores.' }
     ])
   }, [])
 
@@ -140,14 +145,14 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
         console.error("Error al cargar modpacks:", error);
         // En caso de error, usar datos de respaldo
         setModpacks([
-          { id: 'opt', name: 'Optimizado', description: 'Paquete de rendimiento y gráficos suaves', tags: ['Optimización'], imageUrl: 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen' },
-          { id: 'adventure', name: 'Aventura+', description: 'Explora mazmorras y nuevas dimensiones', tags: ['Aventura'], imageUrl: 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen' },
-          { id: 'builder', name: 'Constructor', description: 'Bloques y herramientas para creativos', tags: ['Construcción'], imageUrl: 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen' }
+          { id: 'opt', name: 'Optimizado', description: 'Paquete de rendimiento y gráficos suaves', tags: ['Optimización'], imageUrl: getDefaultPlaceholder() },
+          { id: 'adventure', name: 'Aventura+', description: 'Explora mazmorras y nuevas dimensiones', tags: ['Aventura'], imageUrl: getDefaultPlaceholder() },
+          { id: 'builder', name: 'Constructor', description: 'Bloques y herramientas para creativos', tags: ['Construcción'], imageUrl: getDefaultPlaceholder() }
         ]);
       });
     }
 
-    // Cargar shaders recomendados
+    // Cargar shaders recomendados de Modrinth
     if (window.api?.modrinth?.search) {
       window.api.modrinth.search({
         contentType: 'shaders',
@@ -160,10 +165,42 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
         console.error("Error al cargar shaders:", error);
         // En caso de error, usar datos de respaldo
         setShaders([
-          { id: 's1', name: 'Oculus', description: 'Shaderpack de alto rendimiento con efectos visuales realistas', imageUrl: 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen' },
-          { id: 's2', name: 'BSL', description: 'Shaderpack con iluminación dinámica y sombras realistas', imageUrl: 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen' },
-          { id: 's3', name: 'SEUS', description: 'Shaderpack con efectos de luz y sombra de alta calidad', imageUrl: 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen' }
+          { id: 's1', name: 'Oculus', description: 'Shaderpack de alto rendimiento con efectos visuales realistas', imageUrl: getDefaultPlaceholder() },
+          { id: 's2', name: 'BSL', description: 'Shaderpack con iluminación dinámica y sombras realistas', imageUrl: getDefaultPlaceholder() },
+          { id: 's3', name: 'SEUS', description: 'Shaderpack con efectos de luz y sombra de alta calidad', imageUrl: getDefaultPlaceholder() }
         ]);
+      });
+    }
+
+    // Cargar modpacks de CurseForge (usando la misma lógica que ContentPage)
+    if (window.api?.curseforge?.search) {
+      window.api.curseforge.search({
+        contentType: 'modpacks',
+        search: ''
+      }).then((modpacksList: any) => {
+        // Los resultados ya vienen mapeados desde curseforgeService con imageUrl correcto
+        // Tomar solo los primeros 3 modpacks
+        const topModpacks = modpacksList.slice(0, 3);
+        setModpacksCurseForge(topModpacks);
+      }).catch((error: any) => {
+        console.error("Error al cargar modpacks de CurseForge:", error);
+        setModpacksCurseForge([]);
+      });
+    }
+
+    // Cargar shaders de CurseForge (usando la misma lógica que ContentPage)
+    if (window.api?.curseforge?.search) {
+      window.api.curseforge.search({
+        contentType: 'shaders',
+        search: ''
+      }).then((shadersList: any) => {
+        // Los resultados ya vienen mapeados desde curseforgeService con imageUrl correcto
+        // Tomar solo los primeros 3 shaders
+        const topShaders = shadersList.slice(0, 3);
+        setShadersCurseForge(topShaders);
+      }).catch((error: any) => {
+        console.error("Error al cargar shaders de CurseForge:", error);
+        setShadersCurseForge([]);
       });
     }
 
@@ -249,8 +286,8 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
 
         <Card>
           <div className="flex items-center justify-between mb-4">
-            <div className="text-xl font-semibold text-gray-200">Descubre un modpack</div>
-            <Button variant="secondary" onClick={() => location.assign('#/contenido/modpacks')}>Ver más</Button>
+            <div className="text-xl font-semibold text-gray-200">Descubre un modpack de Modrinth</div>
+            <Button variant="secondary" onClick={() => location.assign('#/contenido/modpacks?platform=modrinth')}>Ver más</Button>
           </div>
           <div className="grid grid-cols-3 gap-4">
             {modpacks.map(m => (
@@ -262,7 +299,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
                   loading="lazy"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
-                    target.src = 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen';
+                    target.src = getDefaultPlaceholder();
                   }}
                 />
                 <div className="p-3">
@@ -282,11 +319,53 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
           </div>
         </Card>
 
-        {/* Sección de shaders */}
+        {/* Sección de modpacks de CurseForge */}
         <Card>
           <div className="flex items-center justify-between mb-4">
-            <div className="text-xl font-semibold text-gray-200">Descubre shaders</div>
-            <Button variant="secondary" onClick={() => location.assign('#/contenido/shaders')}>Ver más</Button>
+            <div className="text-xl font-semibold text-gray-200">Descubre un modpack de CurseForge</div>
+            <Button variant="secondary" onClick={() => {
+              window.location.hash = '/contenido/modpacks?platform=curseforge';
+            }}>Ver más</Button>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            {modpacksCurseForge.length > 0 ? modpacksCurseForge.map(m => (
+              <div key={m.id} className="rounded-xl overflow-hidden bg-gray-800/60 backdrop-blur-sm border border-gray-700/50 transition-transform hover:scale-[1.02]">
+                <img
+                  src={m.imageUrl || getDefaultPlaceholder()}
+                  alt={m.name || m.title}
+                  className="w-full h-32 object-cover"
+                  loading="lazy"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = getDefaultPlaceholder();
+                  }}
+                />
+                <div className="p-3">
+                  <div className="font-medium mb-1 text-gray-100">{m.title || m.name}</div>
+                  <div className="text-sm text-gray-400 mb-2">{m.description || 'Sin descripción disponible'}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        window.location.hash = `/contenido/modpacks/${m.id}?platform=curseforge`;
+                      }}
+                    >
+                      Ver
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="col-span-3 text-center text-gray-400 py-8">Cargando modpacks de CurseForge...</div>
+            )}
+          </div>
+        </Card>
+
+        {/* Sección de shaders de Modrinth */}
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-xl font-semibold text-gray-200">Descubre shaders de Modrinth</div>
+            <Button variant="secondary" onClick={() => location.assign('#/contenido/shaders?platform=modrinth')}>Ver más</Button>
           </div>
           <div className="grid grid-cols-3 gap-4">
             {shaders.map(s => (
@@ -298,7 +377,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
                   loading="lazy"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
-                    target.src = 'https://via.placeholder.com/600x300/1f2937/9ca3af?text=Sin+imagen';
+                    target.src = getDefaultPlaceholder();
                   }}
                 />
                 <div className="p-3">
@@ -315,6 +394,50 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
                 </div>
               </div>
             ))}
+          </div>
+        </Card>
+
+        {/* Sección de shaders de CurseForge */}
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-xl font-semibold text-gray-200">Descubre shaders de CurseForge</div>
+            <Button variant="secondary" onClick={() => {
+              window.location.hash = '/contenido/shaders?platform=curseforge';
+            }}>Ver más</Button>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            {shadersCurseForge.length > 0 ? shadersCurseForge.map(s => (
+              <div key={s.id} className="rounded-xl overflow-hidden bg-gray-800/60 backdrop-blur-sm border border-gray-700/50 transition-transform hover:scale-[1.02]">
+                <img
+                  src={s.imageUrl || getDefaultPlaceholder()}
+                  alt={s.title || s.name || 'Shader'}
+                  className="w-full h-32 object-cover"
+                  loading="lazy"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    if (target.src !== getDefaultPlaceholder()) {
+                      target.src = getDefaultPlaceholder();
+                    }
+                  }}
+                />
+                <div className="p-3">
+                  <div className="font-medium mb-1 text-gray-100">{s.title || s.name || 'Sin nombre'}</div>
+                  <div className="text-sm text-gray-400 mb-2">{s.description || 'Sin descripción disponible'}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        window.location.hash = `/contenido/shaders/${s.id}?platform=curseforge`;
+                      }}
+                    >
+                      Ver
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="col-span-3 text-center text-gray-400 py-8">Cargando shaders de CurseForge...</div>
+            )}
           </div>
         </Card>
 
@@ -363,10 +486,61 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
             currentUser={currentUser}
             profiles={accounts}
             onSelectAccount={onSelectAccount}
-            onAddAccount={onAddAccount}
+            onAddAccount={() => onLoginClick()}
             onDeleteAccount={onDeleteAccount}
             onLoginClick={onLoginClick}
           />
+        </Card>
+
+        {/* Recuadros de anuncios */}
+        <Card>
+          <div className="text-xl font-semibold mb-4 text-gray-200">Anuncios</div>
+          <div className="space-y-3">
+            {/* Anuncio 1 */}
+            <div className="p-4 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 backdrop-blur-sm rounded-xl border border-blue-700/30 hover:border-blue-600/50 transition-all cursor-pointer">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center">
+                  <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold text-white">¡Nueva Actualización!</div>
+                  <div className="text-xs text-blue-300">Descubre las últimas mejoras</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Anuncio 2 */}
+            <div className="p-4 bg-gradient-to-r from-purple-900/40 to-pink-900/40 backdrop-blur-sm rounded-xl border border-purple-700/30 hover:border-purple-600/50 transition-all cursor-pointer">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-purple-600/20 rounded-lg flex items-center justify-center">
+                  <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold text-white">Modpacks Destacados</div>
+                  <div className="text-xs text-purple-300">Explora los más populares</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Anuncio 3 */}
+            <div className="p-4 bg-gradient-to-r from-green-900/40 to-emerald-900/40 backdrop-blur-sm rounded-xl border border-green-700/30 hover:border-green-600/50 transition-all cursor-pointer">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center">
+                  <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold text-white">Soporte Premium</div>
+                  <div className="text-xs text-green-300">Obtén ayuda prioritaria</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </Card>
       </div>
     </div>

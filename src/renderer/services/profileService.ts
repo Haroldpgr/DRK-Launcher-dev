@@ -6,7 +6,7 @@ import { generateValidUUID } from '../utils/uuid';
 export interface Profile {
   id: string;
   username: string;
-  type: 'microsoft' | 'non-premium';
+  type: 'microsoft' | 'non-premium' | 'elyby';
   lastUsed: number;
   gameTime?: number; // Tiempo total de juego en milisegundos
   instances?: string[]; // IDs de las instancias asociadas
@@ -34,7 +34,7 @@ export const profileService = {
     return getProfiles().find(p => p.username === username);
   },
 
-  addProfile(username: string, type: 'microsoft' | 'non-premium'): Profile {
+  addProfile(username: string, type: 'microsoft' | 'non-premium' | 'elyby'): Profile {
     const profiles = getProfiles();
     if (profiles.some(p => p.username === username)) {
       // Si el perfil ya existe, actualizar su tipo y última vez usado

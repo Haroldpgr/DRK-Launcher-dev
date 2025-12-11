@@ -1164,6 +1164,34 @@ ipcMain.handle('curseforge:get-compatible-versions', async (_event, payload: {
   );
 });
 
+// --- Ely.by API Integration --- //
+// Manejador IPC para verificar usuarios de Ely.by (evita CORS)
+ipcMain.handle('elyby:verify-username', async (_event, username: string) => {
+  try {
+    const response = await fetch(`https://authserver.ely.by/api/users/profiles/minecraft/${encodeURIComponent(username)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.status === 204) {
+      // Usuario no encontrado
+      return { exists: false, user: null };
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return { exists: true, user: data };
+  } catch (error) {
+    console.error('Error al buscar usuario en Ely.by:', error);
+    throw error;
+  }
+});
+
 // IPC Handlers para cancelación de descargas
 ipcMain.handle('download:cancel', async (_event, downloadId: string) => {
   const { downloadQueueService } = await import('../services/downloadQueueService.js');

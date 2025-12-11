@@ -13,7 +13,7 @@ type Props = {
   onNavigate: (path: string) => void;
   accounts: Profile[];
   currentUser: string | null;
-  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium') => void;
+  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium' | 'elyby') => void;
   onDeleteAccount: (username: string) => void;
   onSelectAccount: (username: string) => void;
 };
