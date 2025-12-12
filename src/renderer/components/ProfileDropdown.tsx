@@ -118,6 +118,10 @@ export default function ProfileDropdown({
                   ? 'Cuenta Microsoft' 
                   : profiles.find(p => p.username === currentUser)?.type === 'elyby'
                   ? 'Cuenta Ely.by'
+                  : profiles.find(p => p.username === currentUser)?.type === 'drkauth'
+                  ? 'Cuenta Drk'
+                  : profiles.find(p => p.username === currentUser)?.type === 'yggdrasil'
+                  ? 'Cuenta Yggdrasil'
                   : 'Cuenta no premium'}
               </div>
             </div>
@@ -170,6 +174,10 @@ export default function ProfileDropdown({
                         ? 'Microsoft' 
                         : profile.type === 'elyby'
                         ? 'Ely.by'
+                        : profile.type === 'yggdrasil'
+                        ? 'Yggdrasil'
+                        : profile.type === 'drkauth'
+                        ? 'Drk'
                         : 'No premium'}
                     </div>
                   </div>

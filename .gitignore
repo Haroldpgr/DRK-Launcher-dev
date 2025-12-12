@@ -33,3 +33,4 @@ Thumbs.db
 *.bin
 electron/
 electron-v*.*.*-win32-x64/
+web/

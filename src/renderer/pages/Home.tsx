@@ -11,7 +11,7 @@ type NewsItem = { id: string; title: string; body: string }
 type Instance = { id: string; name: string; version: string; loader?: string }
 
 type HomeProps = {
-  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium' | 'elyby') => void;
+  onAddAccount: (username: string, type?: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil') => void;
   onDeleteAccount: (username: string) => void;
   onSelectAccount: (username: string) => void;
   onLoginClick: () => void;

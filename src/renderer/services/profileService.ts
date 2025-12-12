@@ -6,11 +6,14 @@ import { generateValidUUID } from '../utils/uuid';
 export interface Profile {
   id: string;
   username: string;
-  type: 'microsoft' | 'non-premium' | 'elyby';
+  type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' | 'drkauth';
   lastUsed: number;
   gameTime?: number; // Tiempo total de juego en milisegundos
   instances?: string[]; // IDs de las instancias asociadas
   skinUrl?: string; // URL de la skin personalizada
+  // Tokens para Yggdrasil (opcional, solo para tipo 'yggdrasil')
+  accessToken?: string;
+  clientToken?: string;
 }
 
 const STORAGE_KEY = 'launcher_profiles';
@@ -34,7 +37,7 @@ export const profileService = {
     return getProfiles().find(p => p.username === username);
   },
 
-  addProfile(username: string, type: 'microsoft' | 'non-premium' | 'elyby'): Profile {
+  addProfile(username: string, type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' | 'drkauth', tokens?: { accessToken?: string; clientToken?: string }): Profile {
     const profiles = getProfiles();
     if (profiles.some(p => p.username === username)) {
       // Si el perfil ya existe, actualizar su tipo y última vez usado
@@ -50,6 +53,7 @@ export const profileService = {
       username,
       type,
       lastUsed: Date.now(),
+      ...(tokens && { accessToken: tokens.accessToken, clientToken: tokens.clientToken })
     };
     profiles.push(newProfile);
     saveProfiles(profiles);

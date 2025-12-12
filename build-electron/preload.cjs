@@ -24,6 +24,16 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   littleskin: {
     startOAuth: () => import_electron.ipcRenderer.invoke("littleskin:start-oauth")
   },
+  yggdrasil: {
+    authenticate: (username, password) => import_electron.ipcRenderer.invoke("yggdrasil:authenticate", username, password),
+    refresh: (accessToken, clientToken) => import_electron.ipcRenderer.invoke("yggdrasil:refresh", accessToken, clientToken),
+    validate: (accessToken) => import_electron.ipcRenderer.invoke("yggdrasil:validate", accessToken)
+  },
+  drkauth: {
+    authenticate: (username, password) => import_electron.ipcRenderer.invoke("drkauth:authenticate", username, password),
+    refresh: (accessToken, clientToken) => import_electron.ipcRenderer.invoke("drkauth:refresh", accessToken, clientToken),
+    validate: (accessToken) => import_electron.ipcRenderer.invoke("drkauth:validate", accessToken)
+  },
   // Métodos de descarga
   download: {
     start: (data) => import_electron.ipcRenderer.send("download:start", data),
