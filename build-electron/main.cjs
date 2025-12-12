@@ -1610,8 +1610,8 @@ var require_URL = __commonJS({
     var utils = require_utils();
     var Impl = require_URL_impl();
     var impl = utils.implSymbol;
-    function URL(url) {
-      if (!this || this[impl] || !(this instanceof URL)) {
+    function URL2(url) {
+      if (!this || this[impl] || !(this instanceof URL2)) {
         throw new TypeError("Failed to construct 'URL': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
       }
       if (arguments.length < 1) {
@@ -1627,7 +1627,7 @@ var require_URL = __commonJS({
       }
       module2.exports.setup(this, args);
     }
-    URL.prototype.toJSON = function toJSON() {
+    URL2.prototype.toJSON = function toJSON() {
       if (!this || !module2.exports.is(this)) {
         throw new TypeError("Illegal invocation");
       }
@@ -1637,7 +1637,7 @@ var require_URL = __commonJS({
       }
       return this[impl].toJSON.apply(this[impl], args);
     };
-    Object.defineProperty(URL.prototype, "href", {
+    Object.defineProperty(URL2.prototype, "href", {
       get() {
         return this[impl].href;
       },
@@ -1648,20 +1648,20 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    URL.prototype.toString = function() {
+    URL2.prototype.toString = function() {
       if (!this || !module2.exports.is(this)) {
         throw new TypeError("Illegal invocation");
       }
       return this.href;
     };
-    Object.defineProperty(URL.prototype, "origin", {
+    Object.defineProperty(URL2.prototype, "origin", {
       get() {
         return this[impl].origin;
       },
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "protocol", {
+    Object.defineProperty(URL2.prototype, "protocol", {
       get() {
         return this[impl].protocol;
       },
@@ -1672,7 +1672,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "username", {
+    Object.defineProperty(URL2.prototype, "username", {
       get() {
         return this[impl].username;
       },
@@ -1683,7 +1683,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "password", {
+    Object.defineProperty(URL2.prototype, "password", {
       get() {
         return this[impl].password;
       },
@@ -1694,7 +1694,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "host", {
+    Object.defineProperty(URL2.prototype, "host", {
       get() {
         return this[impl].host;
       },
@@ -1705,7 +1705,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "hostname", {
+    Object.defineProperty(URL2.prototype, "hostname", {
       get() {
         return this[impl].hostname;
       },
@@ -1716,7 +1716,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "port", {
+    Object.defineProperty(URL2.prototype, "port", {
       get() {
         return this[impl].port;
       },
@@ -1727,7 +1727,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "pathname", {
+    Object.defineProperty(URL2.prototype, "pathname", {
       get() {
         return this[impl].pathname;
       },
@@ -1738,7 +1738,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "search", {
+    Object.defineProperty(URL2.prototype, "search", {
       get() {
         return this[impl].search;
       },
@@ -1749,7 +1749,7 @@ var require_URL = __commonJS({
       enumerable: true,
       configurable: true
     });
-    Object.defineProperty(URL.prototype, "hash", {
+    Object.defineProperty(URL2.prototype, "hash", {
       get() {
         return this[impl].hash;
       },
@@ -1765,7 +1765,7 @@ var require_URL = __commonJS({
         return !!obj && obj[impl] instanceof Impl.implementation;
       },
       create(constructorArgs, privateData) {
-        let obj = Object.create(URL.prototype);
+        let obj = Object.create(URL2.prototype);
         this.setup(obj, constructorArgs, privateData);
         return obj;
       },
@@ -1775,10 +1775,10 @@ var require_URL = __commonJS({
         obj[impl] = new Impl.implementation(constructorArgs, privateData);
         obj[impl][utils.wrapperSymbol] = obj;
       },
-      interface: URL,
+      interface: URL2,
       expose: {
-        Window: { URL },
-        Worker: { URL }
+        Window: { URL: URL2 },
+        Worker: { URL: URL2 }
       }
     };
   }
@@ -1809,7 +1809,7 @@ var require_lib2 = __commonJS({
       return ex && typeof ex === "object" && "default" in ex ? ex["default"] : ex;
     }
     var Stream = _interopDefault(require("stream"));
-    var http = _interopDefault(require("http"));
+    var http2 = _interopDefault(require("http"));
     var Url = _interopDefault(require("url"));
     var whatwgUrl = _interopDefault(require_public_api());
     var https = _interopDefault(require("https"));
@@ -2549,7 +2549,7 @@ var require_lib2 = __commonJS({
       return headers;
     }
     var INTERNALS$1 = Symbol("Response internals");
-    var STATUS_CODES = http.STATUS_CODES;
+    var STATUS_CODES = http2.STATUS_CODES;
     var Response = class _Response {
       constructor() {
         let body = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : null;
@@ -2625,12 +2625,12 @@ var require_lib2 = __commonJS({
       configurable: true
     });
     var INTERNALS$2 = Symbol("Request internals");
-    var URL = Url.URL || whatwgUrl.URL;
+    var URL2 = Url.URL || whatwgUrl.URL;
     var parse_url = Url.parse;
     var format_url = Url.format;
     function parseURL(urlStr) {
       if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.exec(urlStr)) {
-        urlStr = new URL(urlStr).toString();
+        urlStr = new URL2(urlStr).toString();
       }
       return parse_url(urlStr);
     }
@@ -2802,7 +2802,7 @@ var require_lib2 = __commonJS({
       return new fetch10.Promise(function(resolve, reject) {
         const request = new Request(url, opts);
         const options = getNodeRequestOptions(request);
-        const send = (options.protocol === "https:" ? https : http).request;
+        const send = (options.protocol === "https:" ? https : http2).request;
         const signal = request.signal;
         let response = null;
         const abort = function abort2() {
@@ -4466,6 +4466,8 @@ var require_node_stream_zip = __commonJS({
 var import_electron2 = require("electron");
 var import_node_path14 = __toESM(require("node:path"), 1);
 var import_node_fs13 = __toESM(require("node:fs"), 1);
+var import_node_http = __toESM(require("node:http"), 1);
+var import_node_url = require("node:url");
 
 // src/services/db.ts
 var import_node_path2 = __toESM(require("node:path"), 1);
@@ -7583,7 +7585,7 @@ var CurseForgeService = class {
   }
   // Method to get the best available image URL
   getBestImageUrl(item) {
-    const imageUrl = item.logo?.url || item.logo?.thumbnailUrl || item.logo?.imageUrl || item.primaryScreenshot?.url || (item.screenshots && item.screenshots.length > 0 ? item.screenshots[0]?.url : null) || item.thumbnailUrl || item.thumbnail?.url || item.imageUrl || "https://via.placeholder.com/400x200";
+    const imageUrl = item.logo?.url || item.logo?.thumbnailUrl || item.logo?.imageUrl || item.primaryScreenshot?.url || (item.screenshots && item.screenshots.length > 0 ? item.screenshots[0]?.url : null) || item.thumbnailUrl || item.thumbnail?.url || item.imageUrl || null;
     return imageUrl;
   }
   // Get compatible versions for a specific project
@@ -7706,7 +7708,7 @@ var CurseForgeService = class {
     const fs14 = await import("fs");
     const path15 = await import("path");
     const https = await import("https");
-    const http = await import("http");
+    const http2 = await import("http");
     try {
       const compatibleVersions = await this.getCompatibleVersions(projectId, mcVersion, loader);
       console.log(`[downloadContent] Total versiones compatibles obtenidas: ${compatibleVersions.length}`);
@@ -7927,10 +7929,10 @@ var CurseForgeService = class {
   async downloadFileToPath(url, filePath) {
     const fs14 = await import("fs");
     const https = await import("https");
-    const http = await import("http");
+    const http2 = await import("http");
     return new Promise((resolve, reject) => {
       const file = fs14.createWriteStream(filePath);
-      const protocol = url.startsWith("https") ? https : http;
+      const protocol = url.startsWith("https") ? https : http2;
       protocol.get(url, (response) => {
         if (response.statusCode === 301 || response.statusCode === 302) {
           return this.downloadFileToPath(response.headers.location, filePath).then(resolve).catch(reject);
@@ -9575,6 +9577,9 @@ import_electron2.app.whenReady().then(async () => {
   const { instancesBaseDefault } = basePaths();
   ensureDir2(instancesBaseDefault);
   initDB();
+  if (!import_electron2.app.isDefaultProtocolClient("elyby")) {
+    import_electron2.app.setAsDefaultProtocolClient("elyby");
+  }
   try {
     await javaService_default.detectJava();
     console.log(`Java service initialized. Found ${javaService_default.getAllJavas().length} Java installations.`);
@@ -9582,7 +9587,14 @@ import_electron2.app.whenReady().then(async () => {
     console.error("Error initializing Java service:", error);
   }
   await createWindow();
+  import_electron2.app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleOAuthProtocol(url);
+  });
 });
+function handleOAuthProtocol(url) {
+  console.log("[Ely.by OAuth] URL recibida:", url);
+}
 function getUserDataPath() {
   return getLauncherDataPath();
 }
@@ -10386,6 +10398,455 @@ import_electron2.ipcMain.handle("curseforge:get-compatible-versions", async (_ev
     payload.mcVersion,
     payload.loader
   );
+});
+var ELY_BY_AUTH_BASE = "https://authserver.ely.by";
+var ELY_BY_OAUTH_AUTHORIZE_ENDPOINT = "https://account.ely.by/oauth2/v1";
+var ELY_BY_OAUTH_TOKEN_ENDPOINT = "https://account.ely.by/api/oauth2/v1/token";
+var ELY_BY_OAUTH_USER_ENDPOINT = "https://account.ely.by/api/oauth2/v1/user";
+var ELY_BY_OAUTH_CONFIG = {
+  clientId: "drk-launcher",
+  redirectUri: "http://127.0.0.1:25565/callback",
+  // Scope según el prompt mejorado: minecraft_server_session
+  scope: "minecraft_server_session"
+};
+var LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT = "https://littleskin.cn/oauth/authorize";
+var LITTLESKIN_OAUTH_TOKEN_ENDPOINT = "https://littleskin.cn/oauth/token";
+var LITTLESKIN_OAUTH_USER_ENDPOINT = "https://littleskin.cn/api/user";
+var LITTLESKIN_OAUTH_CONFIG = {
+  clientId: "",
+  // TODO: Obtener de https://littleskin.cn/user/oauth/apps
+  clientSecret: "",
+  // TODO: Obtener de https://littleskin.cn/user/oauth/apps
+  redirectUri: "http://127.0.0.1:25565/callback",
+  // Scopes disponibles según documentación de LittleSkin
+  // Para obtener información del usuario y tokens de Minecraft
+  scope: "user-read user-write"
+  // Ajustar según necesidades
+};
+var generateClientToken = () => {
+  const crypto2 = require("crypto");
+  return crypto2.randomBytes(16).toString("hex");
+};
+function generateCodeVerifier() {
+  const crypto2 = require("crypto");
+  const randomBytes = crypto2.randomBytes(32);
+  const verifier = base64UrlEncode(randomBytes);
+  if (verifier.length < 43) {
+    const moreBytes = crypto2.randomBytes(16);
+    return verifier + base64UrlEncode(moreBytes);
+  }
+  return verifier;
+}
+function generateCodeChallenge(codeVerifier) {
+  const crypto2 = require("crypto");
+  const hash = crypto2.createHash("sha256").update(codeVerifier).digest();
+  return base64UrlEncode(hash);
+}
+function base64UrlEncode(buffer) {
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+function createCallbackServer() {
+  return new Promise((resolve, reject) => {
+    const server = import_node_http.default.createServer((req, res) => {
+      if (!req.url) {
+        res.writeHead(400);
+        res.end("Bad Request");
+        return;
+      }
+      const url = new import_node_url.URL(req.url, `http://${req.headers.host}`);
+      if (url.pathname === "/callback") {
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        const error = url.searchParams.get("error");
+        const errorDescription = url.searchParams.get("error_description");
+        if (error) {
+          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Error de Autenticaci\xF3n</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: #fff; }
+                .error { color: #ff4444; }
+              </style>
+            </head>
+            <body>
+              <h1 class="error">Error de Autenticaci\xF3n</h1>
+              <p>${errorDescription || error}</p>
+              <p>Puedes cerrar esta ventana.</p>
+            </body>
+            </html>
+          `);
+          server.close();
+          reject(new Error(errorDescription || error));
+          return;
+        }
+        if (code && state) {
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Autenticaci\xF3n Exitosa</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: #fff; }
+                .success { color: #44ff44; }
+              </style>
+            </head>
+            <body>
+              <h1 class="success">\u2713 Autenticaci\xF3n Exitosa</h1>
+              <p>Puedes cerrar esta ventana y volver al launcher.</p>
+            </body>
+            </html>
+          `);
+          setTimeout(() => {
+            server.close();
+          }, 1e3);
+          resolve({ code, state });
+        } else {
+          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Error</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: #fff; }
+                .error { color: #ff4444; }
+              </style>
+            </head>
+            <body>
+              <h1 class="error">Error</h1>
+              <p>No se recibi\xF3 el c\xF3digo de autorizaci\xF3n.</p>
+              <p>Puedes cerrar esta ventana.</p>
+            </body>
+            </html>
+          `);
+          server.close();
+          reject(new Error("No se recibi\xF3 el c\xF3digo de autorizaci\xF3n"));
+        }
+      } else {
+        res.writeHead(404);
+        res.end("Not Found");
+      }
+    });
+    server.listen(25565, "127.0.0.1", () => {
+      console.log("[Ely.by OAuth] Servidor de callback escuchando en http://127.0.0.1:25565/callback");
+    });
+    setTimeout(() => {
+      if (server.listening) {
+        server.close();
+        reject(new Error("Timeout: No se recibi\xF3 respuesta del servidor de autorizaci\xF3n"));
+      }
+    }, 5 * 60 * 1e3);
+  });
+}
+import_electron2.ipcMain.handle("elyby:verify-username", async (_event, username) => {
+  try {
+    const response = await (0, import_node_fetch8.default)(`${ELY_BY_AUTH_BASE}/api/users/profiles/minecraft/${encodeURIComponent(username)}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+    if (response.status === 204) {
+      return { exists: false, user: null };
+    }
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return { exists: true, user: data };
+  } catch (error) {
+    console.error("Error al buscar usuario en Ely.by:", error);
+    throw error;
+  }
+});
+async function authenticateElyBy() {
+  console.log("[Ely.by OAuth PKCE] Iniciando flujo OAuth 2.0 con PKCE...");
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  const state = generateClientToken();
+  console.log("[Ely.by OAuth PKCE] Code verifier generado:", codeVerifier.substring(0, 20) + "...");
+  console.log("[Ely.by OAuth PKCE] Code challenge generado:", codeChallenge.substring(0, 20) + "...");
+  console.log("[Ely.by OAuth PKCE] State generado:", state);
+  if (!codeVerifier || !codeChallenge || !state) {
+    throw new Error("Error al generar claves PKCE. Valores nulos detectados.");
+  }
+  const callbackPromise = createCallbackServer();
+  console.log("[Ely.by OAuth PKCE] Servidor local iniciado, esperando callback...");
+  if (!ELY_BY_OAUTH_CONFIG.clientId || !ELY_BY_OAUTH_CONFIG.redirectUri) {
+    throw new Error("Configuraci\xF3n OAuth incompleta. Faltan clientId o redirectUri.");
+  }
+  const scope = ELY_BY_OAUTH_CONFIG.scope?.trim() || "minecraft_server_session";
+  const authUrl = new import_node_url.URL(ELY_BY_OAUTH_AUTHORIZE_ENDPOINT);
+  authUrl.searchParams.set("client_id", ELY_BY_OAUTH_CONFIG.clientId);
+  authUrl.searchParams.set("redirect_uri", ELY_BY_OAUTH_CONFIG.redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", scope);
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
+  authUrl.searchParams.set("state", state);
+  console.log(`[Ely.by OAuth PKCE] URL de autorizaci\xF3n completa: ${authUrl.toString()}`);
+  console.log(`[Ely.by OAuth PKCE] Par\xE1metros de autorizaci\xF3n:`, {
+    client_id: ELY_BY_OAUTH_CONFIG.clientId,
+    redirect_uri: ELY_BY_OAUTH_CONFIG.redirectUri,
+    response_type: "code",
+    scope,
+    code_challenge: codeChallenge.substring(0, 20) + "...",
+    code_challenge_method: "S256",
+    state,
+    code_challenge_length: codeChallenge.length,
+    code_verifier_length: codeVerifier.length
+  });
+  await import_electron2.shell.openExternal(authUrl.toString());
+  console.log("[Ely.by OAuth PKCE] Navegador abierto para autorizaci\xF3n");
+  console.log("[Ely.by OAuth PKCE] Esperando callback en http://127.0.0.1:25565/callback...");
+  const { code, state: receivedState } = await callbackPromise;
+  if (receivedState !== state) {
+    throw new Error("El state no coincide. Posible ataque CSRF.");
+  }
+  console.log("[Ely.by OAuth PKCE] C\xF3digo de autorizaci\xF3n recibido:", code.substring(0, 20) + "...");
+  if (!code || !codeVerifier) {
+    throw new Error("C\xF3digo de autorizaci\xF3n o code_verifier faltante");
+  }
+  const tokenParams = new URLSearchParams();
+  tokenParams.append("grant_type", "authorization_code");
+  tokenParams.append("client_id", ELY_BY_OAUTH_CONFIG.clientId);
+  tokenParams.append("code", code);
+  tokenParams.append("redirect_uri", ELY_BY_OAUTH_CONFIG.redirectUri);
+  tokenParams.append("code_verifier", codeVerifier);
+  console.log("[Ely.by OAuth PKCE] Intercambiando c\xF3digo por token...");
+  console.log("[Ely.by OAuth PKCE] Endpoint:", ELY_BY_OAUTH_TOKEN_ENDPOINT);
+  console.log("[Ely.by OAuth PKCE] Par\xE1metros del token:", {
+    grant_type: "authorization_code",
+    client_id: ELY_BY_OAUTH_CONFIG.clientId,
+    code: code.substring(0, 20) + "...",
+    redirect_uri: ELY_BY_OAUTH_CONFIG.redirectUri,
+    code_verifier_length: codeVerifier.length
+  });
+  const tokenResponse = await (0, import_node_fetch8.default)(ELY_BY_OAUTH_TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: tokenParams.toString()
+  });
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text();
+    console.error("[Ely.by OAuth PKCE] Error al intercambiar c\xF3digo:", errorText);
+    throw new Error(`Error al obtener token (${tokenResponse.status}): ${errorText}`);
+  }
+  const tokenData = await tokenResponse.json();
+  console.log("[Ely.by OAuth PKCE] Token recibido exitosamente");
+  if (!tokenData.access_token) {
+    throw new Error("No se recibi\xF3 access_token en la respuesta");
+  }
+  console.log("[Ely.by OAuth PKCE] Obteniendo informaci\xF3n del usuario...");
+  const userResponse = await (0, import_node_fetch8.default)(ELY_BY_OAUTH_USER_ENDPOINT, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${tokenData.access_token}`,
+      "Content-Type": "application/json"
+    }
+  });
+  let userInfo = null;
+  if (userResponse.ok) {
+    userInfo = await userResponse.json();
+    console.log("[Ely.by OAuth PKCE] Informaci\xF3n del usuario obtenida:", userInfo);
+  } else {
+    console.warn("[Ely.by OAuth PKCE] No se pudo obtener informaci\xF3n del usuario, pero el token es v\xE1lido");
+  }
+  return {
+    success: true,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresIn: tokenData.expires_in,
+    tokenType: tokenData.token_type || "Bearer",
+    selectedProfile: {
+      id: userInfo?.uuid || userInfo?.id || "",
+      name: userInfo?.username || userInfo?.name || "Ely.by User"
+    },
+    user: userInfo
+  };
+}
+import_electron2.ipcMain.handle("elyby:start-oauth", async (_event) => {
+  try {
+    return await authenticateElyBy();
+  } catch (error) {
+    console.error("[Ely.by OAuth PKCE] Error en el flujo OAuth:", error);
+    return {
+      success: false,
+      error: error.message || "Error desconocido en el flujo OAuth"
+    };
+  }
+});
+async function authenticateLittleSkin() {
+  console.log("[LittleSkin OAuth] Iniciando flujo OAuth 2.0...");
+  if (!LITTLESKIN_OAUTH_CONFIG.clientId || !LITTLESKIN_OAUTH_CONFIG.clientSecret) {
+    throw new Error("Configuraci\xF3n de LittleSkin incompleta. Necesitas registrar una aplicaci\xF3n en https://littleskin.cn/user/oauth/apps");
+  }
+  const state = generateClientToken();
+  console.log("[LittleSkin OAuth] State generado:", state);
+  const callbackPromise = createCallbackServer();
+  console.log("[LittleSkin OAuth] Servidor local iniciado, esperando callback...");
+  const scope = LITTLESKIN_OAUTH_CONFIG.scope?.trim() || "user-read";
+  const authUrl = new import_node_url.URL(LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT);
+  authUrl.searchParams.set("client_id", LITTLESKIN_OAUTH_CONFIG.clientId);
+  authUrl.searchParams.set("redirect_uri", LITTLESKIN_OAUTH_CONFIG.redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", scope);
+  authUrl.searchParams.set("state", state);
+  console.log(`[LittleSkin OAuth] URL de autorizaci\xF3n: ${authUrl.toString()}`);
+  console.log(`[LittleSkin OAuth] Par\xE1metros de autorizaci\xF3n:`, {
+    client_id: LITTLESKIN_OAUTH_CONFIG.clientId,
+    redirect_uri: LITTLESKIN_OAUTH_CONFIG.redirectUri,
+    response_type: "code",
+    scope,
+    state
+  });
+  await import_electron2.shell.openExternal(authUrl.toString());
+  console.log("[LittleSkin OAuth] Navegador abierto para autorizaci\xF3n");
+  console.log("[LittleSkin OAuth] Esperando callback en http://127.0.0.1:25565/callback...");
+  const { code, state: receivedState } = await callbackPromise;
+  if (receivedState !== state) {
+    throw new Error("El state no coincide. Posible ataque CSRF.");
+  }
+  console.log("[LittleSkin OAuth] C\xF3digo de autorizaci\xF3n recibido:", code.substring(0, 20) + "...");
+  const tokenParams = new URLSearchParams();
+  tokenParams.append("grant_type", "authorization_code");
+  tokenParams.append("client_id", LITTLESKIN_OAUTH_CONFIG.clientId);
+  tokenParams.append("client_secret", LITTLESKIN_OAUTH_CONFIG.clientSecret);
+  tokenParams.append("code", code);
+  tokenParams.append("redirect_uri", LITTLESKIN_OAUTH_CONFIG.redirectUri);
+  console.log("[LittleSkin OAuth] Intercambiando c\xF3digo por token...");
+  console.log("[LittleSkin OAuth] Endpoint:", LITTLESKIN_OAUTH_TOKEN_ENDPOINT);
+  const tokenResponse = await (0, import_node_fetch8.default)(LITTLESKIN_OAUTH_TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json"
+    },
+    body: tokenParams.toString()
+  });
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text();
+    console.error("[LittleSkin OAuth] Error al intercambiar c\xF3digo:", errorText);
+    throw new Error(`Error al obtener token (${tokenResponse.status}): ${errorText}`);
+  }
+  const tokenData = await tokenResponse.json();
+  console.log("[LittleSkin OAuth] Token recibido exitosamente");
+  if (!tokenData.access_token) {
+    throw new Error("No se recibi\xF3 access_token en la respuesta");
+  }
+  console.log("[LittleSkin OAuth] Obteniendo informaci\xF3n del usuario...");
+  const userResponse = await (0, import_node_fetch8.default)(LITTLESKIN_OAUTH_USER_ENDPOINT, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${tokenData.access_token}`,
+      "Accept": "application/json"
+    }
+  });
+  let userInfo = null;
+  if (userResponse.ok) {
+    userInfo = await userResponse.json();
+    console.log("[LittleSkin OAuth] Informaci\xF3n del usuario obtenida:", userInfo);
+  } else {
+    console.warn("[LittleSkin OAuth] No se pudo obtener informaci\xF3n del usuario, pero el token es v\xE1lido");
+  }
+  return {
+    success: true,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresIn: tokenData.expires_in,
+    tokenType: tokenData.token_type || "Bearer",
+    selectedProfile: {
+      id: userInfo?.uid || userInfo?.id || "",
+      name: userInfo?.nickname || userInfo?.username || "LittleSkin User"
+    },
+    user: userInfo
+  };
+}
+import_electron2.ipcMain.handle("littleskin:start-oauth", async (_event) => {
+  try {
+    return await authenticateLittleSkin();
+  } catch (error) {
+    console.error("[LittleSkin OAuth] Error en el flujo OAuth:", error);
+    return {
+      success: false,
+      error: error.message || "Error desconocido en el flujo OAuth"
+    };
+  }
+});
+import_electron2.ipcMain.handle("elyby:authenticate", async (_event, username, password, totpToken) => {
+  try {
+    const clientToken = generateClientToken();
+    const finalPassword = totpToken ? `${password}:${totpToken}` : password;
+    const url = `${ELY_BY_AUTH_BASE}/auth/authenticate`;
+    console.log(`[Ely.by] Intentando autenticaci\xF3n en: ${url}`);
+    const response = await (0, import_node_fetch8.default)(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        agent: {
+          name: "Minecraft",
+          version: 1
+        },
+        username,
+        password: finalPassword,
+        clientToken,
+        requestUser: true
+        // Para obtener información adicional del usuario
+      })
+    });
+    console.log(`[Ely.by] Respuesta: status=${response.status}, statusText=${response.statusText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: "UnknownError", errorMessage: errorText || `HTTP error! status: ${response.status}` };
+      }
+      if (response.status === 401 && errorData.error === "ForbiddenOperationException" && errorData.errorMessage === "Account protected with two factor auth.") {
+        return {
+          success: false,
+          requires2FA: true,
+          error: "Esta cuenta est\xE1 protegida con autenticaci\xF3n de dos factores. Por favor, ingresa el c\xF3digo de verificaci\xF3n.",
+          clientToken
+          // Mantener el clientToken para el siguiente intento
+        };
+      }
+      throw new Error(errorData.errorMessage || errorData.error || `HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    if (data.selectedProfile) {
+      console.log(`[Ely.by] \u2713 Autenticaci\xF3n exitosa para usuario: ${data.selectedProfile.name}`);
+      return {
+        success: true,
+        accessToken: data.accessToken,
+        clientToken: data.clientToken || clientToken,
+        selectedProfile: {
+          id: data.selectedProfile.id,
+          name: data.selectedProfile.name
+        },
+        availableProfiles: data.availableProfiles || [],
+        user: data.user || null
+      };
+    } else {
+      throw new Error("No se recibi\xF3 informaci\xF3n del perfil");
+    }
+  } catch (error) {
+    console.error("Error al autenticar usuario en Ely.by:", error);
+    return {
+      success: false,
+      requires2FA: false,
+      error: error.message || "Error desconocido al autenticar"
+    };
+  }
 });
 import_electron2.ipcMain.handle("download:cancel", async (_event, downloadId) => {
   const { downloadQueueService: downloadQueueService2 } = await Promise.resolve().then(() => (init_downloadQueueService(), downloadQueueService_exports));

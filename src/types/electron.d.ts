@@ -63,6 +63,11 @@ declare global {
       };
       elyby: {
         verifyUsername: (username: string) => Promise<{ exists: boolean; user: { id: string; name: string } | null }>;
+        authenticate: (username: string, password: string, totpToken?: string) => Promise<{ success: boolean; requires2FA?: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; availableProfiles?: Array<{ id: string; name: string }>; user?: any; error?: string }>;
+        startOAuth: () => Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresIn?: number; tokenType?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+      };
+      littleskin: {
+        startOAuth: () => Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresIn?: number; tokenType?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
       };
       download: {
         start: (data: { url: string; filename: string; itemId: string }) => void;

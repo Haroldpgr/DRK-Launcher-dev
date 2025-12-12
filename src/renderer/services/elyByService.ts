@@ -95,12 +95,36 @@ class ElyByService {
         return result.exists;
       }
       
-      // Fallback al método directo si no está disponible (puede fallar por CORS)
-      const user = await this.getUserByUsername(username);
-      return user !== null;
+      // Si no está disponible el IPC, retornar false
+      console.warn('IPC handler para Ely.by no está disponible');
+      return false;
     } catch (error) {
       console.error('Error al verificar usuario:', error);
       return false;
+    }
+  }
+
+  /**
+   * Autentica un usuario con Ely.by usando correo/username y contraseña
+   * Usa el proceso principal de Electron para evitar CORS
+   * @param username Correo electrónico o nombre de usuario
+   * @param password Contraseña
+   * @param totpToken Token TOTP para autenticación de dos factores (opcional)
+   * @returns Información del usuario autenticado o información sobre 2FA requerido
+   */
+  async authenticate(username: string, password: string, totpToken?: string): Promise<{ success: boolean; requires2FA?: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; availableProfiles?: Array<{ id: string; name: string }>; user?: any; error?: string } | null> {
+    try {
+      // Usar el proceso principal de Electron para evitar CORS
+      if (window.api?.elyby?.authenticate) {
+        const result = await window.api.elyby.authenticate(username, password, totpToken);
+        return result;
+      }
+      
+      console.warn('IPC handler para autenticación de Ely.by no está disponible');
+      return { success: false, error: 'IPC handler no disponible' };
+    } catch (error: any) {
+      console.error('Error al autenticar usuario:', error);
+      return { success: false, error: error.message || 'Error desconocido' };
     }
   }
 }

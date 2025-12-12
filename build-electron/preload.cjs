@@ -16,6 +16,14 @@ import_electron.contextBridge.exposeInMainWorld("api", {
     },
     getCompatibleVersions: (payload) => import_electron.ipcRenderer.invoke("curseforge:get-compatible-versions", payload)
   },
+  elyby: {
+    verifyUsername: (username) => import_electron.ipcRenderer.invoke("elyby:verify-username", username),
+    authenticate: (username, password, totpToken) => import_electron.ipcRenderer.invoke("elyby:authenticate", username, password, totpToken),
+    startOAuth: () => import_electron.ipcRenderer.invoke("elyby:start-oauth")
+  },
+  littleskin: {
+    startOAuth: () => import_electron.ipcRenderer.invoke("littleskin:start-oauth")
+  },
   // Métodos de descarga
   download: {
     start: (data) => import_electron.ipcRenderer.send("download:start", data),

@@ -1,7 +1,9 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, session } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
+import http from 'node:http'
+import { URL } from 'node:url'
 import { initDB, hasDB, sqlite } from '../services/db'
 import { queryStatus } from '../services/serverService'
 import { launchJava as originalLaunchJava, isInstanceReady, areAssetsReadyForVersion, ensureClientJar } from '../services/gameService'
@@ -32,6 +34,11 @@ app.whenReady().then(async () => {
   ensureDir(instancesBaseDefault);
   initDB();
 
+  // Registrar protocolo personalizado para OAuth callback de Ely.by
+  if (!app.isDefaultProtocolClient('elyby')) {
+    app.setAsDefaultProtocolClient('elyby');
+  }
+
   // Detect Java using the service at startup
   try {
     await javaService.detectJava();
@@ -41,7 +48,19 @@ app.whenReady().then(async () => {
   }
 
   await createWindow();
+  
+  // Manejar URLs de protocolo personalizado (para OAuth callback)
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleOAuthProtocol(url);
+  });
 });
+
+// Manejar URLs del protocolo elyby://
+function handleOAuthProtocol(url: string) {
+  console.log('[Ely.by OAuth] URL recibida:', url);
+  // Esto se manejará en el handler IPC cuando se abra la ventana
+}
 
 function getUserDataPath() {
   // Use the centralized launcher data path utility
@@ -1165,10 +1184,209 @@ ipcMain.handle('curseforge:get-compatible-versions', async (_event, payload: {
 });
 
 // --- Ely.by API Integration --- //
+const ELY_BY_AUTH_BASE = 'https://authserver.ely.by';
+// Endpoint de autorización - según documentación oficial es /oauth2/v1 (sin /authorize)
+const ELY_BY_OAUTH_AUTHORIZE_ENDPOINT = 'https://account.ely.by/oauth2/v1';
+// Endpoint de token según documentación: /api/oauth2/v1/token (con /api/)
+const ELY_BY_OAUTH_TOKEN_ENDPOINT = 'https://account.ely.by/api/oauth2/v1/token';
+const ELY_BY_OAUTH_USER_ENDPOINT = 'https://account.ely.by/api/oauth2/v1/user';
+
+// Configuración OAuth 2.0 de Ely.by con PKCE
+// Client ID: drk-launcher (cliente público, requiere PKCE)
+const ELY_BY_OAUTH_CONFIG = {
+  clientId: 'drk-launcher',
+  redirectUri: 'http://127.0.0.1:25565/callback',
+  // Scope según el prompt mejorado: minecraft_server_session
+  scope: 'minecraft_server_session'
+};
+
+// --- LittleSkin OAuth 2.0 Integration --- //
+// Documentación: https://manual.littlesk.in/advanced/oauth2/
+const LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT = 'https://littleskin.cn/oauth/authorize';
+const LITTLESKIN_OAUTH_TOKEN_ENDPOINT = 'https://littleskin.cn/oauth/token';
+const LITTLESKIN_OAUTH_USER_ENDPOINT = 'https://littleskin.cn/api/user';
+
+// Configuración OAuth 2.0 de LittleSkin
+// NOTA: Necesitas crear una aplicación en LittleSkin para obtener client_id y client_secret
+// https://littleskin.cn/user/oauth/apps
+const LITTLESKIN_OAUTH_CONFIG = {
+  clientId: '', // TODO: Obtener de https://littleskin.cn/user/oauth/apps
+  clientSecret: '', // TODO: Obtener de https://littleskin.cn/user/oauth/apps
+  redirectUri: 'http://127.0.0.1:25565/callback',
+  // Scopes disponibles según documentación de LittleSkin
+  // Para obtener información del usuario y tokens de Minecraft
+  scope: 'user-read user-write' // Ajustar según necesidades
+};
+
+// Generar un clientToken único para esta sesión
+const generateClientToken = (): string => {
+  const crypto = require('crypto');
+  return crypto.randomBytes(16).toString('hex');
+};
+
+// ===== Funciones PKCE para OAuth 2.0 =====
+
+/**
+ * Genera un code_verifier aleatorio para PKCE
+ * Debe ser una cadena URL-safe de 43-128 caracteres
+ * RFC 7636: mínimo 43 caracteres, máximo 128 caracteres
+ */
+function generateCodeVerifier(): string {
+  const crypto = require('crypto');
+  // Generar 32 bytes aleatorios (256 bits) para obtener ~43 caracteres después de base64url
+  const randomBytes = crypto.randomBytes(32);
+  const verifier = base64UrlEncode(randomBytes);
+  
+  // Verificar que tenga al menos 43 caracteres (requisito PKCE)
+  if (verifier.length < 43) {
+    // Si es muy corto, generar más bytes
+    const moreBytes = crypto.randomBytes(16);
+    return verifier + base64UrlEncode(moreBytes);
+  }
+  
+  return verifier;
+}
+
+/**
+ * Genera un code_challenge a partir de un code_verifier usando S256 (SHA256 + Base64url)
+ */
+function generateCodeChallenge(codeVerifier: string): string {
+  const crypto = require('crypto');
+  // Calcular SHA256 del code_verifier
+  const hash = crypto.createHash('sha256').update(codeVerifier).digest();
+  // Codificar en base64url
+  return base64UrlEncode(hash);
+}
+
+/**
+ * Codifica un Buffer en Base64url (sin padding, con caracteres URL-safe)
+ */
+function base64UrlEncode(buffer: Buffer): string {
+  return buffer
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+/**
+ * Crea un servidor HTTP local para escuchar el callback de OAuth
+ */
+function createCallbackServer(): Promise<{ code: string; state: string }> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      if (!req.url) {
+        res.writeHead(400);
+        res.end('Bad Request');
+        return;
+      }
+
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      
+      // Verificar que es la ruta de callback
+      if (url.pathname === '/callback') {
+        const code = url.searchParams.get('code');
+        const state = url.searchParams.get('state');
+        const error = url.searchParams.get('error');
+        const errorDescription = url.searchParams.get('error_description');
+
+        // Enviar respuesta HTML al usuario
+        if (error) {
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Error de Autenticación</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: #fff; }
+                .error { color: #ff4444; }
+              </style>
+            </head>
+            <body>
+              <h1 class="error">Error de Autenticación</h1>
+              <p>${errorDescription || error}</p>
+              <p>Puedes cerrar esta ventana.</p>
+            </body>
+            </html>
+          `);
+          server.close();
+          reject(new Error(errorDescription || error));
+          return;
+        }
+
+        if (code && state) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Autenticación Exitosa</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: #fff; }
+                .success { color: #44ff44; }
+              </style>
+            </head>
+            <body>
+              <h1 class="success">✓ Autenticación Exitosa</h1>
+              <p>Puedes cerrar esta ventana y volver al launcher.</p>
+            </body>
+            </html>
+          `);
+          
+          // Cerrar el servidor después de un breve delay
+          setTimeout(() => {
+            server.close();
+          }, 1000);
+          
+          resolve({ code, state });
+        } else {
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Error</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: #fff; }
+                .error { color: #ff4444; }
+              </style>
+            </head>
+            <body>
+              <h1 class="error">Error</h1>
+              <p>No se recibió el código de autorización.</p>
+              <p>Puedes cerrar esta ventana.</p>
+            </body>
+            </html>
+          `);
+          server.close();
+          reject(new Error('No se recibió el código de autorización'));
+        }
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    });
+
+    // Escuchar en el puerto 25565
+    server.listen(25565, '127.0.0.1', () => {
+      console.log('[Ely.by OAuth] Servidor de callback escuchando en http://127.0.0.1:25565/callback');
+    });
+
+    // Timeout de 5 minutos
+    setTimeout(() => {
+      if (server.listening) {
+        server.close();
+        reject(new Error('Timeout: No se recibió respuesta del servidor de autorización'));
+      }
+    }, 5 * 60 * 1000);
+  });
+}
+
 // Manejador IPC para verificar usuarios de Ely.by (evita CORS)
 ipcMain.handle('elyby:verify-username', async (_event, username: string) => {
   try {
-    const response = await fetch(`https://authserver.ely.by/api/users/profiles/minecraft/${encodeURIComponent(username)}`, {
+    const response = await fetch(`${ELY_BY_AUTH_BASE}/api/users/profiles/minecraft/${encodeURIComponent(username)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -1189,6 +1407,411 @@ ipcMain.handle('elyby:verify-username', async (_event, username: string) => {
   } catch (error) {
     console.error('Error al buscar usuario en Ely.by:', error);
     throw error;
+  }
+});
+
+/**
+ * Función principal para autenticar con Ely.by usando OAuth 2.0 con PKCE
+ * Implementación completa según el prompt mejorado
+ */
+async function authenticateElyBy(): Promise<{
+  success: boolean;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  tokenType?: string;
+  selectedProfile?: { id: string; name: string };
+  user?: any;
+  error?: string;
+}> {
+  console.log('[Ely.by OAuth PKCE] Iniciando flujo OAuth 2.0 con PKCE...');
+  
+  // Paso 1: Generación PKCE
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  const state = generateClientToken(); // State para seguridad CSRF
+  
+  console.log('[Ely.by OAuth PKCE] Code verifier generado:', codeVerifier.substring(0, 20) + '...');
+  console.log('[Ely.by OAuth PKCE] Code challenge generado:', codeChallenge.substring(0, 20) + '...');
+  console.log('[Ely.by OAuth PKCE] State generado:', state);
+  
+  // Validar que todos los valores PKCE estén presentes
+  if (!codeVerifier || !codeChallenge || !state) {
+    throw new Error('Error al generar claves PKCE. Valores nulos detectados.');
+  }
+  
+  // Paso 2: Iniciar Servidor Local
+  const callbackPromise = createCallbackServer();
+  console.log('[Ely.by OAuth PKCE] Servidor local iniciado, esperando callback...');
+  
+  // Paso 3: Construir URL de autorización con todos los parámetros PKCE
+  // ENDPOINT: https://account.ely.by/oauth2/v1
+  if (!ELY_BY_OAUTH_CONFIG.clientId || !ELY_BY_OAUTH_CONFIG.redirectUri) {
+    throw new Error('Configuración OAuth incompleta. Faltan clientId o redirectUri.');
+  }
+  
+  const scope = ELY_BY_OAUTH_CONFIG.scope?.trim() || 'minecraft_server_session';
+  
+  const authUrl = new URL(ELY_BY_OAUTH_AUTHORIZE_ENDPOINT);
+  authUrl.searchParams.set('client_id', ELY_BY_OAUTH_CONFIG.clientId);
+  authUrl.searchParams.set('redirect_uri', ELY_BY_OAUTH_CONFIG.redirectUri);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('scope', scope);
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
+  authUrl.searchParams.set('state', state);
+  
+  console.log(`[Ely.by OAuth PKCE] URL de autorización completa: ${authUrl.toString()}`);
+  console.log(`[Ely.by OAuth PKCE] Parámetros de autorización:`, {
+    client_id: ELY_BY_OAUTH_CONFIG.clientId,
+    redirect_uri: ELY_BY_OAUTH_CONFIG.redirectUri,
+    response_type: 'code',
+    scope: scope,
+    code_challenge: codeChallenge.substring(0, 20) + '...',
+    code_challenge_method: 'S256',
+    state: state,
+    code_challenge_length: codeChallenge.length,
+    code_verifier_length: codeVerifier.length
+  });
+  
+  // Abrir URL en el navegador del usuario usando Electron shell.openExternal
+  await shell.openExternal(authUrl.toString());
+  console.log('[Ely.by OAuth PKCE] Navegador abierto para autorización');
+  
+  // Paso 4: Interceptar Callback
+  console.log('[Ely.by OAuth PKCE] Esperando callback en http://127.0.0.1:25565/callback...');
+  const { code, state: receivedState } = await callbackPromise;
+  
+  // Verificar el state (protección CSRF)
+  if (receivedState !== state) {
+    throw new Error('El state no coincide. Posible ataque CSRF.');
+  }
+  
+  console.log('[Ely.by OAuth PKCE] Código de autorización recibido:', code.substring(0, 20) + '...');
+  
+  // Paso 5: Intercambio de Token (POST)
+  // ENDPOINT: https://account.ely.by/api/oauth2/v1/token
+  if (!code || !codeVerifier) {
+    throw new Error('Código de autorización o code_verifier faltante');
+  }
+  
+  const tokenParams = new URLSearchParams();
+  tokenParams.append('grant_type', 'authorization_code');
+  tokenParams.append('client_id', ELY_BY_OAUTH_CONFIG.clientId);
+  tokenParams.append('code', code);
+  tokenParams.append('redirect_uri', ELY_BY_OAUTH_CONFIG.redirectUri);
+  tokenParams.append('code_verifier', codeVerifier); // Enviar el code_verifier original
+  
+  console.log('[Ely.by OAuth PKCE] Intercambiando código por token...');
+  console.log('[Ely.by OAuth PKCE] Endpoint:', ELY_BY_OAUTH_TOKEN_ENDPOINT);
+  console.log('[Ely.by OAuth PKCE] Parámetros del token:', {
+    grant_type: 'authorization_code',
+    client_id: ELY_BY_OAUTH_CONFIG.clientId,
+    code: code.substring(0, 20) + '...',
+    redirect_uri: ELY_BY_OAUTH_CONFIG.redirectUri,
+    code_verifier_length: codeVerifier.length
+  });
+  
+  const tokenResponse = await fetch(ELY_BY_OAUTH_TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: tokenParams.toString()
+  });
+  
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text();
+    console.error('[Ely.by OAuth PKCE] Error al intercambiar código:', errorText);
+    throw new Error(`Error al obtener token (${tokenResponse.status}): ${errorText}`);
+  }
+  
+  const tokenData = await tokenResponse.json();
+  console.log('[Ely.by OAuth PKCE] Token recibido exitosamente');
+  
+  if (!tokenData.access_token) {
+    throw new Error('No se recibió access_token en la respuesta');
+  }
+  
+  // Paso 6: Uso del Token - Obtener información del usuario
+  // ENDPOINT: https://account.ely.by/api/oauth2/v1/user
+  console.log('[Ely.by OAuth PKCE] Obteniendo información del usuario...');
+  const userResponse = await fetch(ELY_BY_OAUTH_USER_ENDPOINT, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${tokenData.access_token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  let userInfo: any = null;
+  if (userResponse.ok) {
+    userInfo = await userResponse.json();
+    console.log('[Ely.by OAuth PKCE] Información del usuario obtenida:', userInfo);
+  } else {
+    console.warn('[Ely.by OAuth PKCE] No se pudo obtener información del usuario, pero el token es válido');
+  }
+  
+  // Retornar resultado exitoso
+  return {
+    success: true,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresIn: tokenData.expires_in,
+    tokenType: tokenData.token_type || 'Bearer',
+    selectedProfile: {
+      id: userInfo?.uuid || userInfo?.id || '',
+      name: userInfo?.username || userInfo?.name || 'Ely.by User'
+    },
+    user: userInfo
+  };
+}
+
+// Manejador IPC para iniciar el flujo OAuth 2.0 de Ely.by con PKCE
+ipcMain.handle('elyby:start-oauth', async (_event) => {
+  try {
+    return await authenticateElyBy();
+  } catch (error: any) {
+    console.error('[Ely.by OAuth PKCE] Error en el flujo OAuth:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido en el flujo OAuth'
+    };
+  }
+});
+
+/**
+ * Función principal para autenticar con LittleSkin usando OAuth 2.0
+ * Documentación: https://manual.littlesk.in/advanced/oauth2/
+ * Usa Authorization Code Grant (flujo estándar de OAuth 2.0)
+ */
+async function authenticateLittleSkin(): Promise<{
+  success: boolean;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  tokenType?: string;
+  selectedProfile?: { id: string; name: string };
+  user?: any;
+  error?: string;
+}> {
+  console.log('[LittleSkin OAuth] Iniciando flujo OAuth 2.0...');
+  
+  // Validar configuración
+  if (!LITTLESKIN_OAUTH_CONFIG.clientId || !LITTLESKIN_OAUTH_CONFIG.clientSecret) {
+    throw new Error('Configuración de LittleSkin incompleta. Necesitas registrar una aplicación en https://littleskin.cn/user/oauth/apps');
+  }
+  
+  // Paso 1: Generar state para seguridad CSRF
+  const state = generateClientToken();
+  console.log('[LittleSkin OAuth] State generado:', state);
+  
+  // Paso 2: Iniciar Servidor Local
+  const callbackPromise = createCallbackServer();
+  console.log('[LittleSkin OAuth] Servidor local iniciado, esperando callback...');
+  
+  // Paso 3: Construir URL de autorización
+  // ENDPOINT: https://littleskin.cn/oauth/authorize
+  const scope = LITTLESKIN_OAUTH_CONFIG.scope?.trim() || 'user-read';
+  
+  const authUrl = new URL(LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT);
+  authUrl.searchParams.set('client_id', LITTLESKIN_OAUTH_CONFIG.clientId);
+  authUrl.searchParams.set('redirect_uri', LITTLESKIN_OAUTH_CONFIG.redirectUri);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('scope', scope);
+  authUrl.searchParams.set('state', state);
+  
+  console.log(`[LittleSkin OAuth] URL de autorización: ${authUrl.toString()}`);
+  console.log(`[LittleSkin OAuth] Parámetros de autorización:`, {
+    client_id: LITTLESKIN_OAUTH_CONFIG.clientId,
+    redirect_uri: LITTLESKIN_OAUTH_CONFIG.redirectUri,
+    response_type: 'code',
+    scope: scope,
+    state: state
+  });
+  
+  // Abrir URL en el navegador del usuario
+  await shell.openExternal(authUrl.toString());
+  console.log('[LittleSkin OAuth] Navegador abierto para autorización');
+  
+  // Paso 4: Interceptar Callback
+  console.log('[LittleSkin OAuth] Esperando callback en http://127.0.0.1:25565/callback...');
+  const { code, state: receivedState } = await callbackPromise;
+  
+  // Verificar el state (protección CSRF)
+  if (receivedState !== state) {
+    throw new Error('El state no coincide. Posible ataque CSRF.');
+  }
+  
+  console.log('[LittleSkin OAuth] Código de autorización recibido:', code.substring(0, 20) + '...');
+  
+  // Paso 5: Intercambio de Token (POST)
+  // ENDPOINT: https://littleskin.cn/oauth/token
+  // LittleSkin usa client_id y client_secret (no PKCE)
+  const tokenParams = new URLSearchParams();
+  tokenParams.append('grant_type', 'authorization_code');
+  tokenParams.append('client_id', LITTLESKIN_OAUTH_CONFIG.clientId);
+  tokenParams.append('client_secret', LITTLESKIN_OAUTH_CONFIG.clientSecret);
+  tokenParams.append('code', code);
+  tokenParams.append('redirect_uri', LITTLESKIN_OAUTH_CONFIG.redirectUri);
+  
+  console.log('[LittleSkin OAuth] Intercambiando código por token...');
+  console.log('[LittleSkin OAuth] Endpoint:', LITTLESKIN_OAUTH_TOKEN_ENDPOINT);
+  
+  const tokenResponse = await fetch(LITTLESKIN_OAUTH_TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json'
+    },
+    body: tokenParams.toString()
+  });
+  
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text();
+    console.error('[LittleSkin OAuth] Error al intercambiar código:', errorText);
+    throw new Error(`Error al obtener token (${tokenResponse.status}): ${errorText}`);
+  }
+  
+  const tokenData = await tokenResponse.json();
+  console.log('[LittleSkin OAuth] Token recibido exitosamente');
+  
+  if (!tokenData.access_token) {
+    throw new Error('No se recibió access_token en la respuesta');
+  }
+  
+  // Paso 6: Uso del Token - Obtener información del usuario
+  // ENDPOINT: https://littleskin.cn/api/user
+  console.log('[LittleSkin OAuth] Obteniendo información del usuario...');
+  const userResponse = await fetch(LITTLESKIN_OAUTH_USER_ENDPOINT, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${tokenData.access_token}`,
+      'Accept': 'application/json'
+    }
+  });
+  
+  let userInfo: any = null;
+  if (userResponse.ok) {
+    userInfo = await userResponse.json();
+    console.log('[LittleSkin OAuth] Información del usuario obtenida:', userInfo);
+  } else {
+    console.warn('[LittleSkin OAuth] No se pudo obtener información del usuario, pero el token es válido');
+  }
+  
+  // Retornar resultado exitoso
+  return {
+    success: true,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresIn: tokenData.expires_in,
+    tokenType: tokenData.token_type || 'Bearer',
+    selectedProfile: {
+      id: userInfo?.uid || userInfo?.id || '',
+      name: userInfo?.nickname || userInfo?.username || 'LittleSkin User'
+    },
+    user: userInfo
+  };
+}
+
+// Manejador IPC para iniciar el flujo OAuth 2.0 de LittleSkin
+ipcMain.handle('littleskin:start-oauth', async (_event) => {
+  try {
+    return await authenticateLittleSkin();
+  } catch (error: any) {
+    console.error('[LittleSkin OAuth] Error en el flujo OAuth:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido en el flujo OAuth'
+    };
+  }
+});
+
+// Las funciones handleOAuthCallback, exchangeCodeForToken y getUserInfo antiguas
+// ya no son necesarias porque el nuevo flujo PKCE las maneja directamente en el handler IPC
+
+// Manejador IPC para autenticar usuarios de Ely.by con username/email y contraseña (método alternativo)
+// Documentación: https://docs.ely.by/en/minecraft-auth.html
+// Endpoint correcto: POST /auth/authenticate
+ipcMain.handle('elyby:authenticate', async (_event, username: string, password: string, totpToken?: string) => {
+  try {
+    const clientToken = generateClientToken();
+    
+    // Si se proporciona un token TOTP, concatenarlo con la contraseña
+    const finalPassword = totpToken ? `${password}:${totpToken}` : password;
+    
+    const url = `${ELY_BY_AUTH_BASE}/auth/authenticate`;
+    console.log(`[Ely.by] Intentando autenticación en: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent: {
+          name: 'Minecraft',
+          version: 1
+        },
+        username: username,
+        password: finalPassword,
+        clientToken: clientToken,
+        requestUser: true  // Para obtener información adicional del usuario
+      }),
+    });
+    
+    console.log(`[Ely.by] Respuesta: status=${response.status}, statusText=${response.statusText}`);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: 'UnknownError', errorMessage: errorText || `HTTP error! status: ${response.status}` };
+      }
+      
+      // Verificar si es un error de autenticación de dos factores
+      if (response.status === 401 && errorData.error === 'ForbiddenOperationException' && 
+          errorData.errorMessage === 'Account protected with two factor auth.') {
+        // La cuenta requiere autenticación de dos factores
+        return {
+          success: false,
+          requires2FA: true,
+          error: 'Esta cuenta está protegida con autenticación de dos factores. Por favor, ingresa el código de verificación.',
+          clientToken: clientToken  // Mantener el clientToken para el siguiente intento
+        };
+      }
+      
+      // Otro tipo de error
+      throw new Error(errorData.errorMessage || errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.selectedProfile) {
+      console.log(`[Ely.by] ✓ Autenticación exitosa para usuario: ${data.selectedProfile.name}`);
+      return {
+        success: true,
+        accessToken: data.accessToken,
+        clientToken: data.clientToken || clientToken,
+        selectedProfile: {
+          id: data.selectedProfile.id,
+          name: data.selectedProfile.name
+        },
+        availableProfiles: data.availableProfiles || [],
+        user: data.user || null
+      };
+    } else {
+      throw new Error('No se recibió información del perfil');
+    }
+  } catch (error: any) {
+    console.error('Error al autenticar usuario en Ely.by:', error);
+    return {
+      success: false,
+      requires2FA: false,
+      error: error.message || 'Error desconocido al autenticar'
+    };
   }
 });
 
