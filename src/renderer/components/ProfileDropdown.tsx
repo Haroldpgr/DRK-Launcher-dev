@@ -114,25 +114,11 @@ function ProfileDropdown({
             <div className="text-left">
               <div className="font-semibold text-white">{currentUser}</div>
               <div className="text-xs text-gray-400">
-                {(() => {
-                  const currentProfile = profiles.find(p => p.username === currentUser);
-                  const profileType = currentProfile?.type;
-                  
-                  // Logs de depuración
-                  console.log('[ProfileDropdown] Renderizando tipo de cuenta:', {
-                    currentUser,
-                    profileType,
-                    allProfiles: profiles.map(p => ({ username: p.username, type: p.type })),
-                    currentProfile: currentProfile ? { username: currentProfile.username, type: currentProfile.type, id: currentProfile.id } : null
-                  });
-                  
-                  if (profileType === 'microsoft') return 'Cuenta Microsoft';
-                  if (profileType === 'drkauth') return 'Cuenta Drk';
-                  if (profileType === 'elyby') return 'Cuenta Ely.by';
-                  if (profileType === 'littleskin') return 'Cuenta LittleSkin';
-                  if (profileType === 'yggdrasil') return 'Cuenta Yggdrasil';
-                  return 'Cuenta no premium';
-                })()}
+                {profiles.find(p => p.username === currentUser)?.type === 'microsoft' 
+                  ? 'Cuenta Microsoft' 
+                  : profiles.find(p => p.username === currentUser)?.type === 'elyby'
+                  ? 'Cuenta Ely.by'
+                  : 'Cuenta no premium'}
               </div>
             </div>
           </div>
@@ -180,20 +166,11 @@ function ProfileDropdown({
                   <div>
                     <div className="text-white text-sm font-medium">{profile.username}</div>
                     <div className="text-xs text-gray-400">
-                      {(() => {
-                        console.log('[ProfileDropdown] Renderizando perfil en lista:', {
-                          username: profile.username,
-                          type: profile.type,
-                          id: profile.id
-                        });
-                        
-                        if (profile.type === 'microsoft') return 'Microsoft';
-                        if (profile.type === 'drkauth') return 'Drk';
-                        if (profile.type === 'elyby') return 'Ely.by';
-                        if (profile.type === 'littleskin') return 'LittleSkin';
-                        if (profile.type === 'yggdrasil') return 'Yggdrasil';
-                        return 'No premium';
-                      })()}
+                      {profile.type === 'microsoft' 
+                        ? 'Microsoft' 
+                        : profile.type === 'elyby'
+                        ? 'Ely.by'
+                        : 'No premium'}
                     </div>
                   </div>
                 </div>

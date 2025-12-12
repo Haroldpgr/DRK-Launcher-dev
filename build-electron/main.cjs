@@ -6649,8 +6649,7 @@ var javaService = new JavaService();
 var javaService_default = javaService;
 
 // src/main/main.ts
-var import_node_fetch10 = __toESM(require_lib2(), 1);
-init_paths();
+var import_node_fetch8 = __toESM(require_lib2(), 1);
 
 // src/services/instanceService.ts
 var import_node_path7 = __toESM(require("node:path"), 1);

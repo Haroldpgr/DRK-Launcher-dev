@@ -146,8 +146,7 @@ export default function App() {
     }
   };
 
-  const handleAddAccount = useCallback((username: string, type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' | 'drkauth' = 'non-premium') => {
-    console.log('[App] handleAddAccount llamado:', { username, type });
+  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' | 'elyby' = 'non-premium') => {
     const newProfile = profileService.addProfile(username, type);
     console.log('[App] Perfil agregado:', newProfile);
     const updatedProfiles = profileService.getAllProfiles();
