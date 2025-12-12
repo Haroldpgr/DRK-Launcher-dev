@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import Button from './Button'; // Assuming Button component is available
 import { elyByService } from '../services/elyByService';
+import { yggdrasilService } from '../services/yggdrasilService';
+import { drkAuthService } from '../services/drkAuthService';
 import { showModernAlert } from '../utils/uiUtils';
 
 type LoginModalProps = {
@@ -19,9 +21,15 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
   const [elyByRequires2FA, setElyByRequires2FA] = useState(false);
   const [elyByClientToken, setElyByClientToken] = useState<string | null>(null);
   const [isElyByAuthenticating, setIsElyByAuthenticating] = useState(false);
-  const [selectedLoginType, setSelectedLoginType] = useState<'none' | 'microsoft' | 'non-premium' | 'elyby' | 'littleskin'>('none');
+  const [selectedLoginType, setSelectedLoginType] = useState<'none' | 'microsoft' | 'non-premium' | 'elyby' | 'littleskin' | 'yggdrasil' | 'drkauth'>('none');
   const [isLittleSkinAuthenticating, setIsLittleSkinAuthenticating] = useState(false);
   const [showOtherMethods, setShowOtherMethods] = useState(false);
+  const [yggdrasilUsername, setYggdrasilUsername] = useState('');
+  const [yggdrasilPassword, setYggdrasilPassword] = useState('');
+  const [isYggdrasilAuthenticating, setIsYggdrasilAuthenticating] = useState(false);
+  const [drkAuthUsername, setDrkAuthUsername] = useState('');
+  const [drkAuthPassword, setDrkAuthPassword] = useState('');
+  const [isDrkAuthAuthenticating, setIsDrkAuthAuthenticating] = useState(false);
 
   if (!isOpen) {
     return null;
@@ -52,6 +60,118 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
     setElyByRequires2FA(false);
     setElyByClientToken(null);
     setIsElyByAuthenticating(false);
+    setYggdrasilUsername('');
+    setYggdrasilPassword('');
+    setIsYggdrasilAuthenticating(false);
+    setDrkAuthUsername('');
+    setDrkAuthPassword('');
+    setIsDrkAuthAuthenticating(false);
+  };
+
+  const handleDrkAuthLogin = async () => {
+    if (!drkAuthUsername.trim() || !drkAuthPassword.trim() || isDrkAuthAuthenticating) {
+      return;
+    }
+
+    setIsDrkAuthAuthenticating(true);
+    
+    try {
+      const result = await drkAuthService.authenticate(
+        drkAuthUsername.trim(),
+        drkAuthPassword
+      );
+      
+      if (result && result.success && result.selectedProfile) {
+        // Autenticación exitosa, agregar al perfil
+        const profileService = await import('../services/profileService');
+        profileService.profileService.addProfile(
+          result.selectedProfile.name,
+          'drkauth',
+          {
+            accessToken: result.accessToken,
+            clientToken: result.clientToken
+          }
+        );
+        
+        if (onElyByLogin) {
+          onElyByLogin(result.selectedProfile.name);
+        }
+        
+        setDrkAuthUsername('');
+        setDrkAuthPassword('');
+        setSelectedLoginType('none');
+        setIsDrkAuthAuthenticating(false);
+      } else {
+        const errorMessage = result?.error || 'Credenciales incorrectas. Por favor, verifica tu usuario y contraseña.';
+        await showModernAlert(
+          'Error de autenticación',
+          errorMessage,
+          'error'
+        );
+        setIsDrkAuthAuthenticating(false);
+      }
+    } catch (error: any) {
+      console.error('Error al autenticar con Drk Launcher:', error);
+      await showModernAlert(
+        'Error de conexión',
+        'No se pudo conectar con el servidor de autenticación. Por favor, verifica que el servidor esté ejecutándose en http://localhost:3000',
+        'error'
+      );
+      setIsDrkAuthAuthenticating(false);
+    }
+  };
+
+  const handleYggdrasilLogin = async () => {
+    if (!yggdrasilUsername.trim() || !yggdrasilPassword.trim() || isYggdrasilAuthenticating) {
+      return;
+    }
+
+    setIsYggdrasilAuthenticating(true);
+    
+    try {
+      const result = await yggdrasilService.authenticate(
+        yggdrasilUsername.trim(),
+        yggdrasilPassword
+      );
+      
+      if (result && result.success && result.selectedProfile) {
+        // Autenticación exitosa, agregar al perfil
+        // Guardar tokens si están disponibles
+        const profileService = await import('../services/profileService');
+        profileService.profileService.addProfile(
+          result.selectedProfile.name,
+          'yggdrasil',
+          {
+            accessToken: result.accessToken,
+            clientToken: result.clientToken
+          }
+        );
+        // Usar el mismo handler que Ely.by ya que ambos agregan perfiles
+        if (onElyByLogin) {
+          onElyByLogin(result.selectedProfile.name);
+        }
+        setYggdrasilUsername('');
+        setYggdrasilPassword('');
+        setSelectedLoginType('none');
+        setIsYggdrasilAuthenticating(false);
+      } else {
+        const errorMessage = result?.error || 'Credenciales incorrectas. Por favor, verifica tu usuario y contraseña.';
+        await showModernAlert(
+          'Error de autenticación',
+          errorMessage,
+          'error'
+        );
+        setIsYggdrasilAuthenticating(false);
+      }
+    } catch (error: any) {
+      console.error('Error al autenticar con Yggdrasil:', error);
+      await showModernAlert(
+        'Error de conexión',
+        'No se pudo conectar con el servidor Yggdrasil. Por favor, verifica tu conexión e inténtalo de nuevo.',
+        'error'
+      );
+      setIsYggdrasilAuthenticating(false);
+    }
   };
 
   const handleElyByLogin = async () => {
@@ -285,6 +405,37 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
                       selectedLoginType === 'elyby' ? 'border-purple-500 bg-purple-500' : 'border-gray-500'
                     }`}>
                       {selectedLoginType === 'elyby' && (
+                        <svg className="w-2.5 h-2.5 md:w-3 md:h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Drk Launcher Option */}
+                <div
+                  onClick={() => setSelectedLoginType('drkauth')}
+                  className={`w-full cursor-pointer p-3 md:p-4 rounded-xl transition-all duration-300 shadow-lg border-2 ${
+                    selectedLoginType === 'drkauth'
+                      ? 'border-cyan-500 bg-cyan-900/30'
+                      : 'border-gray-700 bg-gray-700/50 hover:border-gray-600 hover:bg-gray-700/70'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <svg className="w-5 h-5 md:w-6 md:h-6 text-cyan-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path>
+                      </svg>
+                      <div className="text-left">
+                        <div className="text-white font-semibold text-sm md:text-base">Iniciar sesión con Drk Launcher</div>
+                        <div className="text-xs text-gray-400">Servidor de autenticación oficial</div>
+                      </div>
+                    </div>
+                    <div className={`w-4 h-4 md:w-5 md:h-5 rounded-full border-2 flex items-center justify-center ${
+                      selectedLoginType === 'drkauth' ? 'border-cyan-500 bg-cyan-500' : 'border-gray-500'
+                    }`}>
+                      {selectedLoginType === 'drkauth' && (
                         <svg className="w-2.5 h-2.5 md:w-3 md:h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path>
                         </svg>
@@ -632,7 +783,159 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
             </div>
           )}
 
-          {(selectedLoginType === 'microsoft' || selectedLoginType === 'non-premium' || selectedLoginType === 'elyby' || selectedLoginType === 'littleskin') && (
+
+          {selectedLoginType === 'drkauth' && (
+            <div className="space-y-4 mt-2">
+              <div className="bg-gradient-to-br from-cyan-900/90 to-blue-900/90 text-white p-5 rounded-xl shadow-xl border border-cyan-700/40 backdrop-blur-sm">
+                <div className="flex justify-center mb-3">
+                  <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path>
+                  </svg>
+                </div>
+                <div className="text-center mb-4">
+                  <h3 className="text-lg font-bold mb-2">Inicio de Sesión con Drk Launcher</h3>
+                  <p className="text-cyan-200 text-sm mb-3">Usa la página web para registrarte o iniciar sesión</p>
+                  <a 
+                    href="http://localhost:3000" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-block bg-cyan-700/80 text-cyan-100 px-4 py-1.5 rounded-full text-sm font-semibold mx-auto hover:bg-cyan-600/80 transition-colors mb-3"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open('http://localhost:3000', '_blank');
+                    }}
+                  >
+                    Visitar página de Drk Launcher
+                  </a>
+                </div>
+              </div>
+              
+              {/* Explicación del flujo */}
+              <div className="mb-4 p-3 bg-cyan-900/20 border border-cyan-500/30 rounded-lg">
+                <p className="text-sm text-cyan-200 text-center">
+                  <span className="font-semibold">💡 Método Web:</span> Al hacer clic en el botón, se abrirá tu navegador 
+                  para que puedas registrarte o iniciar sesión directamente en la página de Drk Launcher.
+                </p>
+              </div>
+              
+              <Button
+                onClick={async () => {
+                  if (isDrkAuthAuthenticating) return;
+                  
+                  setIsDrkAuthAuthenticating(true);
+                  
+                  try {
+                    // Abrir la página web en una nueva ventana
+                    const authWindow = window.open('http://localhost:3000', 'drkAuth', 'width=500,height=700,resizable=yes,scrollbars=yes');
+                    
+                    if (!authWindow) {
+                      throw new Error('No se pudo abrir la ventana. Verifica que los popups estén permitidos.');
+                    }
+
+                    // Escuchar mensajes de la página de autenticación
+                    const messageHandler = async (event: MessageEvent) => {
+                      // Verificar origen por seguridad (en desarrollo local)
+                      if (event.origin !== 'http://localhost:3000' && event.origin !== 'http://127.0.0.1:3000') {
+                        return;
+                      }
+
+                      if (event.data && event.data.type === 'DRK_AUTH_SUCCESS') {
+                        const authData = event.data.data;
+                        
+                        // Cerrar la ventana de autenticación
+                        authWindow.close();
+                        
+                        // Remover el listener
+                        window.removeEventListener('message', messageHandler);
+                        
+                        // Agregar el perfil al launcher
+                        try {
+                          const profileService = await import('../services/profileService');
+                          profileService.profileService.addProfile(
+                            authData.selectedProfile.name,
+                            'drkauth',
+                            {
+                              accessToken: authData.accessToken,
+                              clientToken: authData.clientToken
+                            }
+                          );
+                          
+                          // Cerrar el modal y actualizar
+                          if (onElyByLogin) {
+                            onElyByLogin(authData.selectedProfile.name);
+                          }
+                          
+                          setSelectedLoginType('none');
+                          setIsDrkAuthAuthenticating(false);
+                          
+                          await showModernAlert(
+                            '¡Éxito!',
+                            `Has iniciado sesión como ${authData.selectedProfile.name}`,
+                            'success'
+                          );
+                        } catch (error: any) {
+                          console.error('Error al agregar perfil:', error);
+                          await showModernAlert(
+                            'Error',
+                            'Error al agregar la cuenta al launcher: ' + (error.message || 'Error desconocido'),
+                            'error'
+                          );
+                          setIsDrkAuthAuthenticating(false);
+                        }
+                      }
+                    };
+
+                    // Agregar listener para mensajes
+                    window.addEventListener('message', messageHandler);
+                    
+                    // Verificar si la ventana se cerró manualmente
+                    const checkClosed = setInterval(() => {
+                      if (authWindow.closed) {
+                        clearInterval(checkClosed);
+                        window.removeEventListener('message', messageHandler);
+                        setIsDrkAuthAuthenticating(false);
+                      }
+                    }, 1000);
+                    
+                    // Mostrar mensaje informativo
+                    await showModernAlert(
+                      'Página abierta',
+                      'Se ha abierto la página de Drk Launcher. Puedes registrarte o iniciar sesión allí. La cuenta se agregará automáticamente al launcher.',
+                      'info'
+                    );
+                  } catch (error: any) {
+                    console.error('Error al abrir página de Drk Launcher:', error);
+                    await showModernAlert(
+                      'Error',
+                      'No se pudo abrir la página. Por favor, verifica que el servidor esté ejecutándose en http://localhost:3000',
+                      'error'
+                    );
+                    setIsDrkAuthAuthenticating(false);
+                  }
+                }}
+                disabled={isDrkAuthAuthenticating}
+                className={`w-full py-4 px-4 rounded-xl transition-all duration-300 shadow-lg text-lg font-semibold ${
+                  !isDrkAuthAuthenticating
+                    ? 'bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-700 hover:to-blue-800 text-white shadow-cyan-500/40 hover:shadow-cyan-500/50 transform hover:-translate-y-0.5'
+                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {isDrkAuthAuthenticating ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Abriendo navegador...
+                  </span>
+                ) : (
+                  'Iniciar sesión con Drk'
+                )}
+              </Button>
+            </div>
+          )}
+
+          {(selectedLoginType === 'microsoft' || selectedLoginType === 'non-premium' || selectedLoginType === 'elyby' || selectedLoginType === 'littleskin' || selectedLoginType === 'drkauth') && (
             <div className="pt-3">
               <Button
                 variant="secondary"

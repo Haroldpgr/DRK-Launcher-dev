@@ -26,6 +26,8 @@ import { logProgressService } from '../services/logProgressService';
 import { gameLaunchService } from '../services/gameLaunchService';
 import { tempModpackService } from '../services/tempModpackService';
 import { fileAnalyzerService } from '../services/fileAnalyzerService';
+import { YggdrasilClient, yggdrasilClient } from './yggdrasilClient';
+import { DrkAuthClient, drkAuthClient } from './drkAuthClient';
 
 let win: BrowserWindow | null = null;
 
@@ -368,6 +370,17 @@ ipcMain.handle('shell:openPath', async (_e, folderPath: string) => {
   } catch (error) {
     console.error('Error opening path:', error);
     return false;
+  }
+});
+
+// Handler para abrir URL externa
+ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+  try {
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error: any) {
+    console.error('[Shell] Error al abrir URL externa:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -1207,15 +1220,15 @@ const LITTLESKIN_OAUTH_TOKEN_ENDPOINT = 'https://littleskin.cn/oauth/token';
 const LITTLESKIN_OAUTH_USER_ENDPOINT = 'https://littleskin.cn/api/user';
 
 // Configuración OAuth 2.0 de LittleSkin
-// NOTA: Necesitas crear una aplicación en LittleSkin para obtener client_id y client_secret
-// https://littleskin.cn/user/oauth/apps
+// Credenciales obtenidas de: https://littleskin.cn/user/oauth/manage
 const LITTLESKIN_OAUTH_CONFIG = {
-  clientId: '', // TODO: Obtener de https://littleskin.cn/user/oauth/apps
-  clientSecret: '', // TODO: Obtener de https://littleskin.cn/user/oauth/apps
-  redirectUri: 'http://127.0.0.1:25565/callback',
+  clientId: '1266',
+  clientSecret: 'Z18Fr0LDceUSkF2dQo2JPle5VWCQ83G26UpJUoFB',
+  redirectUri: 'http://127.0.0.1:4567/auth/callback', // Debe coincidir con el configurado en LittleSkin
   // Scopes disponibles según documentación de LittleSkin
-  // Para obtener información del usuario y tokens de Minecraft
-  scope: 'user-read user-write' // Ajustar según necesidades
+  // Probar primero sin scope o con scopes básicos
+  // Según la documentación, los scopes pueden variar
+  scope: '' // Dejar vacío primero para ver qué scopes acepta
 };
 
 // Generar un clientToken único para esta sesión
@@ -1271,8 +1284,10 @@ function base64UrlEncode(buffer: Buffer): string {
 
 /**
  * Crea un servidor HTTP local para escuchar el callback de OAuth
+ * @param port Puerto en el que escuchar (default: 25565)
+ * @param path Ruta del callback (default: '/callback')
  */
-function createCallbackServer(): Promise<{ code: string; state: string }> {
+function createCallbackServer(port: number = 25565, path: string = '/callback'): Promise<{ code: string; state: string }> {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       if (!req.url) {
@@ -1284,7 +1299,7 @@ function createCallbackServer(): Promise<{ code: string; state: string }> {
       const url = new URL(req.url, `http://${req.headers.host}`);
       
       // Verificar que es la ruta de callback
-      if (url.pathname === '/callback') {
+      if (url.pathname === path) {
         const code = url.searchParams.get('code');
         const state = url.searchParams.get('state');
         const error = url.searchParams.get('error');
@@ -1368,9 +1383,9 @@ function createCallbackServer(): Promise<{ code: string; state: string }> {
       }
     });
 
-    // Escuchar en el puerto 25565
-    server.listen(25565, '127.0.0.1', () => {
-      console.log('[Ely.by OAuth] Servidor de callback escuchando en http://127.0.0.1:25565/callback');
+    // Escuchar en el puerto especificado
+    server.listen(port, '127.0.0.1', () => {
+      console.log(`[OAuth] Servidor de callback escuchando en http://127.0.0.1:${port}${path}`);
     });
 
     // Timeout de 5 minutos
@@ -1607,18 +1622,26 @@ async function authenticateLittleSkin(): Promise<{
   console.log('[LittleSkin OAuth] State generado:', state);
   
   // Paso 2: Iniciar Servidor Local
-  const callbackPromise = createCallbackServer();
-  console.log('[LittleSkin OAuth] Servidor local iniciado, esperando callback...');
+  // LittleSkin usa puerto 4567 y ruta /auth/callback según la configuración
+  const callbackUrl = new URL(LITTLESKIN_OAUTH_CONFIG.redirectUri);
+  const callbackPort = parseInt(callbackUrl.port) || 4567;
+  const callbackPath = callbackUrl.pathname || '/auth/callback';
+  
+  const callbackPromise = createCallbackServer(callbackPort, callbackPath);
+  console.log(`[LittleSkin OAuth] Servidor local iniciado, esperando callback en ${LITTLESKIN_OAUTH_CONFIG.redirectUri}...`);
   
   // Paso 3: Construir URL de autorización
   // ENDPOINT: https://littleskin.cn/oauth/authorize
-  const scope = LITTLESKIN_OAUTH_CONFIG.scope?.trim() || 'user-read';
+  const scope = LITTLESKIN_OAUTH_CONFIG.scope?.trim() || '';
   
   const authUrl = new URL(LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT);
   authUrl.searchParams.set('client_id', LITTLESKIN_OAUTH_CONFIG.clientId);
   authUrl.searchParams.set('redirect_uri', LITTLESKIN_OAUTH_CONFIG.redirectUri);
   authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('scope', scope);
+  // Solo agregar scope si no está vacío (algunos servicios OAuth no requieren scope)
+  if (scope) {
+    authUrl.searchParams.set('scope', scope);
+  }
   authUrl.searchParams.set('state', state);
   
   console.log(`[LittleSkin OAuth] URL de autorización: ${authUrl.toString()}`);
@@ -1626,8 +1649,9 @@ async function authenticateLittleSkin(): Promise<{
     client_id: LITTLESKIN_OAUTH_CONFIG.clientId,
     redirect_uri: LITTLESKIN_OAUTH_CONFIG.redirectUri,
     response_type: 'code',
-    scope: scope,
-    state: state
+    scope: scope || '(sin scope)',
+    state: state,
+    scope_incluido_en_url: scope ? 'Sí' : 'No'
   });
   
   // Abrir URL en el navegador del usuario
@@ -1635,7 +1659,7 @@ async function authenticateLittleSkin(): Promise<{
   console.log('[LittleSkin OAuth] Navegador abierto para autorización');
   
   // Paso 4: Interceptar Callback
-  console.log('[LittleSkin OAuth] Esperando callback en http://127.0.0.1:25565/callback...');
+  console.log(`[LittleSkin OAuth] Esperando callback en ${LITTLESKIN_OAUTH_CONFIG.redirectUri}...`);
   const { code, state: receivedState } = await callbackPromise;
   
   // Verificar el state (protección CSRF)
@@ -1811,6 +1835,148 @@ ipcMain.handle('elyby:authenticate', async (_event, username: string, password: 
       success: false,
       requires2FA: false,
       error: error.message || 'Error desconocido al autenticar'
+    };
+  }
+});
+
+// --- Yggdrasil Authentication Integration --- //
+// Configuración del servidor Yggdrasil (puede ser cambiada según necesidad)
+const YGGDRASIL_BASE_URL = process.env.YGGDRASIL_BASE_URL || 'http://localhost:8080/authserver';
+
+// Crear instancia del cliente Yggdrasil
+const yggdrasilClientInstance = new YggdrasilClient(YGGDRASIL_BASE_URL);
+
+// --- Drk Launcher Authentication Integration --- //
+// Configuración del servidor de autenticación Drk Launcher
+// Para desarrollo local, usar: http://localhost:3000/authserver
+// Para producción, usar: https://api.drklauncher.com/authserver
+const DRK_AUTH_BASE_URL = process.env.DRK_AUTH_BASE_URL || 'http://localhost:3000/authserver';
+
+// Crear instancia del cliente Drk Auth
+const drkAuthClientInstance = new DrkAuthClient(DRK_AUTH_BASE_URL);
+
+// IPC Handler para autenticar con Yggdrasil
+ipcMain.handle('yggdrasil:authenticate', async (_event, username: string, password: string) => {
+  try {
+    console.log(`[Yggdrasil IPC] Autenticando usuario: ${username}`);
+    const result = await yggdrasilClientInstance.authenticate(username, password);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      availableProfiles: result.availableProfiles || [],
+      user: result.user
+    };
+  } catch (error: any) {
+    console.error('[Yggdrasil IPC] Error en authenticate:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido al autenticar'
+    };
+  }
+});
+
+// IPC Handler para refrescar tokens Yggdrasil
+ipcMain.handle('yggdrasil:refresh', async (_event, accessToken: string, clientToken: string) => {
+  try {
+    console.log(`[Yggdrasil IPC] Refrescando tokens...`);
+    const result = await yggdrasilClientInstance.refresh(accessToken, clientToken);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      user: result.user
+    };
+  } catch (error: any) {
+    console.error('[Yggdrasil IPC] Error en refresh:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido al refrescar tokens'
+    };
+  }
+});
+
+// IPC Handler para validar token Yggdrasil
+ipcMain.handle('yggdrasil:validate', async (_event, accessToken: string) => {
+  try {
+    console.log(`[Yggdrasil IPC] Validando token...`);
+    const isValid = await yggdrasilClientInstance.validate(accessToken);
+    return {
+      success: true,
+      isValid: isValid
+    };
+  } catch (error: any) {
+    console.error('[Yggdrasil IPC] Error en validate:', error);
+    return {
+      success: false,
+      isValid: false,
+      error: error.message || 'Error desconocido al validar token'
+    };
+  }
+});
+
+// --- Drk Launcher Auth IPC Handlers --- //
+
+// IPC Handler para autenticar con Drk Launcher
+ipcMain.handle('drkauth:authenticate', async (_event, username: string, password: string) => {
+  try {
+    console.log(`[DrkAuth IPC] Autenticando usuario: ${username}`);
+    const result = await drkAuthClientInstance.authenticate(username, password);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      availableProfiles: result.availableProfiles || [],
+      user: result.user
+    };
+  } catch (error: any) {
+    console.error('[DrkAuth IPC] Error en authenticate:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido al autenticar'
+    };
+  }
+});
+
+// IPC Handler para refrescar tokens Drk Launcher
+ipcMain.handle('drkauth:refresh', async (_event, accessToken: string, clientToken: string) => {
+  try {
+    console.log(`[DrkAuth IPC] Refrescando tokens...`);
+    const result = await drkAuthClientInstance.refresh(accessToken, clientToken);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      user: result.user
+    };
+  } catch (error: any) {
+    console.error('[DrkAuth IPC] Error en refresh:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido al refrescar tokens'
+    };
+  }
+});
+
+// IPC Handler para validar token Drk Launcher
+ipcMain.handle('drkauth:validate', async (_event, accessToken: string) => {
+  try {
+    console.log(`[DrkAuth IPC] Validando token...`);
+    const isValid = await drkAuthClientInstance.validate(accessToken);
+    return {
+      success: true,
+      isValid: isValid
+    };
+  } catch (error: any) {
+    console.error('[DrkAuth IPC] Error en validate:', error);
+    return {
+      success: false,
+      isValid: false,
+      error: error.message || 'Error desconocido al validar token'
     };
   }
 });

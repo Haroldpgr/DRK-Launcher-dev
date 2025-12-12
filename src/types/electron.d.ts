@@ -69,6 +69,16 @@ declare global {
       littleskin: {
         startOAuth: () => Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresIn?: number; tokenType?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
       };
+      yggdrasil: {
+        authenticate: (username: string, password: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; availableProfiles?: Array<{ id: string; name: string }>; user?: any; error?: string }>;
+        refresh: (accessToken: string, clientToken: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+        validate: (accessToken: string) => Promise<{ success: boolean; isValid: boolean; error?: string }>;
+      };
+      drkauth: {
+        authenticate: (username: string, password: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; availableProfiles?: Array<{ id: string; name: string }>; user?: any; error?: string }>;
+        refresh: (accessToken: string, clientToken: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+        validate: (accessToken: string) => Promise<{ success: boolean; isValid: boolean; error?: string }>;
+      };
       download: {
         start: (data: { url: string; filename: string; itemId: string }) => void;
         onProgress: (callback: (event: any, data: { itemId: string; progress: number }) => void) => void;
@@ -92,6 +102,7 @@ declare global {
       shell: {
         showItemInFolder: (filePath: string) => Promise<boolean>;
         openPath: (folderPath: string) => Promise<boolean>;
+        openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
       };
     };
   }

@@ -2794,12 +2794,12 @@ var require_lib2 = __commonJS({
       const dest = new URL$1(destination).protocol;
       return orig === dest;
     };
-    function fetch10(url, opts) {
-      if (!fetch10.Promise) {
+    function fetch12(url, opts) {
+      if (!fetch12.Promise) {
         throw new Error("native promise missing, set fetch.Promise to your favorite alternative");
       }
-      Body.Promise = fetch10.Promise;
-      return new fetch10.Promise(function(resolve, reject) {
+      Body.Promise = fetch12.Promise;
+      return new fetch12.Promise(function(resolve, reject) {
         const request = new Request(url, opts);
         const options = getNodeRequestOptions(request);
         const send = (options.protocol === "https:" ? https : http2).request;
@@ -2870,7 +2870,7 @@ var require_lib2 = __commonJS({
         req.on("response", function(res) {
           clearTimeout(reqTimeout);
           const headers = createHeadersLenient(res.headers);
-          if (fetch10.isRedirect(res.statusCode)) {
+          if (fetch12.isRedirect(res.statusCode)) {
             const location = headers.get("Location");
             let locationURL = null;
             try {
@@ -2932,7 +2932,7 @@ var require_lib2 = __commonJS({
                   requestOpts.body = void 0;
                   requestOpts.headers.delete("content-length");
                 }
-                resolve(fetch10(new Request(locationURL, requestOpts)));
+                resolve(fetch12(new Request(locationURL, requestOpts)));
                 finalize();
                 return;
             }
@@ -3024,11 +3024,11 @@ var require_lib2 = __commonJS({
         stream.end();
       }
     }
-    fetch10.isRedirect = function(code) {
+    fetch12.isRedirect = function(code) {
       return code === 301 || code === 302 || code === 303 || code === 307 || code === 308;
     };
-    fetch10.Promise = global.Promise;
-    module2.exports = exports2 = fetch10;
+    fetch12.Promise = global.Promise;
+    module2.exports = exports2 = fetch12;
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.default = exports2;
     exports2.Headers = Headers;
@@ -6560,7 +6560,7 @@ var javaService = new JavaService();
 var javaService_default = javaService;
 
 // src/main/main.ts
-var import_node_fetch8 = __toESM(require_lib2(), 1);
+var import_node_fetch10 = __toESM(require_lib2(), 1);
 
 // src/services/instanceService.ts
 var import_node_path7 = __toESM(require("node:path"), 1);
@@ -9569,6 +9569,376 @@ var GameLaunchService = class {
 };
 var gameLaunchService = new GameLaunchService();
 
+// src/main/yggdrasilClient.ts
+var import_node_fetch8 = __toESM(require_lib2(), 1);
+var YggdrasilClient = class {
+  baseUrl;
+  /**
+   * Constructor del cliente Yggdrasil
+   * @param baseUrl URL base del servidor Yggdrasil (ej: http://localhost:8080/authserver)
+   */
+  constructor(baseUrl = "http://localhost:8080/authserver") {
+    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  }
+  /**
+   * Iniciar sesión con credenciales de usuario
+   * @param username Nombre de usuario o email
+   * @param password Contraseña del usuario
+   * @returns Objeto con accessToken, clientToken y selectedProfile
+   * @throws Error si la autenticación falla
+   */
+  async authenticate(username, password) {
+    const url = `${this.baseUrl}/authenticate`;
+    const clientToken = this.generateClientToken();
+    const requestBody = {
+      agent: {
+        name: "Minecraft",
+        version: 1
+      },
+      username,
+      password,
+      clientToken,
+      requestUser: true
+    };
+    console.log(`[Yggdrasil] Autenticando usuario: ${username}`);
+    console.log(`[Yggdrasil] Endpoint: ${url}`);
+    try {
+      const response = await (0, import_node_fetch8.default)(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = {
+            error: "UnknownError",
+            errorMessage: responseText || `HTTP error! status: ${response.status}`
+          };
+        }
+        console.error(`[Yggdrasil] Error de autenticaci\xF3n:`, errorData);
+        throw new Error(errorData.errorMessage || errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data = JSON.parse(responseText);
+      if (!data.accessToken || !data.clientToken || !data.selectedProfile) {
+        throw new Error("Respuesta de autenticaci\xF3n incompleta. Faltan campos requeridos.");
+      }
+      console.log(`[Yggdrasil] \u2713 Autenticaci\xF3n exitosa para usuario: ${data.selectedProfile.name}`);
+      return {
+        accessToken: data.accessToken,
+        clientToken: data.clientToken || clientToken,
+        selectedProfile: {
+          id: data.selectedProfile.id,
+          name: data.selectedProfile.name
+        },
+        availableProfiles: data.availableProfiles || [],
+        user: data.user || void 0
+      };
+    } catch (error) {
+      console.error("[Yggdrasil] Error en authenticate:", error);
+      if (error.message) {
+        throw error;
+      }
+      throw new Error(`Error de conexi\xF3n: ${error.message || "Error desconocido"}`);
+    }
+  }
+  /**
+   * Refrescar tokens de acceso
+   * @param accessToken Token de acceso actual
+   * @param clientToken Token del cliente
+   * @returns Nuevo accessToken y selectedProfile
+   * @throws Error si el refresh falla
+   */
+  async refresh(accessToken, clientToken) {
+    const url = `${this.baseUrl}/refresh`;
+    const requestBody = {
+      accessToken,
+      clientToken,
+      requestUser: true
+    };
+    console.log(`[Yggdrasil] Refrescando tokens...`);
+    console.log(`[Yggdrasil] Endpoint: ${url}`);
+    try {
+      const response = await (0, import_node_fetch8.default)(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = {
+            error: "UnknownError",
+            errorMessage: responseText || `HTTP error! status: ${response.status}`
+          };
+        }
+        console.error(`[Yggdrasil] Error al refrescar tokens:`, errorData);
+        throw new Error(errorData.errorMessage || errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data = JSON.parse(responseText);
+      if (!data.accessToken || !data.clientToken || !data.selectedProfile) {
+        throw new Error("Respuesta de refresh incompleta. Faltan campos requeridos.");
+      }
+      console.log(`[Yggdrasil] \u2713 Tokens refrescados exitosamente para usuario: ${data.selectedProfile.name}`);
+      return {
+        accessToken: data.accessToken,
+        clientToken: data.clientToken,
+        selectedProfile: {
+          id: data.selectedProfile.id,
+          name: data.selectedProfile.name
+        },
+        user: data.user || void 0
+      };
+    } catch (error) {
+      console.error("[Yggdrasil] Error en refresh:", error);
+      if (error.message) {
+        throw error;
+      }
+      throw new Error(`Error de conexi\xF3n: ${error.message || "Error desconocido"}`);
+    }
+  }
+  /**
+   * Validar si un accessToken es válido
+   * @param accessToken Token de acceso a validar
+   * @returns true si el token es válido, false si no lo es
+   * @throws Error si hay un problema de conexión
+   */
+  async validate(accessToken) {
+    const url = `${this.baseUrl}/validate`;
+    const requestBody = {
+      accessToken
+    };
+    console.log(`[Yggdrasil] Validando token...`);
+    console.log(`[Yggdrasil] Endpoint: ${url}`);
+    try {
+      const response = await (0, import_node_fetch8.default)(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      if (response.status === 204) {
+        console.log(`[Yggdrasil] \u2713 Token v\xE1lido`);
+        return true;
+      } else {
+        console.log(`[Yggdrasil] \u2717 Token inv\xE1lido (status: ${response.status})`);
+        return false;
+      }
+    } catch (error) {
+      console.error("[Yggdrasil] Error en validate:", error);
+      return false;
+    }
+  }
+  /**
+   * Genera un clientToken único para esta sesión
+   * @returns String hexadecimal de 32 caracteres
+   */
+  generateClientToken() {
+    const crypto2 = require("crypto");
+    return crypto2.randomBytes(16).toString("hex");
+  }
+};
+var yggdrasilClient = new YggdrasilClient("http://localhost:8080/authserver");
+
+// src/main/drkAuthClient.ts
+var import_node_fetch9 = __toESM(require_lib2(), 1);
+var DrkAuthClient = class {
+  baseUrl;
+  /**
+   * Constructor del cliente de autenticación Drk Launcher
+   * @param baseUrl URL base del servidor de autenticación (ej: https://api.drklauncher.com/authserver)
+   */
+  constructor(baseUrl = "https://api.drklauncher.com/authserver") {
+    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  }
+  /**
+   * Iniciar sesión con credenciales de usuario
+   * @param username Nombre de usuario o email
+   * @param password Contraseña del usuario
+   * @returns Objeto con accessToken, clientToken y selectedProfile
+   * @throws Error si la autenticación falla
+   */
+  async authenticate(username, password) {
+    const url = `${this.baseUrl}/authenticate`;
+    const clientToken = this.generateClientToken();
+    const requestBody = {
+      agent: {
+        name: "Minecraft",
+        version: 1
+      },
+      username,
+      password,
+      clientToken,
+      requestUser: true
+    };
+    console.log(`[DrkAuth] Autenticando usuario: ${username}`);
+    console.log(`[DrkAuth] Endpoint: ${url}`);
+    try {
+      const response = await (0, import_node_fetch9.default)(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = {
+            error: "UnknownError",
+            errorMessage: responseText || `HTTP error! status: ${response.status}`
+          };
+        }
+        console.error(`[DrkAuth] Error de autenticaci\xF3n:`, errorData);
+        throw new Error(errorData.errorMessage || errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data = JSON.parse(responseText);
+      if (!data.accessToken || !data.clientToken || !data.selectedProfile) {
+        throw new Error("Respuesta de autenticaci\xF3n incompleta. Faltan campos requeridos.");
+      }
+      console.log(`[DrkAuth] \u2713 Autenticaci\xF3n exitosa para usuario: ${data.selectedProfile.name}`);
+      return {
+        accessToken: data.accessToken,
+        clientToken: data.clientToken || clientToken,
+        selectedProfile: {
+          id: data.selectedProfile.id,
+          name: data.selectedProfile.name
+        },
+        availableProfiles: data.availableProfiles || [],
+        user: data.user || void 0
+      };
+    } catch (error) {
+      console.error("[DrkAuth] Error en authenticate:", error);
+      if (error.message) {
+        throw error;
+      }
+      throw new Error(`Error de conexi\xF3n: ${error.message || "Error desconocido"}`);
+    }
+  }
+  /**
+   * Refrescar tokens de acceso
+   * @param accessToken Token de acceso actual
+   * @param clientToken Token del cliente
+   * @returns Nuevo accessToken y selectedProfile
+   * @throws Error si el refresh falla
+   */
+  async refresh(accessToken, clientToken) {
+    const url = `${this.baseUrl}/refresh`;
+    const requestBody = {
+      accessToken,
+      clientToken,
+      requestUser: true
+    };
+    console.log(`[DrkAuth] Refrescando tokens...`);
+    console.log(`[DrkAuth] Endpoint: ${url}`);
+    try {
+      const response = await (0, import_node_fetch9.default)(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = {
+            error: "UnknownError",
+            errorMessage: responseText || `HTTP error! status: ${response.status}`
+          };
+        }
+        console.error(`[DrkAuth] Error al refrescar tokens:`, errorData);
+        throw new Error(errorData.errorMessage || errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data = JSON.parse(responseText);
+      if (!data.accessToken || !data.clientToken || !data.selectedProfile) {
+        throw new Error("Respuesta de refresh incompleta. Faltan campos requeridos.");
+      }
+      console.log(`[DrkAuth] \u2713 Tokens refrescados exitosamente para usuario: ${data.selectedProfile.name}`);
+      return {
+        accessToken: data.accessToken,
+        clientToken: data.clientToken,
+        selectedProfile: {
+          id: data.selectedProfile.id,
+          name: data.selectedProfile.name
+        },
+        user: data.user || void 0
+      };
+    } catch (error) {
+      console.error("[DrkAuth] Error en refresh:", error);
+      if (error.message) {
+        throw error;
+      }
+      throw new Error(`Error de conexi\xF3n: ${error.message || "Error desconocido"}`);
+    }
+  }
+  /**
+   * Validar si un accessToken es válido
+   * @param accessToken Token de acceso a validar
+   * @returns true si el token es válido, false si no lo es
+   * @throws Error si hay un problema de conexión
+   */
+  async validate(accessToken) {
+    const url = `${this.baseUrl}/validate`;
+    const requestBody = {
+      accessToken
+    };
+    console.log(`[DrkAuth] Validando token...`);
+    console.log(`[DrkAuth] Endpoint: ${url}`);
+    try {
+      const response = await (0, import_node_fetch9.default)(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      if (response.status === 204) {
+        console.log(`[DrkAuth] \u2713 Token v\xE1lido`);
+        return true;
+      } else {
+        console.log(`[DrkAuth] \u2717 Token inv\xE1lido (status: ${response.status})`);
+        return false;
+      }
+    } catch (error) {
+      console.error("[DrkAuth] Error en validate:", error);
+      return false;
+    }
+  }
+  /**
+   * Genera un clientToken único para esta sesión
+   * @returns String hexadecimal de 32 caracteres
+   */
+  generateClientToken() {
+    const crypto2 = require("crypto");
+    return crypto2.randomBytes(16).toString("hex");
+  }
+};
+var drkAuthClient = new DrkAuthClient("https://api.drklauncher.com/authserver");
+
 // src/main/main.ts
 var import_node_stream5 = require("node:stream");
 var import_node_util5 = require("node:util");
@@ -9730,7 +10100,7 @@ function deleteInstance(id) {
   if (item && import_node_fs13.default.existsSync(item.path)) import_node_fs13.default.rmSync(item.path, { recursive: true, force: true });
 }
 async function mojangVersions() {
-  const res = await (0, import_node_fetch8.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
+  const res = await (0, import_node_fetch10.default)("https://launchermeta.mojang.com/mc/game/version_manifest.json");
   const json = await res.json();
   return json.versions;
 }
@@ -10259,7 +10629,7 @@ import_electron2.ipcMain.on("download:start", async (event, { url, filename, ite
   const fileDir = import_node_path14.default.dirname(filePath);
   ensureDir2(fileDir);
   try {
-    const response = await (0, import_node_fetch8.default)(url);
+    const response = await (0, import_node_fetch10.default)(url);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -10331,7 +10701,7 @@ async function fetchModrinthContent(contentType, search) {
       const url = `${MODRINTH_API_URL}/search?${searchParams}`;
       console.log(`Preparando solicitud Modrinth ${i + 1}:`, url);
       requests.push(
-        (0, import_node_fetch8.default)(url, {
+        (0, import_node_fetch10.default)(url, {
           method: "GET",
           headers: {
             "User-Agent": "DRKLauncher/1.0 (haroldpgr@gmail.com)",
@@ -10413,15 +10783,15 @@ var LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT = "https://littleskin.cn/oauth/authorize
 var LITTLESKIN_OAUTH_TOKEN_ENDPOINT = "https://littleskin.cn/oauth/token";
 var LITTLESKIN_OAUTH_USER_ENDPOINT = "https://littleskin.cn/api/user";
 var LITTLESKIN_OAUTH_CONFIG = {
-  clientId: "",
-  // TODO: Obtener de https://littleskin.cn/user/oauth/apps
-  clientSecret: "",
-  // TODO: Obtener de https://littleskin.cn/user/oauth/apps
-  redirectUri: "http://127.0.0.1:25565/callback",
+  clientId: "1266",
+  clientSecret: "Z18Fr0LDceUSkF2dQo2JPle5VWCQ83G26UpJUoFB",
+  redirectUri: "http://127.0.0.1:4567/auth/callback",
+  // Debe coincidir con el configurado en LittleSkin
   // Scopes disponibles según documentación de LittleSkin
-  // Para obtener información del usuario y tokens de Minecraft
-  scope: "user-read user-write"
-  // Ajustar según necesidades
+  // Probar primero sin scope o con scopes básicos
+  // Según la documentación, los scopes pueden variar
+  scope: ""
+  // Dejar vacío primero para ver qué scopes acepta
 };
 var generateClientToken = () => {
   const crypto2 = require("crypto");
@@ -10445,7 +10815,7 @@ function generateCodeChallenge(codeVerifier) {
 function base64UrlEncode(buffer) {
   return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
-function createCallbackServer() {
+function createCallbackServer(port = 25565, path15 = "/callback") {
   return new Promise((resolve, reject) => {
     const server = import_node_http.default.createServer((req, res) => {
       if (!req.url) {
@@ -10454,7 +10824,7 @@ function createCallbackServer() {
         return;
       }
       const url = new import_node_url.URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname === "/callback") {
+      if (url.pathname === path15) {
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
         const error = url.searchParams.get("error");
@@ -10531,8 +10901,8 @@ function createCallbackServer() {
         res.end("Not Found");
       }
     });
-    server.listen(25565, "127.0.0.1", () => {
-      console.log("[Ely.by OAuth] Servidor de callback escuchando en http://127.0.0.1:25565/callback");
+    server.listen(port, "127.0.0.1", () => {
+      console.log(`[OAuth] Servidor de callback escuchando en http://127.0.0.1:${port}${path15}`);
     });
     setTimeout(() => {
       if (server.listening) {
@@ -10544,7 +10914,7 @@ function createCallbackServer() {
 }
 import_electron2.ipcMain.handle("elyby:verify-username", async (_event, username) => {
   try {
-    const response = await (0, import_node_fetch8.default)(`${ELY_BY_AUTH_BASE}/api/users/profiles/minecraft/${encodeURIComponent(username)}`, {
+    const response = await (0, import_node_fetch10.default)(`${ELY_BY_AUTH_BASE}/api/users/profiles/minecraft/${encodeURIComponent(username)}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json"
@@ -10626,7 +10996,7 @@ async function authenticateElyBy() {
     redirect_uri: ELY_BY_OAUTH_CONFIG.redirectUri,
     code_verifier_length: codeVerifier.length
   });
-  const tokenResponse = await (0, import_node_fetch8.default)(ELY_BY_OAUTH_TOKEN_ENDPOINT, {
+  const tokenResponse = await (0, import_node_fetch10.default)(ELY_BY_OAUTH_TOKEN_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -10644,7 +11014,7 @@ async function authenticateElyBy() {
     throw new Error("No se recibi\xF3 access_token en la respuesta");
   }
   console.log("[Ely.by OAuth PKCE] Obteniendo informaci\xF3n del usuario...");
-  const userResponse = await (0, import_node_fetch8.default)(ELY_BY_OAUTH_USER_ENDPOINT, {
+  const userResponse = await (0, import_node_fetch10.default)(ELY_BY_OAUTH_USER_ENDPOINT, {
     method: "GET",
     headers: {
       "Authorization": `Bearer ${tokenData.access_token}`,
@@ -10689,26 +11059,32 @@ async function authenticateLittleSkin() {
   }
   const state = generateClientToken();
   console.log("[LittleSkin OAuth] State generado:", state);
-  const callbackPromise = createCallbackServer();
-  console.log("[LittleSkin OAuth] Servidor local iniciado, esperando callback...");
-  const scope = LITTLESKIN_OAUTH_CONFIG.scope?.trim() || "user-read";
+  const callbackUrl = new import_node_url.URL(LITTLESKIN_OAUTH_CONFIG.redirectUri);
+  const callbackPort = parseInt(callbackUrl.port) || 4567;
+  const callbackPath = callbackUrl.pathname || "/auth/callback";
+  const callbackPromise = createCallbackServer(callbackPort, callbackPath);
+  console.log(`[LittleSkin OAuth] Servidor local iniciado, esperando callback en ${LITTLESKIN_OAUTH_CONFIG.redirectUri}...`);
+  const scope = LITTLESKIN_OAUTH_CONFIG.scope?.trim() || "";
   const authUrl = new import_node_url.URL(LITTLESKIN_OAUTH_AUTHORIZE_ENDPOINT);
   authUrl.searchParams.set("client_id", LITTLESKIN_OAUTH_CONFIG.clientId);
   authUrl.searchParams.set("redirect_uri", LITTLESKIN_OAUTH_CONFIG.redirectUri);
   authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", scope);
+  if (scope) {
+    authUrl.searchParams.set("scope", scope);
+  }
   authUrl.searchParams.set("state", state);
   console.log(`[LittleSkin OAuth] URL de autorizaci\xF3n: ${authUrl.toString()}`);
   console.log(`[LittleSkin OAuth] Par\xE1metros de autorizaci\xF3n:`, {
     client_id: LITTLESKIN_OAUTH_CONFIG.clientId,
     redirect_uri: LITTLESKIN_OAUTH_CONFIG.redirectUri,
     response_type: "code",
-    scope,
-    state
+    scope: scope || "(sin scope)",
+    state,
+    scope_incluido_en_url: scope ? "S\xED" : "No"
   });
   await import_electron2.shell.openExternal(authUrl.toString());
   console.log("[LittleSkin OAuth] Navegador abierto para autorizaci\xF3n");
-  console.log("[LittleSkin OAuth] Esperando callback en http://127.0.0.1:25565/callback...");
+  console.log(`[LittleSkin OAuth] Esperando callback en ${LITTLESKIN_OAUTH_CONFIG.redirectUri}...`);
   const { code, state: receivedState } = await callbackPromise;
   if (receivedState !== state) {
     throw new Error("El state no coincide. Posible ataque CSRF.");
@@ -10722,7 +11098,7 @@ async function authenticateLittleSkin() {
   tokenParams.append("redirect_uri", LITTLESKIN_OAUTH_CONFIG.redirectUri);
   console.log("[LittleSkin OAuth] Intercambiando c\xF3digo por token...");
   console.log("[LittleSkin OAuth] Endpoint:", LITTLESKIN_OAUTH_TOKEN_ENDPOINT);
-  const tokenResponse = await (0, import_node_fetch8.default)(LITTLESKIN_OAUTH_TOKEN_ENDPOINT, {
+  const tokenResponse = await (0, import_node_fetch10.default)(LITTLESKIN_OAUTH_TOKEN_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -10741,7 +11117,7 @@ async function authenticateLittleSkin() {
     throw new Error("No se recibi\xF3 access_token en la respuesta");
   }
   console.log("[LittleSkin OAuth] Obteniendo informaci\xF3n del usuario...");
-  const userResponse = await (0, import_node_fetch8.default)(LITTLESKIN_OAUTH_USER_ENDPOINT, {
+  const userResponse = await (0, import_node_fetch10.default)(LITTLESKIN_OAUTH_USER_ENDPOINT, {
     method: "GET",
     headers: {
       "Authorization": `Bearer ${tokenData.access_token}`,
@@ -10785,7 +11161,7 @@ import_electron2.ipcMain.handle("elyby:authenticate", async (_event, username, p
     const finalPassword = totpToken ? `${password}:${totpToken}` : password;
     const url = `${ELY_BY_AUTH_BASE}/auth/authenticate`;
     console.log(`[Ely.by] Intentando autenticaci\xF3n en: ${url}`);
-    const response = await (0, import_node_fetch8.default)(url, {
+    const response = await (0, import_node_fetch10.default)(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -10845,6 +11221,122 @@ import_electron2.ipcMain.handle("elyby:authenticate", async (_event, username, p
       success: false,
       requires2FA: false,
       error: error.message || "Error desconocido al autenticar"
+    };
+  }
+});
+var YGGDRASIL_BASE_URL = process.env.YGGDRASIL_BASE_URL || "http://localhost:8080/authserver";
+var yggdrasilClientInstance = new YggdrasilClient(YGGDRASIL_BASE_URL);
+var DRK_AUTH_BASE_URL = process.env.DRK_AUTH_BASE_URL || "http://localhost:3000/authserver";
+var drkAuthClientInstance = new DrkAuthClient(DRK_AUTH_BASE_URL);
+import_electron2.ipcMain.handle("yggdrasil:authenticate", async (_event, username, password) => {
+  try {
+    console.log(`[Yggdrasil IPC] Autenticando usuario: ${username}`);
+    const result = await yggdrasilClientInstance.authenticate(username, password);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      availableProfiles: result.availableProfiles || [],
+      user: result.user
+    };
+  } catch (error) {
+    console.error("[Yggdrasil IPC] Error en authenticate:", error);
+    return {
+      success: false,
+      error: error.message || "Error desconocido al autenticar"
+    };
+  }
+});
+import_electron2.ipcMain.handle("yggdrasil:refresh", async (_event, accessToken, clientToken) => {
+  try {
+    console.log(`[Yggdrasil IPC] Refrescando tokens...`);
+    const result = await yggdrasilClientInstance.refresh(accessToken, clientToken);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      user: result.user
+    };
+  } catch (error) {
+    console.error("[Yggdrasil IPC] Error en refresh:", error);
+    return {
+      success: false,
+      error: error.message || "Error desconocido al refrescar tokens"
+    };
+  }
+});
+import_electron2.ipcMain.handle("yggdrasil:validate", async (_event, accessToken) => {
+  try {
+    console.log(`[Yggdrasil IPC] Validando token...`);
+    const isValid = await yggdrasilClientInstance.validate(accessToken);
+    return {
+      success: true,
+      isValid
+    };
+  } catch (error) {
+    console.error("[Yggdrasil IPC] Error en validate:", error);
+    return {
+      success: false,
+      isValid: false,
+      error: error.message || "Error desconocido al validar token"
+    };
+  }
+});
+import_electron2.ipcMain.handle("drkauth:authenticate", async (_event, username, password) => {
+  try {
+    console.log(`[DrkAuth IPC] Autenticando usuario: ${username}`);
+    const result = await drkAuthClientInstance.authenticate(username, password);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      availableProfiles: result.availableProfiles || [],
+      user: result.user
+    };
+  } catch (error) {
+    console.error("[DrkAuth IPC] Error en authenticate:", error);
+    return {
+      success: false,
+      error: error.message || "Error desconocido al autenticar"
+    };
+  }
+});
+import_electron2.ipcMain.handle("drkauth:refresh", async (_event, accessToken, clientToken) => {
+  try {
+    console.log(`[DrkAuth IPC] Refrescando tokens...`);
+    const result = await drkAuthClientInstance.refresh(accessToken, clientToken);
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.clientToken,
+      selectedProfile: result.selectedProfile,
+      user: result.user
+    };
+  } catch (error) {
+    console.error("[DrkAuth IPC] Error en refresh:", error);
+    return {
+      success: false,
+      error: error.message || "Error desconocido al refrescar tokens"
+    };
+  }
+});
+import_electron2.ipcMain.handle("drkauth:validate", async (_event, accessToken) => {
+  try {
+    console.log(`[DrkAuth IPC] Validando token...`);
+    const isValid = await drkAuthClientInstance.validate(accessToken);
+    return {
+      success: true,
+      isValid
+    };
+  } catch (error) {
+    console.error("[DrkAuth IPC] Error en validate:", error);
+    return {
+      success: false,
+      isValid: false,
+      error: error.message || "Error desconocido al validar token"
     };
   }
 });

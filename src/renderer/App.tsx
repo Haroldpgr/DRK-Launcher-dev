@@ -119,7 +119,7 @@ export default function App() {
     }
   };
 
-  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' | 'elyby' = 'non-premium') => {
+  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' = 'non-premium') => {
     const newProfile = profileService.addProfile(username, type);
     setAccounts([...accounts, newProfile]);
     setCurrentUser(username);

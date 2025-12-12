@@ -31,6 +31,22 @@ contextBridge.exposeInMainWorld('api', {
     startOAuth: () =>
       ipcRenderer.invoke('littleskin:start-oauth')
   },
+  yggdrasil: {
+    authenticate: (username: string, password: string) =>
+      ipcRenderer.invoke('yggdrasil:authenticate', username, password),
+    refresh: (accessToken: string, clientToken: string) =>
+      ipcRenderer.invoke('yggdrasil:refresh', accessToken, clientToken),
+    validate: (accessToken: string) =>
+      ipcRenderer.invoke('yggdrasil:validate', accessToken)
+  },
+  drkauth: {
+    authenticate: (username: string, password: string) =>
+      ipcRenderer.invoke('drkauth:authenticate', username, password),
+    refresh: (accessToken: string, clientToken: string) =>
+      ipcRenderer.invoke('drkauth:refresh', accessToken, clientToken),
+    validate: (accessToken: string) =>
+      ipcRenderer.invoke('drkauth:validate', accessToken)
+  },
 
   // Métodos de descarga
   download: {
@@ -123,7 +139,8 @@ contextBridge.exposeInMainWorld('api', {
   // API de shell del sistema
   shell: {
     showItemInFolder: (filePath: string) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
-    openPath: (folderPath: string) => ipcRenderer.invoke('shell:openPath', folderPath)
+    openPath: (folderPath: string) => ipcRenderer.invoke('shell:openPath', folderPath),
+    openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url)
   },
 
   // API de modpacks
@@ -161,6 +178,11 @@ declare global {
       };
       littleskin: {
         startOAuth: () => Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresIn?: number; tokenType?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+      };
+      yggdrasil: {
+        authenticate: (username: string, password: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; availableProfiles?: Array<{ id: string; name: string }>; user?: any; error?: string }>;
+        refresh: (accessToken: string, clientToken: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+        validate: (accessToken: string) => Promise<{ success: boolean; isValid: boolean; error?: string }>;
       };
       download: {
         start: (data: { url: string; filename: string; itemId: string }) => void;
@@ -222,6 +244,7 @@ declare global {
       shell: {
         showItemInFolder: (filePath: string) => Promise<boolean>;
         openPath: (folderPath: string) => Promise<boolean>;
+        openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
       };
     };
   }
