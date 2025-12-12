@@ -124,9 +124,9 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
     }
   }, [mcVersion]);
 
-  // Cargar versiones específicas del loader cuando se selecciona una versión de MC
+  // Cargar versiones específicas del loader cuando se selecciona una versión de MC o se cambia el loader
   useEffect(() => {
-    if (mcVersion) {
+    if (mcVersion && loaderType !== 'vanilla') {
       loadLoaderVersions();
     }
   }, [loaderType, mcVersion]);
@@ -134,38 +134,58 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
   const loadLoaderVersions = async () => {
     if (!mcVersion) return;
 
+    console.log(`[CreateInstanceModal] Cargando versiones de ${loaderType} para MC ${mcVersion}`);
     setLoading(true);
+    setError(null);
     
     try {
       switch (loaderType) {
         case 'fabric':
           if (!fabricVersions[mcVersion]) {
-            const versions = await integratedDownloadService.getFabricVersions(mcVersion);
-            setFabricVersions(prev => ({ ...prev, [mcVersion]: versions }));
+            console.log(`[CreateInstanceModal] Obteniendo versiones de Fabric...`);
+            const fabricVers = await integratedDownloadService.getFabricVersions(mcVersion);
+            console.log(`[CreateInstanceModal] Versiones de Fabric obtenidas:`, fabricVers);
+            setFabricVersions(prev => ({ ...prev, [mcVersion]: fabricVers }));
           }
           break;
         case 'forge':
           if (!forgeVersions[mcVersion]) {
-            const versions = await integratedDownloadService.getForgeVersions(mcVersion);
-            setForgeVersions(prev => ({ ...prev, [mcVersion]: versions }));
+            console.log(`[CreateInstanceModal] Obteniendo versiones de Forge...`);
+            const forgeVers = await integratedDownloadService.getForgeVersions(mcVersion);
+            console.log(`[CreateInstanceModal] Versiones de Forge obtenidas:`, forgeVers);
+            setForgeVersions(prev => ({ ...prev, [mcVersion]: forgeVers }));
+            
+            // Si hay versiones y no hay una seleccionada, seleccionar la primera automáticamente
+            if (forgeVers.length > 0 && !loaderVersion) {
+              setLoaderVersion(forgeVers[0].version);
+            }
           }
           break;
         case 'quilt':
           if (!quiltVersions[mcVersion]) {
-            const versions = await integratedDownloadService.getQuiltVersions(mcVersion);
-            setQuiltVersions(prev => ({ ...prev, [mcVersion]: versions }));
+            console.log(`[CreateInstanceModal] Obteniendo versiones de Quilt...`);
+            const quiltVers = await integratedDownloadService.getQuiltVersions(mcVersion);
+            console.log(`[CreateInstanceModal] Versiones de Quilt obtenidas:`, quiltVers);
+            setQuiltVersions(prev => ({ ...prev, [mcVersion]: quiltVers }));
           }
           break;
         case 'neoforge':
           if (!neoforgeVersions[mcVersion]) {
-            const versions = await integratedDownloadService.getNeoForgeVersions(mcVersion);
-            setNeoforgeVersions(prev => ({ ...prev, [mcVersion]: versions }));
+            console.log(`[CreateInstanceModal] Obteniendo versiones de NeoForge...`);
+            const neoforgeVers = await integratedDownloadService.getNeoForgeVersions(mcVersion);
+            console.log(`[CreateInstanceModal] Versiones de NeoForge obtenidas:`, neoforgeVers);
+            setNeoforgeVersions(prev => ({ ...prev, [mcVersion]: neoforgeVers }));
+            
+            // Si hay versiones y no hay una seleccionada, seleccionar la primera automáticamente
+            if (neoforgeVers.length > 0 && !loaderVersion) {
+              setLoaderVersion(neoforgeVers[0].version);
+            }
           }
           break;
       }
-    } catch (err) {
-      console.error(`Error al cargar versiones de ${loaderType}:`, err);
-      setError(`Error al cargar las versiones de ${loaderType}.`);
+    } catch (err: any) {
+      console.error(`[CreateInstanceModal] Error al cargar versiones de ${loaderType}:`, err);
+      setError(`Error al cargar las versiones de ${loaderType}: ${err.message || 'Error desconocido'}`);
     } finally {
       setLoading(false);
     }
@@ -284,20 +304,9 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
   };
 
   const getMcVersions = () => {
-    switch (loaderType) {
-      case 'vanilla':
-        return vanillaVersions.map(v => ({ id: v.id, name: `${v.id}` }));
-      case 'forge':
-        return Object.keys(forgeVersions).map(version => ({ id: version, name: version }));
-      case 'fabric':
-        return Object.keys(fabricVersions).map(version => ({ id: version, name: version }));
-      case 'quilt':
-        return Object.keys(quiltVersions).map(version => ({ id: version, name: version }));
-      case 'neoforge':
-        return Object.keys(neoforgeVersions).map(version => ({ id: version, name: version }));
-      default:
-        return [];
-    }
+    // Para todos los loaders (incluyendo vanilla), mostrar las versiones vanilla disponibles
+    // Los loaders soportan las mismas versiones de MC que vanilla
+    return vanillaVersions.map(v => ({ id: v.id, name: `${v.id}` }));
   };
 
   const getLoaderVersions = () => {
@@ -437,7 +446,13 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                           <button
                             key={type}
                             type="button"
-                            onClick={() => setLoaderType(type)}
+                            onClick={() => {
+                              setLoaderType(type);
+                              // Si cambiamos a vanilla, limpiar la versión del loader
+                              if (type === 'vanilla') {
+                                setLoaderVersion('');
+                              }
+                            }}
                             className={`py-2 px-1 rounded-lg border transition-all duration-300 transform hover:scale-105 min-h-[50px] flex flex-col justify-center items-center ${
                               loaderType === type
                                 ? 'bg-gradient-to-br from-blue-600 to-purple-600 border-blue-500 text-white shadow-lg shadow-blue-500/30'
@@ -496,15 +511,25 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                           {loaderVersions.map((version: any, index: number) => {
                             // Esto depende de la estructura de datos de cada loader
                             let displayVersion = '';
+                            let versionValue = '';
+                            
                             if (loaderType === 'fabric' || loaderType === 'quilt') {
                               displayVersion = version.loader?.version || version.version;
+                              versionValue = displayVersion;
                             } else if (loaderType === 'forge' || loaderType === 'neoforge') {
-                              displayVersion = version.version;
+                              // Para Forge y NeoForge, mostrar solo la versión del loader (después del guión)
+                              const fullVersion = version.version || '';
+                              const parts = fullVersion.split('-');
+                              displayVersion = parts.length > 1 ? parts[1] : fullVersion;
+                              versionValue = fullVersion; // Guardar la versión completa para el valor
                             }
                             
+                            // La primera versión (índice 0) es la recomendada
+                            const isRecommended = index === 0;
+                            
                             return (
-                              <option key={index} value={displayVersion}>
-                                {displayVersion}
+                              <option key={index} value={versionValue || displayVersion}>
+                                {isRecommended ? `⭐ ${displayVersion} (Recomendada)` : displayVersion}
                               </option>
                             );
                           })}

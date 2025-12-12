@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { Profile, profileService } from '../services/profileService';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { PlayerProfileModal } from './ui/PlayerProfileModal';
@@ -35,7 +35,7 @@ const ProfileImage: React.FC<{ username: string; size: number; className?: strin
   );
 };
 
-export default function ProfileDropdown({
+function ProfileDropdown({
   currentUser,
   profiles,
   onSelectAccount,
@@ -114,15 +114,25 @@ export default function ProfileDropdown({
             <div className="text-left">
               <div className="font-semibold text-white">{currentUser}</div>
               <div className="text-xs text-gray-400">
-                {profiles.find(p => p.username === currentUser)?.type === 'microsoft' 
-                  ? 'Cuenta Microsoft' 
-                  : profiles.find(p => p.username === currentUser)?.type === 'elyby'
-                  ? 'Cuenta Ely.by'
-                  : profiles.find(p => p.username === currentUser)?.type === 'drkauth'
-                  ? 'Cuenta Drk'
-                  : profiles.find(p => p.username === currentUser)?.type === 'yggdrasil'
-                  ? 'Cuenta Yggdrasil'
-                  : 'Cuenta no premium'}
+                {(() => {
+                  const currentProfile = profiles.find(p => p.username === currentUser);
+                  const profileType = currentProfile?.type;
+                  
+                  // Logs de depuración
+                  console.log('[ProfileDropdown] Renderizando tipo de cuenta:', {
+                    currentUser,
+                    profileType,
+                    allProfiles: profiles.map(p => ({ username: p.username, type: p.type })),
+                    currentProfile: currentProfile ? { username: currentProfile.username, type: currentProfile.type, id: currentProfile.id } : null
+                  });
+                  
+                  if (profileType === 'microsoft') return 'Cuenta Microsoft';
+                  if (profileType === 'drkauth') return 'Cuenta Drk';
+                  if (profileType === 'elyby') return 'Cuenta Ely.by';
+                  if (profileType === 'littleskin') return 'Cuenta LittleSkin';
+                  if (profileType === 'yggdrasil') return 'Cuenta Yggdrasil';
+                  return 'Cuenta no premium';
+                })()}
               </div>
             </div>
           </div>
@@ -170,15 +180,20 @@ export default function ProfileDropdown({
                   <div>
                     <div className="text-white text-sm font-medium">{profile.username}</div>
                     <div className="text-xs text-gray-400">
-                      {profile.type === 'microsoft' 
-                        ? 'Microsoft' 
-                        : profile.type === 'elyby'
-                        ? 'Ely.by'
-                        : profile.type === 'yggdrasil'
-                        ? 'Yggdrasil'
-                        : profile.type === 'drkauth'
-                        ? 'Drk'
-                        : 'No premium'}
+                      {(() => {
+                        console.log('[ProfileDropdown] Renderizando perfil en lista:', {
+                          username: profile.username,
+                          type: profile.type,
+                          id: profile.id
+                        });
+                        
+                        if (profile.type === 'microsoft') return 'Microsoft';
+                        if (profile.type === 'drkauth') return 'Drk';
+                        if (profile.type === 'elyby') return 'Ely.by';
+                        if (profile.type === 'littleskin') return 'LittleSkin';
+                        if (profile.type === 'yggdrasil') return 'Yggdrasil';
+                        return 'No premium';
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -245,3 +260,5 @@ export default function ProfileDropdown({
     </div>
   );
 }
+
+export default memo(ProfileDropdown);

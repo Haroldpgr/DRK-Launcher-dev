@@ -796,13 +796,13 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
                   <h3 className="text-lg font-bold mb-2">Inicio de Sesión con Drk Launcher</h3>
                   <p className="text-cyan-200 text-sm mb-3">Usa la página web para registrarte o iniciar sesión</p>
                   <a 
-                    href="http://localhost:3000" 
+                    href="http://localhost:3000/login" 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="inline-block bg-cyan-700/80 text-cyan-100 px-4 py-1.5 rounded-full text-sm font-semibold mx-auto hover:bg-cyan-600/80 transition-colors mb-3"
                     onClick={(e) => {
                       e.stopPropagation();
-                      window.open('http://localhost:3000', '_blank');
+                      window.open('http://localhost:3000/login', '_blank');
                     }}
                   >
                     Visitar página de Drk Launcher
@@ -826,74 +826,184 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
                   
                   try {
                     // Abrir la página web en una nueva ventana
-                    const authWindow = window.open('http://localhost:3000', 'drkAuth', 'width=500,height=700,resizable=yes,scrollbars=yes');
+                    const authWindow = window.open('http://localhost:3000/login', 'drkAuth', 'width=500,height=700,resizable=yes,scrollbars=yes');
                     
                     if (!authWindow) {
                       throw new Error('No se pudo abrir la ventana. Verifica que los popups estén permitidos.');
                     }
 
+                    // Función para procesar el éxito de autenticación
+                    const handleAuthSuccess = async (authData: any) => {
+                      console.log('[LoginModal] handleAuthSuccess llamado con:', {
+                        hasAuthData: !!authData,
+                        hasSelectedProfile: !!authData?.selectedProfile,
+                        hasAccessToken: !!authData?.accessToken,
+                        hasClientToken: !!authData?.clientToken,
+                        accessTokenLength: authData?.accessToken?.length,
+                        clientTokenLength: authData?.clientToken?.length,
+                        authDataKeys: authData ? Object.keys(authData) : []
+                      });
+                      
+                      // Cerrar la ventana de autenticación
+                      if (authWindow && !authWindow.closed) {
+                        authWindow.close();
+                      }
+                      
+                      // Remover el listener
+                      window.removeEventListener('message', messageHandler);
+                      
+                      // Verificar que tenemos los datos necesarios
+                      if (!authData || !authData.selectedProfile || !authData.selectedProfile.name) {
+                        console.error('[LoginModal] Datos de autenticación incompletos:', authData);
+                        await showModernAlert(
+                          'Error',
+                          'Datos de autenticación incompletos. Por favor, intenta de nuevo.',
+                          'error'
+                        );
+                        setIsDrkAuthAuthenticating(false);
+                        return;
+                      }
+                      
+                      // Agregar el perfil al launcher
+                      try {
+                        const profileService = await import('../services/profileService');
+                        console.log('[LoginModal] Agregando perfil DRK:', authData.selectedProfile.name);
+                        console.log('[LoginModal] Tokens disponibles:', {
+                          accessToken: authData.accessToken ? `${authData.accessToken.substring(0, 20)}...` : 'NO HAY',
+                          clientToken: authData.clientToken ? `${authData.clientToken.substring(0, 20)}...` : 'NO HAY'
+                        });
+                        
+                        const newProfile = profileService.profileService.addProfile(
+                          authData.selectedProfile.name,
+                          'drkauth', // Asegurar que el tipo sea 'drkauth'
+                          {
+                            accessToken: authData.accessToken,
+                            clientToken: authData.clientToken
+                          }
+                        );
+                        console.log('[LoginModal] Perfil agregado:', newProfile);
+                        console.log('[LoginModal] Tipo del perfil:', newProfile.type);
+                        console.log('[LoginModal] Token guardado en perfil:', {
+                          hasAccessToken: !!newProfile.accessToken,
+                          accessTokenLength: newProfile.accessToken?.length,
+                          hasClientToken: !!newProfile.clientToken,
+                          clientTokenLength: newProfile.clientToken?.length
+                        });
+                        
+                        // También guardar en localStorage como respaldo
+                        if (authData.accessToken) {
+                          try {
+                            localStorage.setItem('drkAuthData', JSON.stringify({
+                              accessToken: authData.accessToken,
+                              clientToken: authData.clientToken,
+                              selectedProfile: authData.selectedProfile,
+                              availableProfiles: authData.availableProfiles,
+                              user: authData.user
+                            }));
+                            console.log('[LoginModal] Token guardado también en localStorage como respaldo');
+                          } catch (e) {
+                            console.error('[LoginModal] Error al guardar en localStorage:', e);
+                          }
+                        }
+                        
+                        // Forzar actualización de la lista de perfiles en App.tsx
+                        // Esto asegura que el componente se re-renderice con el tipo correcto
+                        window.dispatchEvent(new CustomEvent('profileUpdated'));
+                        
+                        // NO llamar a onElyByLogin porque ya agregamos el perfil con el tipo correcto
+                        // onElyByLogin agregaría el perfil de nuevo y podría cambiar el tipo
+                        // Solo cerrar el modal
+                        setSelectedLoginType('none');
+                        setIsDrkAuthAuthenticating(false);
+                        
+                        // Cerrar el modal de login
+                        onClose();
+                        
+                        await showModernAlert(
+                          '¡Éxito!',
+                          `Has iniciado sesión como ${authData.selectedProfile.name}`,
+                          'success'
+                        );
+                      } catch (error: any) {
+                        console.error('Error al agregar perfil:', error);
+                        await showModernAlert(
+                          'Error',
+                          'Error al agregar la cuenta al launcher: ' + (error.message || 'Error desconocido'),
+                          'error'
+                        );
+                        setIsDrkAuthAuthenticating(false);
+                      }
+                    };
+
                     // Escuchar mensajes de la página de autenticación
                     const messageHandler = async (event: MessageEvent) => {
+                      console.log('[LoginModal] Mensaje recibido:', {
+                        origin: event.origin,
+                        type: event.data?.type,
+                        hasData: !!event.data?.data,
+                        fullEventData: event.data
+                      });
+                      
                       // Verificar origen por seguridad (en desarrollo local)
-                      if (event.origin !== 'http://localhost:3000' && event.origin !== 'http://127.0.0.1:3000') {
+                      // Permitir localhost y 127.0.0.1, y también 'null' para file:// protocol
+                      const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'null', 'file://'];
+                      const isAllowedOrigin = allowedOrigins.some(origin => 
+                        event.origin.includes(origin) || event.origin === origin || event.origin.startsWith('file://')
+                      );
+                      
+                      if (!isAllowedOrigin) {
+                        console.warn('[LoginModal] Origen no permitido:', event.origin);
                         return;
                       }
 
                       if (event.data && event.data.type === 'DRK_AUTH_SUCCESS') {
                         const authData = event.data.data;
-                        
-                        // Cerrar la ventana de autenticación
-                        authWindow.close();
-                        
-                        // Remover el listener
-                        window.removeEventListener('message', messageHandler);
-                        
-                        // Agregar el perfil al launcher
-                        try {
-                          const profileService = await import('../services/profileService');
-                          profileService.profileService.addProfile(
-                            authData.selectedProfile.name,
-                            'drkauth',
-                            {
-                              accessToken: authData.accessToken,
-                              clientToken: authData.clientToken
-                            }
-                          );
-                          
-                          // Cerrar el modal y actualizar
-                          if (onElyByLogin) {
-                            onElyByLogin(authData.selectedProfile.name);
-                          }
-                          
-                          setSelectedLoginType('none');
-                          setIsDrkAuthAuthenticating(false);
-                          
-                          await showModernAlert(
-                            '¡Éxito!',
-                            `Has iniciado sesión como ${authData.selectedProfile.name}`,
-                            'success'
-                          );
-                        } catch (error: any) {
-                          console.error('Error al agregar perfil:', error);
-                          await showModernAlert(
-                            'Error',
-                            'Error al agregar la cuenta al launcher: ' + (error.message || 'Error desconocido'),
-                            'error'
-                          );
-                          setIsDrkAuthAuthenticating(false);
-                        }
+                        console.log('[LoginModal] Datos de autenticación recibidos:', {
+                          hasAuthData: !!authData,
+                          keys: authData ? Object.keys(authData) : [],
+                          hasAccessToken: !!authData?.accessToken,
+                          hasClientToken: !!authData?.clientToken,
+                          hasSelectedProfile: !!authData?.selectedProfile
+                        });
+                        await handleAuthSuccess(authData);
+                      } else {
+                        console.log('[LoginModal] Mensaje recibido pero no es DRK_AUTH_SUCCESS:', event.data);
                       }
                     };
 
                     // Agregar listener para mensajes
                     window.addEventListener('message', messageHandler);
                     
-                    // Verificar si la ventana se cerró manualmente
-                    const checkClosed = setInterval(() => {
+                    // Verificar si la ventana se cerró manualmente y cerrar sesión si es necesario
+                    const checkClosed = setInterval(async () => {
                       if (authWindow.closed) {
                         clearInterval(checkClosed);
                         window.removeEventListener('message', messageHandler);
                         setIsDrkAuthAuthenticating(false);
+                        
+                        // Si la ventana se cerró sin autenticación exitosa, 
+                        // intentar cerrar la sesión en la web si existe
+                        try {
+                          const { profileService } = await import('../services/profileService');
+                          const currentProfile = profileService.getCurrentProfile();
+                          if (currentProfile) {
+                            const profile = profileService.getProfileByUsername(currentProfile);
+                            if (profile && profile.type === 'drkauth' && profile.accessToken) {
+                              // Intentar cerrar sesión en el backend
+                              fetch('http://localhost:3000/api/user/logout', {
+                                method: 'POST',
+                                headers: {
+                                  'Authorization': `Bearer ${profile.accessToken}`,
+                                  'Content-Type': 'application/json'
+                                }
+                              }).catch(err => {
+                                console.error('[LoginModal] Error al cerrar sesión:', err);
+                              });
+                            }
+                          }
+                        } catch (error) {
+                          console.error('[LoginModal] Error al importar profileService:', error);
+                        }
                       }
                     }, 1000);
                     

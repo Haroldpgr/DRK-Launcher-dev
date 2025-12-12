@@ -1,22 +1,32 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, Suspense, lazy, useCallback, useMemo } from 'react'
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
-import Home from './pages/Home'
-import ContentPage from './pages/ContentPage'
-import SkinsPage from './pages/SkinsPage'
-import Instances from './pages/Instances'
-import CreateInstance from './pages/CreateInstance'
-import Servers from './pages/Servers'
-import CrashAnalyzer from './pages/CrashAnalyzer'
-import ModpackImporter from './pages/ModpackImporter'
-import DownloadsView from './components/DownloadsView'
-import SettingsModal from './components/SettingsModal' // Import the modal
-import LoginModal from './components/LoginModal' // Import the new LoginModal
 import { profileService, type Profile } from './services/profileService' // Import the actual profile service
 import { themeService } from './services/themeService';
 import { processMonitorService } from './services/processMonitorService';
 import NotificationContainer from './components/NotificationContainer';
 import DownloadProgressWidget from './components/DownloadProgressWidget';
+
+// Lazy loading de componentes pesados para optimizar memoria
+const Home = lazy(() => import('./pages/Home'));
+const ContentPage = lazy(() => import('./pages/ContentPage'));
+const SkinsPage = lazy(() => import('./pages/SkinsPage'));
+const Instances = lazy(() => import('./pages/Instances'));
+const CreateInstance = lazy(() => import('./pages/CreateInstance'));
+const Servers = lazy(() => import('./pages/Servers'));
+const CrashAnalyzer = lazy(() => import('./pages/CrashAnalyzer'));
+const ModpackImporter = lazy(() => import('./pages/ModpackImporter'));
+const DownloadsView = lazy(() => import('./components/DownloadsView'));
+const SettingsModal = lazy(() => import('./components/SettingsModal'));
+const LoginModal = lazy(() => import('./components/LoginModal'));
+
+// Componente de carga optimizado
+const LoadingFallback = React.memo(() => (
+  <div className="flex items-center justify-center h-full">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
+  </div>
+));
+LoadingFallback.displayName = 'LoadingFallback';
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'oled'>('dark')
@@ -25,6 +35,23 @@ export default function App() {
   const [javaInstallations, setJavaInstallations] = useState([]) // State for Java installations
   const [accounts, setAccounts] = useState<Profile[]>([]);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+
+  // Escuchar eventos de actualización de perfiles
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      const updatedProfiles = profileService.getAllProfiles();
+      setAccounts(updatedProfiles);
+      const current = profileService.getCurrentProfile();
+      if (current) {
+        setCurrentUser(current);
+      }
+    };
+
+    window.addEventListener('profileUpdated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('profileUpdated', handleProfileUpdate);
+    };
+  }, []);
   const nav = useNavigate()
   const loc = useLocation()
 
@@ -119,29 +146,71 @@ export default function App() {
     }
   };
 
-  const handleAddAccount = (username: string, type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' = 'non-premium') => {
+  const handleAddAccount = useCallback((username: string, type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' | 'drkauth' = 'non-premium') => {
+    console.log('[App] handleAddAccount llamado:', { username, type });
     const newProfile = profileService.addProfile(username, type);
-    setAccounts([...accounts, newProfile]);
+    console.log('[App] Perfil agregado:', newProfile);
+    const updatedProfiles = profileService.getAllProfiles();
+    console.log('[App] Todos los perfiles actualizados:', updatedProfiles.map(p => ({ username: p.username, type: p.type })));
+    setAccounts(updatedProfiles);
     setCurrentUser(username);
-  };
+  }, []);
 
-  const handleDeleteAccount = (username: string) => {
+  const handleDeleteAccount = async (username: string) => {
+    // Verificar si la cuenta a eliminar es de tipo DRK
+    const profileToDelete = profileService.getProfileByUsername(username);
+    const isDrkAccount = profileToDelete && profileToDelete.type === 'drkauth';
+    const accessToken = profileToDelete?.accessToken;
+    
     const success = profileService.deleteProfile(username);
     if (success) {
+      // Si es una cuenta DRK, cerrar sesión en la web también
+      if (isDrkAccount && accessToken) {
+        try {
+          // Cerrar sesión en el backend
+          await fetch('http://localhost:3000/api/user/logout', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(err => {
+            console.error('[App] Error al cerrar sesión en el backend:', err);
+          });
+          
+          // Limpiar localStorage de la sesión web si existe
+          const savedAuthData = localStorage.getItem('drkAuthData');
+          if (savedAuthData) {
+            try {
+              const authData = JSON.parse(savedAuthData);
+              if (authData.selectedProfile && authData.selectedProfile.name === username) {
+                // Limpiar la sesión local
+                localStorage.removeItem('drkAuthData');
+                console.log('[App] Sesión DRK cerrada localmente');
+              }
+            } catch (e) {
+              console.error('[App] Error al parsear datos de sesión:', e);
+            }
+          }
+        } catch (error) {
+          console.error('[App] Error al cerrar sesión DRK:', error);
+        }
+      }
+      
       const updatedProfiles = profileService.getAllProfiles();
       setAccounts(updatedProfiles);
       setCurrentUser(profileService.getCurrentProfile());
     }
   };
 
-  const handleSelectAccount = (username: string) => {
+  const handleSelectAccount = useCallback((username: string) => {
     const success = profileService.setCurrentProfile(username);
     if (success) {
       setCurrentUser(username);
       // Update accounts to reflect last used time
       setAccounts(profileService.getAllProfiles());
     }
-  };
+  }, []);
 
   const handleLoginClick = () => {
     setLoginModalOpen(true);
@@ -156,21 +225,39 @@ export default function App() {
     // No additional logic here, modal component will show maintenance message
   };
 
-  const handleNonPremiumLogin = (username: string) => {
+  const handleNonPremiumLogin = useCallback((username: string) => {
     const newProfile = profileService.addProfile(username, 'non-premium');
-    setAccounts([...accounts, newProfile]);
+    const updatedProfiles = profileService.getAllProfiles();
+    setAccounts(updatedProfiles);
     setCurrentUser(username);
     profileService.setCurrentProfile(username); // Ensure the newly added profile is set as current
     handleCloseLoginModal();
-  };
+  }, []);
 
-  const handleElyByLogin = (username: string) => {
-    const newProfile = profileService.addProfile(username, 'elyby');
-    setAccounts([...accounts, newProfile]);
+  const handleElyByLogin = useCallback((username: string) => {
+    console.log('[App] handleElyByLogin llamado con:', username);
+    // Verificar si el perfil ya existe antes de agregarlo
+    const existingProfile = profileService.getProfileByUsername(username);
+    if (existingProfile) {
+      console.log('[App] Perfil ya existe, no se agregará de nuevo. Tipo actual:', existingProfile.type);
+      // Solo actualizar el perfil actual si no es drkauth
+      if (existingProfile.type !== 'drkauth') {
+        console.log('[App] Actualizando tipo de perfil existente a drkauth');
+        const updatedProfile = profileService.addProfile(username, 'drkauth');
+        console.log('[App] Perfil actualizado:', updatedProfile);
+      }
+    } else {
+      // Solo agregar si no existe
+      const newProfile = profileService.addProfile(username, 'drkauth');
+      console.log('[App] Perfil agregado:', newProfile);
+    }
+    const updatedProfiles = profileService.getAllProfiles();
+    console.log('[App] Todos los perfiles:', updatedProfiles.map(p => ({ username: p.username, type: p.type })));
+    setAccounts(updatedProfiles);
     setCurrentUser(username);
     profileService.setCurrentProfile(username); // Ensure the newly added profile is set as current
     handleCloseLoginModal();
-  };
+  }, []);
 
   const handlePlay = async (instanceId: string) => {
     try {
@@ -202,33 +289,37 @@ export default function App() {
         onSelectAccount={handleSelectAccount}
       />
       <main className={`flex-1 p-6 bg-gray-900/30 dark:bg-gray-900/50 transition-all duration-300 ${isSettingsOpen || isLoginModalOpen ? 'filter blur-sm' : ''} overflow-y-auto custom-scrollbar`}>
-        <Routes>
-          <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} onPlay={handlePlay} currentUser={currentUser} accounts={accounts} />} />
-          <Route path="/instances" element={<Instances onPlay={handlePlay} />} />
-          <Route path="/create" element={<CreateInstance />} />
-          {/* <Route path="/settings" element={<Settings />} /> */} {/* The route is no longer needed */}
-          <Route path="/servers" element={<Servers />} />
-          <Route path="/contenido" element={<ContentPage />} />
-          <Route path="/contenido/:type" element={<ContentPage />} />
-          <Route path="/contenido/:type/:id" element={<ContentPage />} />
-          <Route path="/skins" element={<SkinsPage />} />
-          <Route path="/crash" element={<CrashAnalyzer />} />
-          <Route path="/import" element={<ModpackImporter />} />
-          <Route path="/downloads" element={<DownloadsView />} />
-        </Routes>
+        <Suspense fallback={<LoadingFallback />}>
+          <Routes>
+            <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} onPlay={handlePlay} currentUser={currentUser} accounts={accounts} />} />
+            <Route path="/instances" element={<Instances onPlay={handlePlay} />} />
+            <Route path="/create" element={<CreateInstance />} />
+            {/* <Route path="/settings" element={<Settings />} /> */} {/* The route is no longer needed */}
+            <Route path="/servers" element={<Servers />} />
+            <Route path="/contenido" element={<ContentPage />} />
+            <Route path="/contenido/:type" element={<ContentPage />} />
+            <Route path="/contenido/:type/:id" element={<ContentPage />} />
+            <Route path="/skins" element={<SkinsPage />} />
+            <Route path="/crash" element={<CrashAnalyzer />} />
+            <Route path="/import" element={<ModpackImporter />} />
+            <Route path="/downloads" element={<DownloadsView />} />
+          </Routes>
+        </Suspense>
       </main>
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onSettingsChanged={handleSettingsChanged}
-      />
-      <LoginModal
-        isOpen={isLoginModalOpen}
-        onClose={handleCloseLoginModal}
-        onMicrosoftLogin={handleMicrosoftLogin}
-        onNonPremiumLogin={handleNonPremiumLogin}
-        onElyByLogin={handleElyByLogin}
-      />
+      <Suspense fallback={null}>
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          onSettingsChanged={handleSettingsChanged}
+        />
+        <LoginModal
+          isOpen={isLoginModalOpen}
+          onClose={handleCloseLoginModal}
+          onMicrosoftLogin={handleMicrosoftLogin}
+          onNonPremiumLogin={handleNonPremiumLogin}
+          onElyByLogin={handleElyByLogin}
+        />
+      </Suspense>
       <NotificationContainer />
     </div>
   )

@@ -39,14 +39,50 @@ export const profileService = {
 
   addProfile(username: string, type: 'microsoft' | 'non-premium' | 'elyby' | 'yggdrasil' | 'drkauth', tokens?: { accessToken?: string; clientToken?: string }): Profile {
     const profiles = getProfiles();
-    if (profiles.some(p => p.username === username)) {
-      // Si el perfil ya existe, actualizar su tipo y última vez usado
-      const updatedProfiles = profiles.map(p =>
-        p.username === username ? { ...p, type, lastUsed: Date.now() } : p
-      );
+    const existingProfile = profiles.find(p => p.username === username);
+    
+    if (existingProfile) {
+      // Si el perfil ya existe, actualizar su tipo, tokens y última vez usado
+      console.log(`[ProfileService] Perfil existente encontrado:`, {
+        username: existingProfile.username,
+        tipoAnterior: existingProfile.type,
+        tipoNuevo: type,
+        tieneTokens: !!tokens
+      });
+      
+      const updatedProfiles = profiles.map(p => {
+        if (p.username === username) {
+          const updated: Profile = { 
+            ...p, 
+            type, // SIEMPRE actualizar el tipo al nuevo valor
+            lastUsed: Date.now(),
+            ...(tokens && { accessToken: tokens.accessToken, clientToken: tokens.clientToken })
+          };
+          console.log(`[ProfileService] Actualizando perfil ${username} de tipo ${p.type} a ${type}`);
+          console.log(`[ProfileService] Tokens recibidos:`, {
+            hasAccessToken: !!tokens?.accessToken,
+            accessTokenLength: tokens?.accessToken?.length,
+            hasClientToken: !!tokens?.clientToken,
+            clientTokenLength: tokens?.clientToken?.length
+          });
+          console.log(`[ProfileService] Perfil actualizado completo:`, {
+            ...updated,
+            accessToken: updated.accessToken ? `${updated.accessToken.substring(0, 20)}...` : 'NO HAY',
+            clientToken: updated.clientToken ? `${updated.clientToken.substring(0, 20)}...` : 'NO HAY'
+          });
+          return updated;
+        }
+        return p;
+      });
       saveProfiles(updatedProfiles);
       this.setCurrentProfile(username);
-      return updatedProfiles.find(p => p.username === username)!;
+      const updatedProfile = updatedProfiles.find(p => p.username === username)!;
+      console.log(`[ProfileService] Perfil guardado con tipo:`, updatedProfile.type);
+      console.log(`[ProfileService] Token guardado en perfil:`, {
+        hasAccessToken: !!updatedProfile.accessToken,
+        accessTokenLength: updatedProfile.accessToken?.length
+      });
+      return updatedProfile;
     }
     const newProfile: Profile = {
       id: generateValidUUID(),
@@ -55,9 +91,22 @@ export const profileService = {
       lastUsed: Date.now(),
       ...(tokens && { accessToken: tokens.accessToken, clientToken: tokens.clientToken })
     };
+    console.log(`[ProfileService] Creando nuevo perfil:`, {
+      username,
+      type,
+      hasAccessToken: !!tokens?.accessToken,
+      accessTokenLength: tokens?.accessToken?.length,
+      hasClientToken: !!tokens?.clientToken,
+      clientTokenLength: tokens?.clientToken?.length
+    });
     profiles.push(newProfile);
     saveProfiles(profiles);
     this.setCurrentProfile(username); // Set as current after adding
+    console.log(`[ProfileService] Nuevo perfil guardado:`, {
+      ...newProfile,
+      accessToken: newProfile.accessToken ? `${newProfile.accessToken.substring(0, 20)}...` : 'NO HAY',
+      clientToken: newProfile.clientToken ? `${newProfile.clientToken.substring(0, 20)}...` : 'NO HAY'
+    });
     return newProfile;
   },
 

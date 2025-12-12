@@ -206,8 +206,16 @@ export class EnhancedInstanceCreationService {
 
       // PASO 6: Descargar assets
       this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6, 10, 'Descargando y validando assets del juego');
-      // Usar la nueva función que valida y descarga assets faltantes
-      await minecraftDownloadService.validateAndDownloadAssets(config.version);
+      // Usar la nueva función que valida y descarga assets faltantes con callback de progreso
+      await minecraftDownloadService.validateAndDownloadAssets(
+        config.version,
+        (current, total, message) => {
+          // Actualizar progreso granular durante la descarga de assets
+          const progressPercent = total > 0 ? (current / total) * 100 : 0;
+          const stepProgress = 6 + (progressPercent / 100) * 0.5; // 6.0 a 6.5 para assets
+          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, stepProgress, 10, message);
+        }
+      );
 
       // Asegurar que assets críticos como los de idioma estén presentes
       this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6.5, 10, 'Asegurando assets críticos (idiomas, texturas, etc.)');
@@ -221,6 +229,12 @@ export class EnhancedInstanceCreationService {
       if (config.loader && config.loader !== 'vanilla') {
         this.updateProgress(progressId, InstanceCreationStatus.INSTALLING_LOADER, 7, 10, `Instalando ${config.loader}`);
         await this.installLoader(config.loader, config.version, config.loaderVersion, instancePath);
+        
+        // PASO 7.5: Para Forge, ejecutar instalador y descargar todas las librerías del version.json generado
+        if (config.loader === 'forge' || config.loader === 'neoforge') {
+          this.updateProgress(progressId, InstanceCreationStatus.INSTALLING_LOADER, 7.5, 10, 'Ejecutando instalador de Forge y descargando librerías');
+          await this.ensureForgeCompleteInstallation(config.loader, config.version, config.loaderVersion, instancePath);
+        }
       }
       
       if (this.isCancelled(progressId)) {
@@ -399,29 +413,126 @@ export class EnhancedInstanceCreationService {
     try {
       console.log(`Descargando Forge para Minecraft ${mcVersion}...`);
 
-      // Para Forge, necesitamos encontrar la versión compatible
-      // Usamos el API de Forge para obtener la lista de versiones
-      const forgeApiUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json`;
-      const response = await fetch(forgeApiUrl);
-      const forgeMetadata = await response.json();
-
       // Buscar una versión compatible con la versión de Minecraft
       let forgeVersion = loaderVersion;
+      
       if (!forgeVersion) {
-        const versions = forgeMetadata.versioning.versions;
-        
-        // Buscar la versión más reciente compatible con la versión de Minecraft
-        for (let i = versions.length - 1; i >= 0; i--) {
-          const v = versions[i];
-          if (v.startsWith(`${mcVersion}-`)) {
-            forgeVersion = v;
-            break;
+        // Intentar múltiples URLs de la API de Forge
+        const forgeApiUrls = [
+          `https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml`,
+          `https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml`
+        ];
+
+        let versions: string[] = [];
+        let foundMetadata = false;
+
+        // Intentar cada URL hasta que una funcione
+        for (const url of forgeApiUrls) {
+          try {
+            console.log(`[Forge Install] Intentando URL: ${url}`);
+            const response = await fetch(url, {
+              headers: {
+                'User-Agent': 'DRK-Launcher/1.0'
+              }
+            });
+            
+            if (!response.ok) {
+              console.warn(`[Forge Install] URL ${url} devolvió ${response.status}`);
+              continue;
+            }
+            
+            const contentType = response.headers.get('content-type') || '';
+            
+            if (contentType.includes('xml') || url.includes('.xml')) {
+              // Parsear XML usando regex simple (más ligero que un parser completo)
+              const xmlText = await response.text();
+              
+              // Extraer versiones del XML usando regex
+              // Buscar <version>...</version> o <version/> dentro de <versions>
+              const versionMatches = xmlText.match(/<version[^>]*>([^<]+)<\/version>/gi);
+              if (versionMatches) {
+                for (const match of versionMatches) {
+                  const versionMatch = match.match(/>([^<]+)</);
+                  if (versionMatch && versionMatch[1]) {
+                    const version = versionMatch[1].trim();
+                    if (version && !versions.includes(version)) {
+                      versions.push(version);
+                    }
+                  }
+                }
+              }
+              
+              foundMetadata = true;
+              console.log(`[Forge Install] ${versions.length} versiones encontradas desde XML`);
+              break;
+            } else {
+              // Intentar parsear como JSON
+              try {
+                const jsonData = await response.json();
+                if (jsonData.versioning && jsonData.versioning.versions) {
+                  versions = jsonData.versioning.versions;
+                  foundMetadata = true;
+                  console.log(`[Forge Install] ${versions.length} versiones encontradas desde JSON`);
+                  break;
+                }
+              } catch (jsonError) {
+                console.warn(`[Forge Install] No se pudo parsear como JSON:`, jsonError);
+                continue;
+              }
+            }
+          } catch (err: any) {
+            console.warn(`[Forge Install] Error al obtener desde ${url}:`, err.message);
+            continue;
           }
         }
-      }
 
-      if (!forgeVersion) {
-        throw new Error(`No se encontró versión compatible de Forge para Minecraft ${mcVersion}`);
+        // Si no se encontró metadata, usar la API de promociones como fallback
+        if (!foundMetadata) {
+          console.log(`[Forge Install] Intentando API de promociones...`);
+          try {
+            const promoResponse = await fetch(`https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json`, {
+              headers: {
+                'User-Agent': 'DRK-Launcher/1.0'
+              }
+            });
+            
+            if (promoResponse.ok) {
+              const promoData = await promoResponse.json();
+              if (promoData.promos) {
+                for (const key in promoData.promos) {
+                  if (key.startsWith(`${mcVersion}-`)) {
+                    versions.push(key);
+                  }
+                }
+                foundMetadata = true;
+                console.log(`[Forge Install] ${versions.length} versiones encontradas desde promociones`);
+              }
+            }
+          } catch (err: any) {
+            console.error(`[Forge Install] Error al obtener promociones:`, err);
+          }
+        }
+
+        if (!foundMetadata || versions.length === 0) {
+          throw new Error(`No se pudo obtener la lista de versiones de Forge para Minecraft ${mcVersion}`);
+        }
+
+        // Buscar la versión más reciente compatible con la versión de Minecraft
+        const compatibleVersions = versions.filter((v: string) => v.startsWith(`${mcVersion}-`));
+        
+        if (compatibleVersions.length === 0) {
+          throw new Error(`No se encontró versión compatible de Forge para Minecraft ${mcVersion}`);
+        }
+
+        // Ordenar versiones (más reciente primero)
+        compatibleVersions.sort((a: string, b: string) => {
+          const forgeVersionA = a.split('-')[1] || '';
+          const forgeVersionB = b.split('-')[1] || '';
+          return forgeVersionB.localeCompare(forgeVersionA, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        forgeVersion = compatibleVersions[0];
+        console.log(`[Forge Install] Versión seleccionada: ${forgeVersion}`);
       }
 
       console.log(`Usando Forge ${forgeVersion} para Minecraft ${mcVersion}`);
@@ -430,33 +541,47 @@ export class EnhancedInstanceCreationService {
       const loaderDir = path.join(instancePath, 'loader');
       this.ensureDir(loaderDir);
 
-      // Descargar el JAR del instalador de Forge (o el universal si está disponible)
+      // Para Forge moderno (1.17+), intentar primero el universal JAR que es más fácil de usar
+      // El universal JAR puede ser usado directamente sin necesidad de instalador
       const forgeUniversalUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-universal.jar`;
       const forgeUniversalPath = path.join(loaderDir, `forge-${forgeVersion}-universal.jar`);
 
-      // Intentar descargar el universal JAR
-      const responseUniversal = await fetch(forgeUniversalUrl);
+      console.log(`[Forge Install] Intentando descargar Universal JAR desde: ${forgeUniversalUrl}`);
+      const responseUniversal = await fetch(forgeUniversalUrl, {
+        headers: {
+          'User-Agent': 'DRK-Launcher/1.0'
+        }
+      });
+
       if (responseUniversal.ok) {
         const buffer = Buffer.from(await responseUniversal.arrayBuffer());
         fs.writeFileSync(forgeUniversalPath, buffer);
-        console.log(`Forge Universal JAR descargado en: ${forgeUniversalPath}`);
-      } else {
-        // Si no está disponible el universal, intentar con el instalador
-        console.log(`Forge Universal no disponible, descargando instalador...`);
-        const forgeInstallerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-installer.jar`;
-        const forgeInstallerPath = path.join(loaderDir, `forge-${forgeVersion}-installer.jar`);
-
-        const responseInstaller = await fetch(forgeInstallerUrl);
-        if (!responseInstaller.ok) {
-          throw new Error(`No se pudo descargar Forge para ${mcVersion}`);
-        }
-
-        const buffer = Buffer.from(await responseInstaller.arrayBuffer());
-        fs.writeFileSync(forgeInstallerPath, buffer);
-        console.log(`Forge Installer descargado en: ${forgeInstallerPath}`);
+        console.log(`[Forge Install] Forge Universal JAR descargado exitosamente en: ${forgeUniversalPath}`);
+        return;
       }
+
+      // Si el universal no está disponible, intentar con el instalador como fallback
+      console.log(`[Forge Install] Universal JAR no disponible (${responseUniversal.status}), intentando instalador...`);
+      const forgeInstallerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-installer.jar`;
+      const forgeInstallerPath = path.join(loaderDir, `forge-${forgeVersion}-installer.jar`);
+
+      const responseInstaller = await fetch(forgeInstallerUrl, {
+        headers: {
+          'User-Agent': 'DRK-Launcher/1.0'
+        }
+      });
+
+      if (!responseInstaller.ok) {
+        throw new Error(`No se pudo descargar Forge ${forgeVersion} para Minecraft ${mcVersion} (universal: ${responseUniversal.status}, instalador: ${responseInstaller.status})`);
+      }
+
+      // Descargar el instalador como último recurso
+      const buffer = Buffer.from(await responseInstaller.arrayBuffer());
+      fs.writeFileSync(forgeInstallerPath, buffer);
+      console.log(`[Forge Install] Forge Installer descargado en: ${forgeInstallerPath}`);
+      console.log(`[Forge Install] Nota: El instalador de Forge necesita ser ejecutado para completar la instalación.`);
     } catch (error) {
-      console.error(`Error al instalar Forge:`, error);
+      console.error(`[Forge Install] Error al instalar Forge:`, error);
       throw error;
     }
   }
@@ -629,6 +754,556 @@ export class EnhancedInstanceCreationService {
     } catch (error) {
       console.error(`Error al leer la configuración de la instancia: ${error}`);
       return null;
+    }
+  }
+
+  /**
+   * Asegura que Forge esté completamente instalado: ejecuta el instalador y descarga todas las librerías
+   */
+  private async ensureForgeCompleteInstallation(
+    loader: 'forge' | 'neoforge',
+    mcVersion: string,
+    loaderVersion: string | undefined,
+    instancePath: string
+  ): Promise<void> {
+    const launcherDataPath = getLauncherDataPath();
+    
+    // Si no hay loaderVersion, intentar obtenerla
+    if (!loaderVersion) {
+      const forgeApiUrls = [
+        `https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml`,
+      ];
+      
+      for (const url of forgeApiUrls) {
+        try {
+          const response = await fetch(url, { headers: { 'User-Agent': 'DRK-Launcher/1.0' } });
+          if (response.ok) {
+            const xmlText = await response.text();
+            const versionMatches = xmlText.match(/<version[^>]*>([^<]+)<\/version>/gi);
+            if (versionMatches) {
+              const compatibleVersions = versionMatches
+                .map(m => m.match(/>([^<]+)</)?.[1]?.trim())
+                .filter(v => v && v.startsWith(`${mcVersion}-`));
+              if (compatibleVersions.length > 0) {
+                compatibleVersions.sort((a, b) => {
+                  const forgeVersionA = a.split('-')[1] || '';
+                  const forgeVersionB = b.split('-')[1] || '';
+                  return forgeVersionB.localeCompare(forgeVersionA, undefined, { numeric: true, sensitivity: 'base' });
+                });
+                loaderVersion = compatibleVersions[0];
+                break;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn(`Error al obtener versión de Forge:`, err);
+        }
+      }
+    }
+    
+    if (!loaderVersion) {
+      throw new Error(`No se pudo obtener versión de Forge para Minecraft ${mcVersion}`);
+    }
+    
+    // MODELO MODRINTH: Verificar si ya existe un version.json válido
+    // Si existe, reutilizarlo en lugar de ejecutar el instalador
+    const versionName = `${mcVersion}-forge-${loaderVersion}`;
+    const versionsDir = path.join(launcherDataPath, 'versions', versionName);
+    const versionJsonPath = path.join(versionsDir, `${versionName}.json`);
+    
+    let versionJsonExists = false;
+    if (fs.existsSync(versionJsonPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        if (existing.mainClass && existing.libraries && Array.isArray(existing.libraries) && existing.libraries.length > 0) {
+          versionJsonExists = true;
+          console.log(`[Forge Install] Version.json ya existe y es válido, reutilizando...`);
+        }
+      } catch (err) {
+        console.warn(`[Forge Install] Version.json existente es inválido, reconstruyendo...`);
+      }
+    }
+    
+    if (!versionJsonExists) {
+      // Intentar construir el version.json sin usar el instalador (modelo Modrinth)
+      try {
+        console.log(`[Forge Install] Intentando construcción directa del version.json (modelo Modrinth)...`);
+        await this.buildForgeVersionJsonDirectly(mcVersion, loaderVersion);
+        console.log(`[Forge Install] Version.json construido exitosamente sin usar instalador`);
+      } catch (error) {
+        console.warn(`[Forge Install] Error al construir version.json directamente: ${error}`);
+        console.log(`[Forge Install] Usando instalador como fallback...`);
+        
+        // Fallback: usar el instalador tradicional (solo si es necesario)
+        const loaderDir = path.join(instancePath, 'loader');
+        const installerPath = path.join(loaderDir, `forge-${loaderVersion}-installer.jar`);
+        
+        if (!fs.existsSync(installerPath)) {
+          const forgeInstallerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${loaderVersion}/forge-${loaderVersion}-installer.jar`;
+          console.log(`[Forge Install] Descargando instalador desde: ${forgeInstallerUrl}`);
+          
+          try {
+            const response = await fetch(forgeInstallerUrl, {
+              headers: { 'User-Agent': 'DRK-Launcher/1.0' }
+            });
+            
+            if (!response.ok) {
+              throw new Error(`No se pudo descargar instalador de Forge (${response.status})`);
+            }
+            
+            this.ensureDir(loaderDir);
+            const buffer = Buffer.from(await response.arrayBuffer());
+            fs.writeFileSync(installerPath, buffer);
+            console.log(`[Forge Install] Instalador descargado exitosamente`);
+          } catch (err) {
+            throw new Error(`Error al descargar instalador de Forge: ${err}`);
+          }
+        }
+        
+        await this.runForgeInstaller(installerPath, instancePath, mcVersion, loaderVersion);
+        
+        // Después de ejecutar el instalador, actualizar el mainClass a modlauncher.Launcher
+        // si el instalador generó ForgeBootstrap
+        if (fs.existsSync(versionJsonPath)) {
+          try {
+            const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+            if (versionData.mainClass && (versionData.mainClass.includes('ForgeBootstrap') || versionData.mainClass.includes('Bootstrap'))) {
+              versionData.mainClass = 'cpw.mods.modlauncher.Launcher';
+              fs.writeFileSync(versionJsonPath, JSON.stringify(versionData, null, 2));
+              console.log(`[Forge Install] MainClass actualizado a modlauncher.Launcher (JPMS-compatible)`);
+            }
+          } catch (err) {
+            console.warn(`[Forge Install] Error al actualizar mainClass: ${err}`);
+          }
+        }
+      }
+    }
+    
+    // Descargar todas las librerías del version.json (ya sea construido o generado por instalador)
+    await this.downloadAllForgeLibraries(mcVersion, loaderVersion);
+  }
+
+  /**
+   * Construye el version.json de Forge directamente desde Maven (modelo Modrinth/Prism)
+   * Sin usar el instalador.jar
+   */
+  private async buildForgeVersionJsonDirectly(
+    mcVersion: string,
+    loaderVersion: string
+  ): Promise<void> {
+    const launcherDataPath = getLauncherDataPath();
+    const versionName = `${mcVersion}-forge-${loaderVersion}`;
+    const versionDir = path.join(launcherDataPath, 'versions', versionName);
+    this.ensureDir(versionDir);
+    
+    const versionJsonPath = path.join(versionDir, `${versionName}.json`);
+    
+    // Si ya existe, verificar que sea válido
+    if (fs.existsSync(versionJsonPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        if (existing.mainClass && existing.libraries) {
+          console.log(`[Forge Install] Version.json ya existe y es válido`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`[Forge Install] Version.json existente es inválido, reconstruyendo...`);
+      }
+    }
+    
+    // 1. Descargar el version.json base de Minecraft
+    const { minecraftDownloadService } = require('./minecraftDownloadService');
+    const baseVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(mcVersion);
+    const baseVersionData = JSON.parse(fs.readFileSync(baseVersionJsonPath, 'utf-8'));
+    
+    // 2. Descargar el POM de Forge para obtener las dependencias
+    const forgePomUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${loaderVersion}/forge-${loaderVersion}.pom`;
+    console.log(`[Forge Install] Descargando POM de Forge desde: ${forgePomUrl}`);
+    
+    const pomResponse = await fetch(forgePomUrl, {
+      headers: { 'User-Agent': 'DRK-Launcher/1.0' }
+    });
+    
+    if (!pomResponse.ok) {
+      throw new Error(`No se pudo descargar POM de Forge (${pomResponse.status})`);
+    }
+    
+    const pomText = await pomResponse.text();
+    
+    // 3. Extraer dependencias del POM (simplificado - en producción usar un parser XML)
+    // Por ahora, usaremos las librerías conocidas de Forge y las del version.json base
+    const forgeLibraries: any[] = [];
+    
+    // Librerías conocidas de Forge que siempre están presentes
+    const knownForgeLibraries = [
+      {
+        name: 'net.minecraftforge:forge:' + loaderVersion,
+        downloads: {
+          artifact: {
+            path: `net/minecraftforge/forge/${loaderVersion}/forge-${loaderVersion}-client.jar`,
+            url: `https://maven.minecraftforge.net/net/minecraftforge/forge/${loaderVersion}/forge-${loaderVersion}-client.jar`,
+            sha1: '', // Se puede obtener del POM o omitir
+            size: 0
+          }
+        }
+      },
+      {
+        name: 'cpw.mods:modlauncher:9.1.3',
+        downloads: {
+          artifact: {
+            path: `cpw/mods/modlauncher/9.1.3/modlauncher-9.1.3.jar`,
+            url: `https://maven.minecraftforge.net/cpw/mods/modlauncher/9.1.3/modlauncher-9.1.3.jar`,
+            sha1: '',
+            size: 0
+          }
+        }
+      },
+      {
+        name: 'net.minecraftforge:fmlcore:' + loaderVersion,
+        downloads: {
+          artifact: {
+            path: `net/minecraftforge/fmlcore/${loaderVersion}/fmlcore-${loaderVersion}.jar`,
+            url: `https://maven.minecraftforge.net/net/minecraftforge/fmlcore/${loaderVersion}/fmlcore-${loaderVersion}.jar`,
+            sha1: '',
+            size: 0
+          }
+        }
+      },
+      {
+        name: 'net.minecraftforge:fmlloader:' + loaderVersion,
+        downloads: {
+          artifact: {
+            path: `net/minecraftforge/fmlloader/${loaderVersion}/fmlloader-${loaderVersion}.jar`,
+            url: `https://maven.minecraftforge.net/net/minecraftforge/fmlloader/${loaderVersion}/fmlloader-${loaderVersion}.jar`,
+            sha1: '',
+            size: 0
+          }
+        }
+      },
+      {
+        name: 'cpw.mods:bootstraplauncher:2.1.7',
+        downloads: {
+          artifact: {
+            path: `cpw/mods/bootstraplauncher/2.1.7/bootstraplauncher-2.1.7.jar`,
+            url: `https://maven.minecraftforge.net/cpw/mods/bootstraplauncher/2.1.7/bootstraplauncher-2.1.7.jar`,
+            sha1: '',
+            size: 0
+          }
+        }
+      },
+      {
+        name: 'cpw.mods:securejarhandler:2.1.10',
+        downloads: {
+          artifact: {
+            path: `cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar`,
+            url: `https://maven.minecraftforge.net/cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar`,
+            sha1: '',
+            size: 0
+          }
+        }
+      }
+    ];
+    
+    forgeLibraries.push(...knownForgeLibraries);
+    
+    // 4. Combinar librerías base de Minecraft con librerías de Forge
+    // Filtrar duplicados por nombre
+    const allLibraries: any[] = [];
+    const seenLibraryNames = new Set<string>();
+    
+    // Primero añadir librerías base de Minecraft
+    if (baseVersionData.libraries && Array.isArray(baseVersionData.libraries)) {
+      for (const lib of baseVersionData.libraries) {
+        if (lib.name && !seenLibraryNames.has(lib.name)) {
+          allLibraries.push(lib);
+          seenLibraryNames.add(lib.name);
+        }
+      }
+    }
+    
+    // Luego añadir librerías de Forge (evitando duplicados)
+    for (const lib of forgeLibraries) {
+      if (lib.name && !seenLibraryNames.has(lib.name)) {
+        allLibraries.push(lib);
+        seenLibraryNames.add(lib.name);
+      }
+    }
+    
+    // 5. Construir el version.json final
+    const forgeVersionData = {
+      id: versionName,
+      time: new Date().toISOString(),
+      releaseTime: new Date().toISOString(),
+      type: 'release',
+      mainClass: 'cpw.mods.modlauncher.Launcher', // MODELO MODRINTH: Usar modlauncher directamente
+      inheritsFrom: mcVersion,
+      logging: baseVersionData.logging || {},
+      arguments: {
+        game: baseVersionData.arguments?.game || [],
+        jvm: [
+          '--add-modules=ALL-MODULE-PATH',
+          '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.lang.invoke=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.net=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.io=ALL-UNNAMED',
+          ...(baseVersionData.arguments?.jvm || [])
+        ]
+      },
+      libraries: allLibraries,
+      downloads: baseVersionData.downloads || {},
+      assetIndex: baseVersionData.assetIndex || {},
+      assets: baseVersionData.assets || mcVersion
+    };
+    
+    // 6. Guardar el version.json
+    fs.writeFileSync(versionJsonPath, JSON.stringify(forgeVersionData, null, 2));
+    console.log(`[Forge Install] Version.json construido y guardado en: ${versionJsonPath}`);
+  }
+
+  /**
+   * Ejecuta el instalador de Forge
+   */
+  private async runForgeInstaller(
+    installerPath: string,
+    instancePath: string,
+    mcVersion: string,
+    loaderVersion: string
+  ): Promise<void> {
+    return new Promise(async (resolve, reject) => {
+      const { spawn } = require('child_process');
+      const { javaDownloadService } = require('./javaDownloadService');
+      
+      try {
+        // Obtener la ruta de Java usando el método correcto
+        const javaPath = await javaDownloadService.getJavaForMinecraftVersion(mcVersion);
+        if (!javaPath) {
+          reject(new Error('No se encontró Java para ejecutar el instalador'));
+          return;
+        }
+
+        console.log(`[Forge Install] Ejecutando instalador: ${installerPath}`);
+        
+        const launcherDataPath = getLauncherDataPath();
+        
+        // Crear un perfil de launcher falso antes de ejecutar el instalador
+        this.createFakeLauncherProfile(launcherDataPath);
+        
+        console.log(`[Forge Install] Ejecutando instalador en: ${launcherDataPath}`);
+        console.log(`[Forge Install] Comando: ${javaPath} -jar ${installerPath} --installClient ${launcherDataPath}`);
+        
+        const installerProcess = spawn(javaPath, ['-jar', installerPath, '--installClient', launcherDataPath], {
+          cwd: path.dirname(installerPath),
+          stdio: 'pipe'
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        installerProcess.stdout.on('data', (data: Buffer) => {
+          stdout += data.toString();
+          console.log(`[Instalador] ${data.toString().trim()}`);
+        });
+
+        installerProcess.stderr.on('data', (data: Buffer) => {
+          stderr += data.toString();
+          console.warn(`[Instalador] ${data.toString().trim()}`);
+        });
+
+        installerProcess.on('close', (code: number) => {
+          if (code === 0) {
+            console.log(`[Forge Install] Instalador ejecutado exitosamente`);
+            resolve();
+          } else {
+            reject(new Error(`Instalador de Forge falló con código ${code}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`));
+          }
+        });
+
+        installerProcess.on('error', (error: Error) => {
+          reject(new Error(`Error al ejecutar instalador de Forge: ${error.message}`));
+        });
+      } catch (error: any) {
+        reject(new Error(`Error al obtener Java para el instalador: ${error.message || error}`));
+      }
+    });
+  }
+
+  /**
+   * Crea un perfil de launcher falso para que el instalador de Forge funcione
+   */
+  private createFakeLauncherProfile(launcherDataPath: string): void {
+    const launcherProfilesPath = path.join(launcherDataPath, 'launcher_profiles.json');
+    
+    if (!fs.existsSync(launcherProfilesPath)) {
+      const fakeProfile = {
+        profiles: {},
+        settings: {
+          crashUploadEnabled: false,
+          enableSnapshots: false
+        },
+        version: 2
+      };
+      
+      this.ensureDir(path.dirname(launcherProfilesPath));
+      fs.writeFileSync(launcherProfilesPath, JSON.stringify(fakeProfile, null, 2));
+      console.log(`[Forge Install] Perfil de launcher creado en: ${launcherProfilesPath}`);
+    }
+  }
+
+  /**
+   * Descarga todas las librerías del version.json generado por el instalador de Forge
+   */
+  private async downloadAllForgeLibraries(
+    mcVersion: string,
+    loaderVersion: string
+  ): Promise<void> {
+    const launcherDataPath = getLauncherDataPath();
+    const versionsDir = path.join(launcherDataPath, 'versions');
+    
+    // El instalador de Forge puede crear el version.json con diferentes nombres
+    // Buscar en múltiples ubicaciones posibles
+    const possibleVersionNames = [
+      `${mcVersion}-forge-${loaderVersion}`, // Formato estándar: 1.21.11-forge-61.0.2
+      `${mcVersion}-forge-${mcVersion}-${loaderVersion}`, // Formato alternativo: 1.21.11-forge-1.21.11-61.0.2
+      `forge-${mcVersion}-${loaderVersion}`, // Formato alternativo: forge-1.21.11-61.0.2
+    ];
+    
+    let versionJsonPath: string | null = null;
+    let foundVersionName: string | null = null;
+    
+    // Buscar el version.json en las ubicaciones posibles
+    for (const versionName of possibleVersionNames) {
+      const possiblePath = path.join(versionsDir, versionName, `${versionName}.json`);
+      if (fs.existsSync(possiblePath)) {
+        versionJsonPath = possiblePath;
+        foundVersionName = versionName;
+        console.log(`[Forge Libraries] Version.json encontrado: ${versionName}`);
+        break;
+      }
+    }
+    
+    // Si no se encontró con los nombres esperados, buscar cualquier version.json de Forge para esta versión
+    if (!versionJsonPath && fs.existsSync(versionsDir)) {
+      const dirs = fs.readdirSync(versionsDir, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (dir.isDirectory() && dir.name.includes(mcVersion) && dir.name.includes('forge')) {
+          const possibleJson = path.join(versionsDir, dir.name, `${dir.name}.json`);
+          if (fs.existsSync(possibleJson)) {
+            versionJsonPath = possibleJson;
+            foundVersionName = dir.name;
+            console.log(`[Forge Libraries] Version.json encontrado (búsqueda alternativa): ${dir.name}`);
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!versionJsonPath) {
+      throw new Error(`Version.json de Forge no encontrado después de ejecutar el instalador. Buscado en: ${possibleVersionNames.join(', ')}`);
+    }
+    
+    try {
+      const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+      
+      // Descargar todas las librerías del version.json con descargas paralelas para mayor velocidad
+      if (versionData.libraries && Array.isArray(versionData.libraries)) {
+        // Filtrar librerías permitidas primero
+        const librariesToDownload: Array<{ lib: any; libPath: string }> = [];
+        let skipped = 0;
+        
+        for (const lib of versionData.libraries) {
+          // Verificar reglas de aplicabilidad
+          let libraryAllowed = true;
+          if (lib.rules) {
+            libraryAllowed = false;
+            const osName = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
+            for (const rule of lib.rules) {
+              if (rule.action === 'allow') {
+                if (!rule.os || rule.os.name === osName) {
+                  libraryAllowed = true;
+                }
+              } else if (rule.action === 'disallow') {
+                if (rule.os && rule.os.name === osName) {
+                  libraryAllowed = false;
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (!libraryAllowed) {
+            skipped++;
+            continue;
+          }
+          
+          if (lib.downloads && lib.downloads.artifact) {
+            let libPath;
+            if (lib.downloads.artifact.path) {
+              libPath = path.join(launcherDataPath, 'libraries', lib.downloads.artifact.path);
+            } else {
+              const nameParts = lib.name.split(':');
+              const [group, artifact, version] = nameParts;
+              const parts = group.split('.');
+              libPath = path.join(launcherDataPath, 'libraries', ...parts, artifact, version, `${artifact}-${version}.jar`);
+            }
+            
+            // Solo añadir si no existe
+            if (!fs.existsSync(libPath)) {
+              librariesToDownload.push({ lib, libPath });
+            }
+          }
+        }
+        
+        const total = versionData.libraries.length;
+        const toDownload = librariesToDownload.length;
+        const alreadyExists = total - toDownload - skipped;
+        
+        console.log(`[Forge Libraries] Iniciando descarga de ${toDownload} librerías (${alreadyExists} ya existen, ${skipped} omitidas)...`);
+        
+        // Descargar en paralelo (máximo 10 simultáneas para no saturar)
+        const CONCURRENT_DOWNLOADS = 10;
+        let downloaded = 0;
+        let failed = 0;
+        
+        for (let i = 0; i < librariesToDownload.length; i += CONCURRENT_DOWNLOADS) {
+          const batch = librariesToDownload.slice(i, i + CONCURRENT_DOWNLOADS);
+          
+          await Promise.all(
+            batch.map(async ({ lib, libPath }) => {
+              try {
+                this.ensureDir(path.dirname(libPath));
+                const response = await fetch(lib.downloads.artifact.url, {
+                  headers: { 'User-Agent': 'DRK-Launcher/1.0' }
+                });
+                if (response.ok) {
+                  const buffer = Buffer.from(await response.arrayBuffer());
+                  fs.writeFileSync(libPath, buffer);
+                  downloaded++;
+                  if (downloaded % 5 === 0 || downloaded === toDownload) {
+                    console.log(`[Forge Libraries] Descargadas: ${downloaded}/${toDownload} librerías`);
+                  }
+                } else {
+                  failed++;
+                  console.warn(`[Forge Libraries] Error al descargar ${lib.name}: HTTP ${response.status}`);
+                }
+              } catch (err) {
+                failed++;
+                console.warn(`[Forge Libraries] Error al descargar ${lib.name}:`, err);
+              }
+            })
+          );
+        }
+        
+        const totalDownloaded = downloaded + alreadyExists;
+        console.log(`[Forge Libraries] Descarga completada: ${totalDownloaded}/${total} librerías (${downloaded} nuevas, ${alreadyExists} existentes, ${skipped} omitidas, ${failed} fallidas)`);
+        
+        if (failed > 0) {
+          console.warn(`[Forge Libraries] Advertencia: ${failed} librerías no se pudieron descargar`);
+        }
+      }
+    } catch (error) {
+      throw new Error(`Error al procesar version.json de Forge: ${error}`);
     }
   }
 

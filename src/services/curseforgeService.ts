@@ -614,6 +614,311 @@ export class CurseForgeService {
   }
 
   /**
+   * Descarga e instala un modpack de CurseForge
+   * @param projectId ID del proyecto en CurseForge
+   * @param instancePath Ruta de la instancia donde instalar
+   * @param mcVersion Versión de Minecraft objetivo
+   * @param loader Tipo de mod loader (fabric, forge, etc.)
+   */
+  async downloadModpack(
+    projectId: string,
+    instancePath: string,
+    mcVersion: string,
+    loader?: string
+  ): Promise<void> {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    try {
+      // Obtener versiones compatibles del modpack
+      const compatibleVersions = await this.getCompatibleVersions(projectId, mcVersion, loader);
+      
+      if (compatibleVersions.length === 0) {
+        throw new Error(`No se encontró una versión compatible del modpack para ${mcVersion} y ${loader || 'cualquier loader'}`);
+      }
+
+      // Filtrar versiones que coincidan exactamente
+      const matchingVersions = compatibleVersions.filter((v: any) => {
+        const versionMatch = (v.game_versions && Array.isArray(v.game_versions) && v.game_versions.includes(mcVersion)) ||
+                             (v.gameVersion === mcVersion);
+        const loaderMatch = !loader || 
+                            (v.loaders && Array.isArray(v.loaders) && v.loaders.includes(loader)) ||
+                            (v.modLoader && v.modLoader.toLowerCase() === loader.toLowerCase());
+        return versionMatch && loaderMatch;
+      });
+
+      if (matchingVersions.length === 0) {
+        throw new Error(`No se encontró una versión compatible del modpack para ${mcVersion} y ${loader || 'cualquier loader'}`);
+      }
+
+      const targetVersion = matchingVersions[0];
+      let downloadUrl = targetVersion.downloadUrl;
+      const fileId = targetVersion.fileId;
+      const targetFileName = targetVersion.fileName || `curseforge-modpack-${projectId}.zip`;
+
+      // Obtener URL de descarga si no está disponible
+      if (!downloadUrl && fileId) {
+        try {
+          const downloadUrlResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}/download-url`, {
+            headers: this.headers
+          });
+          
+          if (downloadUrlResponse.ok) {
+            const downloadUrlData = await downloadUrlResponse.json();
+            if (downloadUrlData.data && typeof downloadUrlData.data === 'string') {
+              downloadUrl = downloadUrlData.data;
+            }
+          }
+        } catch (apiError) {
+          console.error(`Error al obtener URL de descarga:`, apiError);
+        }
+      }
+
+      if (!downloadUrl) {
+        throw new Error(`No se encontró URL de descarga para el modpack ${projectId}`);
+      }
+
+      // Crear directorio temporal
+      const tempDir = path.join(instancePath, '.temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      // Descargar el archivo ZIP del modpack
+      const tempPackPath = path.join(tempDir, targetFileName);
+      await this.downloadFileToPath(downloadUrl, tempPackPath);
+
+      // Extraer el manifest.json del modpack
+      const manifest = await this.extractCurseForgeModpackManifest(tempPackPath);
+
+      // Procesar el manifest e instalar los componentes
+      await this.processCurseForgeModpackManifest(manifest, instancePath, tempDir);
+
+      // Limpiar archivos temporales
+      if (fs.existsSync(tempPackPath)) {
+        fs.unlinkSync(tempPackPath);
+      }
+      if (fs.existsSync(tempDir)) {
+        fs.rmdirSync(tempDir, { recursive: true });
+      }
+
+      console.log(`Modpack de CurseForge ${projectId} instalado correctamente`);
+    } catch (error) {
+      console.error(`Error al instalar modpack de CurseForge ${projectId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Extrae el manifest.json de un modpack de CurseForge
+   */
+  private async extractCurseForgeModpackManifest(packPath: string): Promise<any> {
+    const nodeStreamZip = require('node-stream-zip');
+    if (!nodeStreamZip) {
+      throw new Error('node-stream-zip no está disponible');
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const zip = new nodeStreamZip({
+          file: packPath,
+          storeEntries: true
+        });
+
+        zip.on('ready', () => {
+          try {
+            // Buscar el archivo manifest.json
+            const manifestEntry = Object.keys(zip.entries()).find(entry =>
+              entry === 'manifest.json' || entry.endsWith('/manifest.json')
+            );
+
+            if (!manifestEntry) {
+              reject(new Error('No se encontró el archivo manifest.json en el modpack de CurseForge'));
+              zip.close();
+              return;
+            }
+
+            zip.stream(manifestEntry, (err: Error | null, stm: any) => {
+              if (err) {
+                reject(err);
+                zip.close();
+                return;
+              }
+
+              const chunks: Buffer[] = [];
+              stm.on('data', (chunk: Buffer) => chunks.push(chunk));
+
+              stm.on('end', () => {
+                try {
+                  const data = Buffer.concat(chunks);
+                  const manifest = JSON.parse(data.toString('utf-8'));
+                  zip.close();
+                  resolve(manifest);
+                } catch (parseError) {
+                  zip.close();
+                  reject(parseError);
+                }
+              });
+
+              stm.on('error', (streamErr: Error) => {
+                zip.close();
+                reject(streamErr);
+              });
+            });
+          } catch (error) {
+            zip.close();
+            reject(error);
+          }
+        });
+
+        zip.on('error', (err: Error) => {
+          reject(err);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Procesa el manifest de un modpack de CurseForge e instala los componentes
+   */
+  private async processCurseForgeModpackManifest(manifest: any, instancePath: string, tempDir: string): Promise<void> {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    if (!manifest.files || !Array.isArray(manifest.files)) {
+      throw new Error('El manifest del modpack de CurseForge no tiene la estructura esperada');
+    }
+
+    // Crear directorios necesarios
+    const modsDir = path.join(instancePath, 'mods');
+    const resourcepacksDir = path.join(instancePath, 'resourcepacks');
+    const shaderpacksDir = path.join(instancePath, 'shaderpacks');
+    const configDir = path.join(instancePath, 'config');
+    const datapacksDir = path.join(instancePath, 'datapacks');
+
+    [modsDir, resourcepacksDir, shaderpacksDir, configDir, datapacksDir].forEach(dir => {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    });
+
+    // Procesar cada archivo del manifest
+    for (const file of manifest.files) {
+      const projectId = file.projectID;
+      const fileId = file.fileID;
+      const required = file.required !== false; // Por defecto son requeridos
+
+      if (!projectId || !fileId) {
+        console.warn(`Archivo en manifest sin projectID o fileID, saltando...`);
+        continue;
+      }
+
+      try {
+        // Obtener información del archivo desde la API de CurseForge
+        const fileInfoResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}`, {
+          headers: this.headers
+        });
+
+        if (!fileInfoResponse.ok) {
+          console.warn(`No se pudo obtener información del archivo ${fileId} del proyecto ${projectId}`);
+          if (required) {
+            throw new Error(`Archivo requerido ${fileId} del proyecto ${projectId} no disponible`);
+          }
+          continue;
+        }
+
+        const fileInfoData = await fileInfoResponse.json();
+        const fileInfo = fileInfoData.data;
+
+        if (!fileInfo) {
+          console.warn(`No se encontró información del archivo ${fileId}`);
+          if (required) {
+            throw new Error(`Archivo requerido ${fileId} no encontrado`);
+          }
+          continue;
+        }
+
+        // Obtener URL de descarga - intentar múltiples métodos
+        let downloadUrl: string | null = null;
+        
+        // Método 1: Endpoint oficial de download-url
+        try {
+          const downloadUrlResponse = await fetch(`${CURSEFORGE_API_URL}/mods/${projectId}/files/${fileId}/download-url`, {
+            headers: this.headers
+          });
+
+          if (downloadUrlResponse.ok) {
+            const downloadUrlData = await downloadUrlResponse.json();
+            downloadUrl = downloadUrlData.data;
+            if (downloadUrl) {
+              console.log(`[processCurseForgeModpackManifest] URL obtenida desde endpoint oficial para archivo ${fileId}`);
+            }
+          } else {
+            const errorText = await downloadUrlResponse.text();
+            console.warn(`[processCurseForgeModpackManifest] Endpoint oficial falló (${downloadUrlResponse.status}) para archivo ${fileId}:`, errorText);
+          }
+        } catch (apiError) {
+          console.warn(`[processCurseForgeModpackManifest] Error al obtener URL desde endpoint oficial para archivo ${fileId}:`, apiError);
+        }
+
+        // Método 2: Construir URL manualmente si tenemos fileName
+        if (!downloadUrl && fileInfo.fileName) {
+          const constructedUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${fileInfo.fileName}`;
+          downloadUrl = constructedUrl;
+          console.log(`[processCurseForgeModpackManifest] URL construida manualmente para archivo ${fileId}: ${constructedUrl}`);
+        }
+
+        // Método 3: Intentar con el nombre de archivo genérico si no tenemos fileName
+        if (!downloadUrl) {
+          const genericFileName = `curseforge-${projectId}-${fileId}.jar`;
+          const constructedUrl = `https://edge.forgecdn.net/files/${Math.floor(fileId / 1000)}/${fileId % 1000}/${genericFileName}`;
+          downloadUrl = constructedUrl;
+          console.log(`[processCurseForgeModpackManifest] URL construida con nombre genérico para archivo ${fileId}: ${constructedUrl}`);
+        }
+
+        // Si aún no hay URL, intentar verificar si el archivo existe usando el endpoint de información
+        if (!downloadUrl) {
+          // Verificar si el archivo tiene downloadUrl en la información del archivo
+          if (fileInfo.downloadUrl) {
+            downloadUrl = fileInfo.downloadUrl;
+            console.log(`[processCurseForgeModpackManifest] URL encontrada en fileInfo para archivo ${fileId}`);
+          }
+        }
+
+        if (!downloadUrl) {
+          console.error(`[processCurseForgeModpackManifest] No se pudo obtener URL de descarga después de todos los intentos para archivo ${fileId} del proyecto ${projectId}`);
+          console.error(`[processCurseForgeModpackManifest] fileInfo completo:`, JSON.stringify(fileInfo, null, 2));
+          if (required) {
+            // En lugar de fallar completamente, registrar el error pero continuar
+            // Muchos modpacks tienen archivos que pueden no estar disponibles pero no son críticos
+            console.warn(`[processCurseForgeModpackManifest] ⚠️ Archivo requerido ${fileId} no disponible, pero continuando con el resto del modpack`);
+            continue;
+          }
+          continue;
+        }
+
+        // Determinar carpeta de destino basada en el tipo de contenido
+        // Por defecto, los mods van a la carpeta mods
+        let targetDir = modsDir;
+        const fileName = fileInfo.fileName || `curseforge-${projectId}-${fileId}.jar`;
+
+        // Descargar el archivo
+        const targetPath = path.join(targetDir, fileName);
+        await this.downloadFileToPath(downloadUrl, targetPath);
+        console.log(`Descargado ${fileName} a ${targetDir}`);
+
+      } catch (error) {
+        console.error(`Error al procesar archivo ${fileId} del proyecto ${projectId}:`, error);
+        if (required) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /**
    * Descarga un archivo desde una URL a una ruta local
    */
   private async downloadFileToPath(url: string, filePath: string): Promise<void> {

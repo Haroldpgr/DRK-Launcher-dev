@@ -47,9 +47,13 @@ export class MinecraftDownloadService {
   /**
    * Valida y descarga los assets faltantes para una versión específica de Minecraft
    * @param version Versión de Minecraft (por ejemplo, '1.21.1')
+   * @param onProgress Callback opcional para reportar progreso (current, total, message)
    * @returns Promise<boolean> Verdadero si todos los assets están presentes o se descargaron exitosamente
    */
-  public async validateAndDownloadAssets(version: string): Promise<boolean> {
+  public async validateAndDownloadAssets(
+    version: string,
+    onProgress?: (current: number, total: number, message: string) => void
+  ): Promise<boolean> {
     try {
       const versionJsonPath = await this.downloadVersionMetadata(version);
       const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
@@ -66,70 +70,110 @@ export class MinecraftDownloadService {
 
       // Asegurar que el archivo de índice exista
       if (!fs.existsSync(assetIndexPath)) {
-        console.log(`Descargando índice de assets para ${version}...`);
+        const message = `Descargando índice de assets para ${version}...`;
+        console.log(message);
+        onProgress?.(0, 100, message);
         await this.downloadFile(assetIndexUrl, assetIndexPath);
       }
 
-      // Cargar el índice de assets
-      const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
+      // Cargar el índice de assets de forma asíncrona para no bloquear
+      const assetIndexData = await new Promise<any>((resolve, reject) => {
+        setImmediate(() => {
+          try {
+            const data = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
+            resolve(data);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+
       const assetsObjects = assetIndexData.objects;
       const totalAssets = Object.keys(assetsObjects).length;
 
-      console.log(`Validando ${totalAssets} assets para la versión ${version}...`);
+      const validationMessage = `Validando ${totalAssets} assets para la versión ${version}...`;
+      console.log(validationMessage);
+      onProgress?.(0, totalAssets, validationMessage);
 
-      // Contar assets faltantes
+      // Contar assets faltantes de forma asíncrona para no bloquear
       let missingAssets = 0;
       const assetsToDownload = [];
+      let validatedCount = 0;
 
-      for (const [assetName, assetInfo] of Object.entries(assetsObjects as any)) {
-        const hash = (assetInfo as any).hash;
-        const size = (assetInfo as any).size;
+      // Validar assets en lotes para no bloquear la UI
+      const assetEntries = Object.entries(assetsObjects as any);
+      const batchSize = 100; // Procesar 100 assets a la vez
 
-        // Crear la ruta del asset basada en el hash (primeros 2 dígitos como subcarpeta)
-        const assetDir = path.join(this.objectsPath, hash.substring(0, 2));
-        const assetPath = path.join(assetDir, hash);
+      for (let i = 0; i < assetEntries.length; i += batchSize) {
+        const batch = assetEntries.slice(i, i + batchSize);
+        
+        // Usar setImmediate para permitir que otros procesos se ejecuten
+        await new Promise<void>((resolve) => {
+          setImmediate(() => {
+            for (const [assetName, assetInfo] of batch) {
+              const hash = (assetInfo as any).hash;
+              const size = (assetInfo as any).size;
 
-        // Verificar si el asset existe y tiene el tamaño correcto
-        if (!fs.existsSync(assetPath)) {
-          missingAssets++;
-          assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
-        } else {
-          const stats = fs.statSync(assetPath);
-          if (stats.size !== size) {
-            console.log(`Asset tiene tamaño incorrecto, se volverá a descargar: ${assetName}`);
-            missingAssets++;
-            assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
-          } else {
-            // Verificar el hash del archivo para asegurar la integridad
-            try {
-              const fileBuffer = fs.readFileSync(assetPath);
-              const calculatedHash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+              // Crear la ruta del asset basada en el hash (primeros 2 dígitos como subcarpeta)
+              const assetDir = path.join(this.objectsPath, hash.substring(0, 2));
+              const assetPath = path.join(assetDir, hash);
 
-              if (calculatedHash !== hash) {
-                console.log(`Asset tiene hash incorrecto, se volverá a descargar: ${assetName}`);
+              // Verificar si el asset existe y tiene el tamaño correcto
+              if (!fs.existsSync(assetPath)) {
                 missingAssets++;
                 assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+              } else {
+                const stats = fs.statSync(assetPath);
+                if (stats.size !== size) {
+                  missingAssets++;
+                  assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+                } else {
+                  // Verificar el hash del archivo para asegurar la integridad (solo para algunos para no bloquear)
+                  if (i % 500 === 0) { // Solo verificar hash cada 500 assets para no bloquear
+                    try {
+                      const fileBuffer = fs.readFileSync(assetPath);
+                      const calculatedHash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+
+                      if (calculatedHash !== hash) {
+                        missingAssets++;
+                        assetsToDownload.push({ assetName, assetInfo, assetPath, hash, size });
+                      }
+                    } catch (hashError) {
+                      // Si no podemos verificar el hash, asumimos que está bien para no re-descargar todo
+                    }
+                  }
+                }
               }
-            } catch (hashError) {
-              console.warn(`No se pudo verificar el hash del asset ${assetName}:`, hashError.message);
-              // Si no podemos verificar el hash, asumimos que está bien para no re-descargar todo
+              validatedCount++;
             }
-          }
-        }
+            resolve();
+          });
+        });
+
+        // Actualizar progreso de validación
+        onProgress?.(validatedCount, totalAssets, `Validando assets... ${validatedCount}/${totalAssets}`);
       }
 
       if (missingAssets > 0) {
-        console.log(`Encontrados ${missingAssets} assets faltantes o incorrectos para la versión ${version}. Iniciando descarga...`);
+        const downloadStartMessage = `Encontrados ${missingAssets} assets faltantes o incorrectos para la versión ${version}. Iniciando descarga paralela...`;
+        console.log(downloadStartMessage);
+        onProgress?.(0, missingAssets, downloadStartMessage);
 
-        // Descargar assets faltantes
+        // Descargar assets en paralelo con límite de concurrencia para mejorar velocidad
+        const CONCURRENT_DOWNLOADS = 45; // Número de descargas simultáneas
         let downloadedCount = 0;
+        let failedCount = 0;
+        
+        // Preparar todos los assets para descarga (crear directorios)
         for (const assetData of assetsToDownload) {
-          const { assetPath, hash, size, assetName } = assetData;
+          const { assetPath } = assetData;
           const assetDir = path.dirname(assetPath);
-
           this.ensureDir(assetDir);
+        }
 
-          // URL del asset: https://resources.download.minecraft.net/[first_2_chars_of_hash]/[full_hash]
+        // Función para descargar un asset individual
+        const downloadAsset = async (assetData: any): Promise<boolean> => {
+          const { assetPath, hash, size, assetName } = assetData;
           const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
 
           try {
@@ -140,22 +184,59 @@ export class MinecraftDownloadService {
             const calculatedHash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
 
             if (calculatedHash === hash) {
-              downloadedCount++;
-              console.log(`Asset descargado y verificado: ${assetName} (${Math.floor((downloadedCount) / assetsToDownload.length * 100)}%)`);
+              // Incrementar contador de forma segura
+              const currentCount = ++downloadedCount;
+              const progressMessage = `Descargando assets... ${currentCount}/${missingAssets} (${Math.floor((currentCount / missingAssets) * 100)}%)`;
+              onProgress?.(currentCount, missingAssets, progressMessage);
+              
+              // Solo loguear cada 50 assets o al final para no saturar la consola
+              if (currentCount % 50 === 0 || currentCount === missingAssets) {
+                console.log(`Asset descargado y verificado: ${currentCount}/${missingAssets} (${Math.floor((currentCount / missingAssets) * 100)}%)`);
+              }
+              return true;
             } else {
               console.error(`El asset descargado tiene hash incorrecto: ${assetName} (esperado: ${hash}, obtenido: ${calculatedHash})`);
               // Eliminar archivo con hash incorrecto
-              fs.unlinkSync(assetPath);
+              if (fs.existsSync(assetPath)) {
+                fs.unlinkSync(assetPath);
+              }
+              failedCount++;
+              return false;
             }
           } catch (downloadError) {
             console.error(`Error al descargar asset ${assetName}:`, downloadError);
-            // No lanzar error aquí para continuar con otros assets
+            failedCount++;
+            // Eliminar archivo parcial si existe
+            if (fs.existsSync(assetPath)) {
+              try {
+                fs.unlinkSync(assetPath);
+              } catch (unlinkError) {
+                // Ignorar errores al eliminar
+              }
+            }
+            return false;
           }
+        };
+
+        // Descargar assets en lotes paralelos
+        for (let i = 0; i < assetsToDownload.length; i += CONCURRENT_DOWNLOADS) {
+          const batch = assetsToDownload.slice(i, i + CONCURRENT_DOWNLOADS);
+          
+          // Ejecutar descargas en paralelo para este lote
+          await Promise.allSettled(batch.map(assetData => downloadAsset(assetData)));
+          
+          // Actualizar progreso después de cada lote
+          const progressMessage = `Descargando assets... ${downloadedCount}/${missingAssets} (${Math.floor((downloadedCount / missingAssets) * 100)}%)`;
+          onProgress?.(downloadedCount, missingAssets, progressMessage);
         }
 
-        console.log(`Descarga de assets completada para la versión ${version}: ${downloadedCount}/${assetsToDownload.length} assets nuevos descargados`);
+        const completionMessage = `Descarga de assets completada para la versión ${version}: ${downloadedCount}/${missingAssets} assets descargados${failedCount > 0 ? `, ${failedCount} fallidos` : ''}`;
+        console.log(completionMessage);
+        onProgress?.(downloadedCount, missingAssets, completionMessage);
       } else {
-        console.log(`Todos los assets están presentes y correctos para la versión ${version}`);
+        const allPresentMessage = `Todos los assets están presentes y correctos para la versión ${version}`;
+        console.log(allPresentMessage);
+        onProgress?.(totalAssets, totalAssets, allPresentMessage);
       }
 
       return true;

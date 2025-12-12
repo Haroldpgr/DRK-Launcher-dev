@@ -792,15 +792,26 @@ ipcMain.handle('instance:install-content', async (_e, payload: {
     console.log(`[install-content] contentId: ${payload.contentId} (${typeof payload.contentId}), isCurseForge: ${isCurseForge}, contentType: ${payload.contentType}`);
     
     if (payload.contentType === 'modpack') {
-      // Para modpacks, usar el método existente
-      console.log(`[install-content] Instalando modpack usando instanceCreationService`);
-      await instanceCreationService.installContentToInstance(
-        payload.instancePath,
-        payload.contentId,
-        payload.contentType,
-        payload.mcVersion,
-        payload.loader
-      );
+      // Para modpacks, verificar si es CurseForge o Modrinth
+      if (isCurseForge) {
+        // Modpack de CurseForge
+        console.log(`[install-content] Instalando modpack de CurseForge (ID: ${payload.contentId}) usando curseforgeService`);
+        await curseforgeService.downloadModpack(
+          payload.contentId,
+          payload.instancePath,
+          payload.mcVersion,
+          payload.loader
+        );
+      } else {
+        // Modpack de Modrinth
+        console.log(`[install-content] Instalando modpack de Modrinth (ID: ${payload.contentId}) usando modrinthDownloadService`);
+        await modrinthDownloadService.downloadModpack(
+          payload.contentId,
+          payload.instancePath,
+          payload.mcVersion,
+          payload.loader
+        );
+      }
     } else if (isCurseForge) {
       // Para CurseForge, usar el servicio de CurseForge
       console.log(`[install-content] Instalando contenido de CurseForge (ID: ${payload.contentId}) usando curseforgeService`);

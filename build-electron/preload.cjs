@@ -112,7 +112,8 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   // API de shell del sistema
   shell: {
     showItemInFolder: (filePath) => import_electron.ipcRenderer.invoke("shell:showItemInFolder", filePath),
-    openPath: (folderPath) => import_electron.ipcRenderer.invoke("shell:openPath", folderPath)
+    openPath: (folderPath) => import_electron.ipcRenderer.invoke("shell:openPath", folderPath),
+    openExternal: (url) => import_electron.ipcRenderer.invoke("shell:openExternal", url)
   },
   // API de modpacks
   modpack: {

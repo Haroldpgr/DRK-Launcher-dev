@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
@@ -128,22 +128,53 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
     }
   };
 
+  // Memoizar servidores estáticos para evitar re-crearlos en cada render
+  const staticServers = useMemo(() => [
+    {
+      id: 'server1',
+      name: 'Hypixel',
+      ip: 'mc.hypixel.net',
+      description: 'El servidor multijugador más grande de Minecraft con minijuegos, SkyBlock y más',
+      category: 'Minijuegos',
+      thumbnail: 'https://api.minetools.eu/favicon/mc.hypixel.net'
+    },
+    {
+      id: 'server2',
+      name: 'Minecade',
+      ip: 'play.minecade.net',
+      description: 'Minijuegos competitivos con torneos regulares y modos únicos',
+      category: 'Minijuegos',
+      thumbnail: 'https://api.minetools.eu/favicon/play.minecade.net'
+    },
+    {
+      id: 'server3',
+      name: 'Empire Minecraft',
+      ip: 'play.emc.gs',
+      description: 'Uno de los servidores de survival más grandes con economía y facciones',
+      category: 'Factions',
+      thumbnail: 'https://api.minetools.eu/favicon/play.emc.gs'
+    }
+  ], []);
+
+  // Cargar datos de forma optimizada
   useEffect(() => {
+    let isMounted = true; // Flag para evitar actualizaciones de estado si el componente se desmonta
+
     // Cargar instancias con validación
     autoDetectAndLoadInstances();
 
-    // Cargar modpacks recomendados
-    if (window.api?.modrinth?.search) {
+    // Cargar modpacks recomendados (solo si no están cargados)
+    if (window.api?.modrinth?.search && modpacks.length === 0) {
       window.api.modrinth.search({
         contentType: 'modpacks',
         search: ''
       }).then((modpacksList: any) => {
-        // Tomar solo los primeros 3 modpacks
+        if (!isMounted) return;
         const topModpacks = modpacksList.slice(0, 3);
         setModpacks(topModpacks);
       }).catch((error: any) => {
+        if (!isMounted) return;
         console.error("Error al cargar modpacks:", error);
-        // En caso de error, usar datos de respaldo
         setModpacks([
           { id: 'opt', name: 'Optimizado', description: 'Paquete de rendimiento y gráficos suaves', tags: ['Optimización'], imageUrl: getDefaultPlaceholder() },
           { id: 'adventure', name: 'Aventura+', description: 'Explora mazmorras y nuevas dimensiones', tags: ['Aventura'], imageUrl: getDefaultPlaceholder() },
@@ -152,18 +183,18 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
       });
     }
 
-    // Cargar shaders recomendados de Modrinth
-    if (window.api?.modrinth?.search) {
+    // Cargar shaders recomendados de Modrinth (solo si no están cargados)
+    if (window.api?.modrinth?.search && shaders.length === 0) {
       window.api.modrinth.search({
         contentType: 'shaders',
         search: ''
       }).then((shadersList: any) => {
-        // Tomar solo los primeros 3 shaders
+        if (!isMounted) return;
         const topShaders = shadersList.slice(0, 3);
         setShaders(topShaders);
       }).catch((error: any) => {
+        if (!isMounted) return;
         console.error("Error al cargar shaders:", error);
-        // En caso de error, usar datos de respaldo
         setShaders([
           { id: 's1', name: 'Oculus', description: 'Shaderpack de alto rendimiento con efectos visuales realistas', imageUrl: getDefaultPlaceholder() },
           { id: 's2', name: 'BSL', description: 'Shaderpack con iluminación dinámica y sombras realistas', imageUrl: getDefaultPlaceholder() },
@@ -172,67 +203,47 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
       });
     }
 
-    // Cargar modpacks de CurseForge (usando la misma lógica que ContentPage)
-    if (window.api?.curseforge?.search) {
+    // Cargar modpacks de CurseForge (solo si no están cargados)
+    if (window.api?.curseforge?.search && modpacksCurseForge.length === 0) {
       window.api.curseforge.search({
         contentType: 'modpacks',
         search: ''
       }).then((modpacksList: any) => {
-        // Los resultados ya vienen mapeados desde curseforgeService con imageUrl correcto
-        // Tomar solo los primeros 3 modpacks
+        if (!isMounted) return;
         const topModpacks = modpacksList.slice(0, 3);
         setModpacksCurseForge(topModpacks);
       }).catch((error: any) => {
+        if (!isMounted) return;
         console.error("Error al cargar modpacks de CurseForge:", error);
         setModpacksCurseForge([]);
       });
     }
 
-    // Cargar shaders de CurseForge (usando la misma lógica que ContentPage)
-    if (window.api?.curseforge?.search) {
+    // Cargar shaders de CurseForge (solo si no están cargados)
+    if (window.api?.curseforge?.search && shadersCurseForge.length === 0) {
       window.api.curseforge.search({
         contentType: 'shaders',
         search: ''
       }).then((shadersList: any) => {
-        // Los resultados ya vienen mapeados desde curseforgeService con imageUrl correcto
-        // Tomar solo los primeros 3 shaders
+        if (!isMounted) return;
         const topShaders = shadersList.slice(0, 3);
         setShadersCurseForge(topShaders);
       }).catch((error: any) => {
+        if (!isMounted) return;
         console.error("Error al cargar shaders de CurseForge:", error);
         setShadersCurseForge([]);
       });
     }
 
-    // Cargar servidores recomendados
-    // Aquí puedes cargar servidores desde una API o desde una configuración local
-    setServers([
-      {
-        id: 'server1',
-        name: 'Hypixel',
-        ip: 'mc.hypixel.net',
-        description: 'El servidor multijugador más grande de Minecraft con minijuegos, SkyBlock y más',
-        category: 'Minijuegos',
-        thumbnail: 'https://api.minetools.eu/favicon/mc.hypixel.net'
-      },
-      {
-        id: 'server2',
-        name: 'Minecade',
-        ip: 'play.minecade.net',
-        description: 'Minijuegos competitivos con torneos regulares y modos únicos',
-        category: 'Minijuegos',
-        thumbnail: 'https://api.minetools.eu/favicon/play.minecade.net'
-      },
-      {
-        id: 'server3',
-        name: 'Empire Minecraft',
-        ip: 'play.emc.gs',
-        description: 'Uno de los servidores de survival más grandes con economía y facciones',
-        category: 'Factions',
-        thumbnail: 'https://api.minetools.eu/favicon/play.emc.gs'
-      }
-    ]);
-  }, [currentUser]) // Agregar currentUser como dependencia para refrescar cuando cambie el perfil
+    // Cargar servidores estáticos (solo una vez)
+    if (servers.length === 0) {
+      setServers(staticServers);
+    }
+
+    return () => {
+      isMounted = false; // Cleanup: evitar actualizaciones después de desmontar
+    };
+  }, [currentUser, staticServers]) // Agregar currentUser como dependencia para refrescar cuando cambie el perfil
 
   const play = async () => { if (!last) return; onPlay(last.id); }
 
