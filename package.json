@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "DRK Launcher - Minecraft Launcher",
+  "author": "DRK Team",
   "main": "build-electron/main.cjs",
   "scripts": {
     "dev": "vite",
@@ -58,10 +60,15 @@
     "productName": "DRK Launcher",
     "files": [
       "dist/**",
-      "dist-electron/**",
+      "build-electron/**",
       "package.json"
     ],
+    "extraFiles": [],
+    "extraResources": [],
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*"
+    ],
     "directories": {
       "output": "release"
     },
@@ -69,19 +76,28 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "DRK-Launcher-${version}-Setup.exe"
+      "artifactName": "DRK-Launcher-${version}-Setup.exe",
+      "sign": null,
+      "compression": "maximum"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
       "artifactName": "DRK-Launcher-${version}.AppImage",
-      "category": "Utility"
+      "category": "Utility",
+      "compression": "maximum"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
-    }
+      "allowToChangeInstallationDirectory": true,
+      "differentialPackage": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "compression": "maximum",
+    "removePackageScripts": true,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false
   }
 }

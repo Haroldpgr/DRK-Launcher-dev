@@ -88,7 +88,9 @@ contextBridge.exposeInMainWorld('api', {
 
   // API para creación completa de instancias
   instance: {
-    createFull: (payload: unknown) => ipcRenderer.invoke('instance:create-full', payload)
+    createFull: (payload: unknown) => ipcRenderer.invoke('instance:create-full', payload),
+    getIncompleteDownloads: () => ipcRenderer.invoke('instance:get-incomplete-downloads'),
+    resumeDownload: (downloadId: string) => ipcRenderer.invoke('instance:resume-download', downloadId)
   },
 
   // Otros APIs

@@ -29,7 +29,7 @@ export interface DownloadInfo {
 export class DownloadQueueService {
   private downloads: Map<string, DownloadInfo> = new Map();
   private activeDownloads: Set<string> = new Set();
-  private maxConcurrentDownloads: number = 3; // Reducir a 3 para evitar sobrecarga
+  private maxConcurrentDownloads: number = 10; // 10 descargas simultáneas para balance entre velocidad y estabilidad
   private timeoutMs: number = 300000; // Aumentar timeout a 5 minutos para descargas lentas
 
   /**

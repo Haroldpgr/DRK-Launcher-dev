@@ -24,6 +24,8 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 500, // Mantener el límite estándar de 500KB
+    sourcemap: false, // Desactivar sourcemaps en producción para reducir tamaño
+    minify: 'esbuild', // Usar esbuild (más rápido y viene incluido)
     rollupOptions: {
       external: ['path', 'fs', 'os', 'stream', 'crypto', 'child_process', 'util', 'net', 'tls', 'zlib'],
       output: {

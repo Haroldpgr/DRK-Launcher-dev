@@ -94,7 +94,10 @@ async function createWindow() {
     await win.loadURL(url);
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    await win.loadFile(path.join(process.cwd(), 'dist', 'index.html'));
+    // En producción, los archivos están en app.asar
+    // app.getAppPath() devuelve la ruta correcta tanto en desarrollo como en producción
+    const htmlPath = path.join(app.getAppPath(), 'dist', 'index.html');
+    await win.loadFile(htmlPath);
   }
 }
 
@@ -610,12 +613,46 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
 })
 
 // --- IPC Handlers for Instance Creation --- //
-ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => {
+// Handler para obtener descargas incompletas
+ipcMain.handle('instance:get-incomplete-downloads', async () => {
+  try {
+    const incompleteDownloads = enhancedInstanceCreationService.getIncompleteDownloads();
+    return incompleteDownloads;
+  } catch (error) {
+    console.error('Error al obtener descargas incompletas:', error);
+    return [];
+  }
+});
+
+// Handler para reanudar una descarga
+ipcMain.handle('instance:resume-download', async (_e, downloadId: string) => {
+  try {
+    const { instanceDownloadPersistenceService } = require('./services/instanceDownloadPersistenceService');
+    const downloadState = instanceDownloadPersistenceService.getDownload(downloadId);
+    
+    if (!downloadState) {
+      throw new Error('Descarga no encontrada');
+    }
+
+    if (downloadState.status === 'completed') {
+      throw new Error('La descarga ya está completa');
+    }
+
+    const instance = await enhancedInstanceCreationService.resumeInstanceDownload(downloadState);
+    return instance;
+  } catch (error) {
+    console.error('Error al reanudar descarga:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; loaderVersion?: string; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => {
   try {
     logProgressService.info(`Iniciando creación de instancia: ${payload.name}`, {
       name: payload.name,
       version: payload.version,
-      loader: payload.loader
+      loader: payload.loader,
+      loaderVersion: payload.loaderVersion || 'NO ESPECIFICADA'
     });
 
     // Usar el servicio mejorado de creación de instancias
@@ -623,6 +660,7 @@ ipcMain.handle('instance:create-full', async (_e, payload: { name: string; versi
       name: payload.name,
       version: payload.version,
       loader: payload.loader || 'vanilla',
+      loaderVersion: payload.loaderVersion, // IMPORTANTE: Pasar la versión del loader
       javaVersion: payload.javaVersion,
       maxMemory: payload.maxMemory,
       minMemory: payload.minMemory,

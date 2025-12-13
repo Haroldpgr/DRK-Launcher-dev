@@ -6,13 +6,16 @@ const outDir = 'build-electron'
 rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 
+const isProduction = process.env.NODE_ENV === 'production' || !process.env.NODE_ENV
+
 await build({
   entryPoints: ['src/main/main.ts'],
   outfile: join(outDir, 'main.cjs'),
   platform: 'node',
   format: 'cjs',
   bundle: true,
-  sourcemap: true,
+  sourcemap: !isProduction,
+  minify: isProduction,
   external: ['electron']
 })
 
@@ -22,7 +25,8 @@ await build({
   platform: 'node',
   format: 'cjs',
   bundle: true,
-  sourcemap: true,
+  sourcemap: !isProduction,
+  minify: isProduction,
   external: ['electron']
 })
 

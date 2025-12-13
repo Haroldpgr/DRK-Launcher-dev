@@ -5,6 +5,14 @@ import { InstanceCreationProgress, InstanceCreationStatus, InstanceCreationConfi
 import { javaDownloadService } from './javaDownloadService';
 import { versionService } from './versionService';
 import { minecraftDownloadService } from './minecraftDownloadService';
+import { gameLaunchService } from './gameLaunchService';
+import { instanceDownloadPersistenceService, InstanceDownloadState } from './instanceDownloadPersistenceService';
+// Importar servicios de descarga organizados
+import { downloadVanilla } from './descargas/vanilla/DownloadVanilla';
+import { downloadFabric } from './descargas/fabric/DownloadFabric';
+import { downloadForge } from './descargas/forge/DownloadForge';
+import { downloadQuilt } from './descargas/quilt/DownloadQuilt';
+import { downloadNeoForge } from './descargas/neoforge/DownloadNeoForge';
 
 /**
  * Interfaz para el estado de la instancia
@@ -103,11 +111,29 @@ export class EnhancedInstanceCreationService {
       details
     };
 
+    // Actualizar persistencia
+    instanceDownloadPersistenceService.updateProgress(
+      instanceId,
+      progress.progress,
+      details || this.getStatusDescription(status),
+      Math.floor(currentStep),
+      totalSteps
+    );
+
     // Emitir progreso si hay un callback registrado
     const callback = this.progressCallbacks.get(instanceId);
     if (callback) {
       callback(progress);
     }
+
+    // Actualizar persistencia
+    instanceDownloadPersistenceService.updateProgress(
+      instanceId,
+      progress.progress,
+      details || this.getStatusDescription(status),
+      Math.floor(currentStep),
+      totalSteps
+    );
 
     return progress;
   }
@@ -158,10 +184,37 @@ export class EnhancedInstanceCreationService {
       throw new Error('Creación de instancia cancelada por el usuario');
     }
 
+    // Iniciar seguimiento de la descarga
+    const instancePath = config.instancePath || path.join(this.basePath, id);
+    const downloadState: InstanceDownloadState = {
+      id: progressId,
+      instanceName: config.name,
+      instancePath,
+      loader: config.loader || 'vanilla',
+      mcVersion: config.version,
+      loaderVersion: config.loaderVersion,
+      status: 'pending',
+      progress: 0,
+      currentStep: 'Iniciando creación de instancia',
+      totalSteps: 10,
+      completedSteps: 0,
+      startedAt: Date.now(),
+      lastUpdated: Date.now(),
+      downloadedFiles: [],
+      pendingFiles: []
+    };
+    instanceDownloadPersistenceService.startTracking(downloadState);
+
     this.updateProgress(progressId, InstanceCreationStatus.PENDING, 0, 10, 'Iniciando creación de instancia');
 
     try {
-      console.log(`Iniciando creación de instancia: ${config.name} (${config.version}) con ${config.loader || 'vanilla'}`);
+      console.log(`[Instance Creation] ===== INICIANDO CREACIÓN DE INSTANCIA =====`);
+      console.log(`[Instance Creation] Nombre: ${config.name}`);
+      console.log(`[Instance Creation] Versión MC: ${config.version}`);
+      console.log(`[Instance Creation] Loader: ${config.loader || 'vanilla'}`);
+      console.log(`[Instance Creation] Loader Version: ${config.loaderVersion || 'NO ESPECIFICADA'}`);
+      console.log(`[Instance Creation] Java Version: ${config.javaVersion || 'NO ESPECIFICADA'}`);
+      console.log(`[Instance Creation] ===========================================`);
 
       // PASO 1: Verificar y descargar JRE si es necesario
       this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_JRE, 1, 10, 'Verificando Java Runtime Environment');
@@ -188,55 +241,44 @@ export class EnhancedInstanceCreationService {
         throw new Error('Creación de instancia cancelada por el usuario');
       }
 
-      // PASO 4: Descargar bibliotecas
-      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_LIBRARIES, 4, 10, 'Descargando bibliotecas del juego');
-      await minecraftDownloadService.downloadVersionLibraries(config.version);
+      // PASO 4-7: Usar los servicios de descarga organizados según el loader
+      // Cada servicio de descarga maneja: client.jar, assets, librerías base y loader específico
+      const loader = config.loader || 'vanilla';
       
-      if (this.isCancelled(progressId)) {
-        throw new Error('Creación de instancia cancelada por el usuario');
-      }
-
-      // PASO 5: Descargar cliente
-      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_CLIENT, 5, 10, 'Descargando cliente de Minecraft');
-      await minecraftDownloadService.downloadClientJar(config.version, instancePath);
+      console.log(`[Instance Creation] Usando servicio de descarga: ${loader}`);
       
-      if (this.isCancelled(progressId)) {
-        throw new Error('Creación de instancia cancelada por el usuario');
+      switch (loader) {
+        case 'vanilla':
+          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_CLIENT, 4, 10, 'Descargando instancia Vanilla');
+          await downloadVanilla.downloadInstance(config.version, instancePath);
+          // downloadVanilla ya descarga: client.jar, assets y librerías
+          break;
+          
+        case 'fabric':
+          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_CLIENT, 4, 10, 'Descargando instancia Fabric');
+          await downloadFabric.downloadInstance(config.version, config.loaderVersion, instancePath);
+          // downloadFabric ya descarga: client.jar, assets, librerías base y Fabric Loader
+          break;
+          
+        case 'forge':
+          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_CLIENT, 4, 10, 'Descargando instancia Forge');
+          await downloadForge.downloadInstance(config.version, config.loaderVersion, instancePath);
+          // downloadForge ya descarga: client.jar, assets, librerías base y Forge (con todas sus dependencias)
+          break;
+          
+        case 'quilt':
+          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_CLIENT, 4, 10, 'Descargando instancia Quilt');
+          await downloadQuilt.downloadInstance(config.version, config.loaderVersion, instancePath);
+          // downloadQuilt ya descarga: client.jar, assets, librerías base y Quilt Loader
+          break;
+          
+        case 'neoforge':
+          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_CLIENT, 4, 10, 'Descargando instancia NeoForge');
+          await downloadNeoForge.downloadInstance(config.version, config.loaderVersion, instancePath);
+          // downloadNeoForge ya descarga: client.jar, assets, librerías base y NeoForge (con todas sus dependencias)
+          break;
       }
 
-      // PASO 6: Descargar assets
-      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6, 10, 'Descargando y validando assets del juego');
-      // Usar la nueva función que valida y descarga assets faltantes con callback de progreso
-      await minecraftDownloadService.validateAndDownloadAssets(
-        config.version,
-        (current, total, message) => {
-          // Actualizar progreso granular durante la descarga de assets
-          const progressPercent = total > 0 ? (current / total) * 100 : 0;
-          const stepProgress = 6 + (progressPercent / 100) * 0.5; // 6.0 a 6.5 para assets
-          this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, stepProgress, 10, message);
-        }
-      );
-
-      // Asegurar que assets críticos como los de idioma estén presentes
-      this.updateProgress(progressId, InstanceCreationStatus.DOWNLOADING_ASSETS, 6.5, 10, 'Asegurando assets críticos (idiomas, texturas, etc.)');
-      await minecraftDownloadService.ensureCriticalAssets(config.version);
-
-      if (this.isCancelled(progressId)) {
-        throw new Error('Creación de instancia cancelada por el usuario');
-      }
-
-      // PASO 7: Si hay loader, instalarlo
-      if (config.loader && config.loader !== 'vanilla') {
-        this.updateProgress(progressId, InstanceCreationStatus.INSTALLING_LOADER, 7, 10, `Instalando ${config.loader}`);
-        await this.installLoader(config.loader, config.version, config.loaderVersion, instancePath);
-        
-        // PASO 7.5: Para Forge, ejecutar instalador y descargar todas las librerías del version.json generado
-        if (config.loader === 'forge' || config.loader === 'neoforge') {
-          this.updateProgress(progressId, InstanceCreationStatus.INSTALLING_LOADER, 7.5, 10, 'Ejecutando instalador de Forge y descargando librerías');
-          await this.ensureForgeCompleteInstallation(config.loader, config.version, config.loaderVersion, instancePath);
-        }
-      }
-      
       if (this.isCancelled(progressId)) {
         throw new Error('Creación de instancia cancelada por el usuario');
       }
@@ -252,6 +294,9 @@ export class EnhancedInstanceCreationService {
       // Actualizar estado final
       this.updateProgress(progressId, InstanceCreationStatus.COMPLETED, 10, 10, 'Instancia creada exitosamente');
 
+      // Marcar descarga como completada
+      instanceDownloadPersistenceService.markCompleted(progressId);
+
       // Marcar instancia como lista para usar
       instanceConfig.ready = true;
       this.saveInstanceConfig(instancePath, instanceConfig);
@@ -260,7 +305,12 @@ export class EnhancedInstanceCreationService {
 
       return instanceConfig;
     } catch (error) {
-      this.updateProgress(progressId, InstanceCreationStatus.ERROR, 0, 10, `Error: ${(error as Error).message}`);
+      const errorMessage = (error as Error).message;
+      this.updateProgress(progressId, InstanceCreationStatus.ERROR, 0, 10, `Error: ${errorMessage}`);
+      
+      // Marcar descarga como error
+      instanceDownloadPersistenceService.markError(progressId, errorMessage);
+      
       console.error(`Error al crear instancia ${config.name}:`, error);
       throw error;
     } finally {
@@ -404,6 +454,8 @@ export class EnhancedInstanceCreationService {
 
   /**
    * Instala Forge
+   * NOTA: Este método solo valida la versión del loader.
+   * La instalación real se hace en ensureForgeCompleteInstallation usando el nuevo método basado en Maven.
    */
   private async installForge(
     mcVersion: string,
@@ -411,177 +463,24 @@ export class EnhancedInstanceCreationService {
     instancePath: string
   ): Promise<void> {
     try {
-      console.log(`Descargando Forge para Minecraft ${mcVersion}...`);
+      console.log(`[Forge Install] Preparando instalación de Forge para Minecraft ${mcVersion}...`);
 
-      // Buscar una versión compatible con la versión de Minecraft
-      let forgeVersion = loaderVersion;
-      
-      if (!forgeVersion) {
-        // Intentar múltiples URLs de la API de Forge
-        const forgeApiUrls = [
-          `https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml`,
-          `https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml`
-        ];
-
-        let versions: string[] = [];
-        let foundMetadata = false;
-
-        // Intentar cada URL hasta que una funcione
-        for (const url of forgeApiUrls) {
-          try {
-            console.log(`[Forge Install] Intentando URL: ${url}`);
-            const response = await fetch(url, {
-              headers: {
-                'User-Agent': 'DRK-Launcher/1.0'
-              }
-            });
-            
-            if (!response.ok) {
-              console.warn(`[Forge Install] URL ${url} devolvió ${response.status}`);
-              continue;
-            }
-            
-            const contentType = response.headers.get('content-type') || '';
-            
-            if (contentType.includes('xml') || url.includes('.xml')) {
-              // Parsear XML usando regex simple (más ligero que un parser completo)
-              const xmlText = await response.text();
-              
-              // Extraer versiones del XML usando regex
-              // Buscar <version>...</version> o <version/> dentro de <versions>
-              const versionMatches = xmlText.match(/<version[^>]*>([^<]+)<\/version>/gi);
-              if (versionMatches) {
-                for (const match of versionMatches) {
-                  const versionMatch = match.match(/>([^<]+)</);
-                  if (versionMatch && versionMatch[1]) {
-                    const version = versionMatch[1].trim();
-                    if (version && !versions.includes(version)) {
-                      versions.push(version);
-                    }
-                  }
-                }
-              }
-              
-              foundMetadata = true;
-              console.log(`[Forge Install] ${versions.length} versiones encontradas desde XML`);
-              break;
-            } else {
-              // Intentar parsear como JSON
-              try {
-                const jsonData = await response.json();
-                if (jsonData.versioning && jsonData.versioning.versions) {
-                  versions = jsonData.versioning.versions;
-                  foundMetadata = true;
-                  console.log(`[Forge Install] ${versions.length} versiones encontradas desde JSON`);
-                  break;
-                }
-              } catch (jsonError) {
-                console.warn(`[Forge Install] No se pudo parsear como JSON:`, jsonError);
-                continue;
-              }
-            }
-          } catch (err: any) {
-            console.warn(`[Forge Install] Error al obtener desde ${url}:`, err.message);
-            continue;
-          }
-        }
-
-        // Si no se encontró metadata, usar la API de promociones como fallback
-        if (!foundMetadata) {
-          console.log(`[Forge Install] Intentando API de promociones...`);
-          try {
-            const promoResponse = await fetch(`https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json`, {
-              headers: {
-                'User-Agent': 'DRK-Launcher/1.0'
-              }
-            });
-            
-            if (promoResponse.ok) {
-              const promoData = await promoResponse.json();
-              if (promoData.promos) {
-                for (const key in promoData.promos) {
-                  if (key.startsWith(`${mcVersion}-`)) {
-                    versions.push(key);
-                  }
-                }
-                foundMetadata = true;
-                console.log(`[Forge Install] ${versions.length} versiones encontradas desde promociones`);
-              }
-            }
-          } catch (err: any) {
-            console.error(`[Forge Install] Error al obtener promociones:`, err);
-          }
-        }
-
-        if (!foundMetadata || versions.length === 0) {
-          throw new Error(`No se pudo obtener la lista de versiones de Forge para Minecraft ${mcVersion}`);
-        }
-
-        // Buscar la versión más reciente compatible con la versión de Minecraft
-        const compatibleVersions = versions.filter((v: string) => v.startsWith(`${mcVersion}-`));
-        
-        if (compatibleVersions.length === 0) {
-          throw new Error(`No se encontró versión compatible de Forge para Minecraft ${mcVersion}`);
-        }
-
-        // Ordenar versiones (más reciente primero)
-        compatibleVersions.sort((a: string, b: string) => {
-          const forgeVersionA = a.split('-')[1] || '';
-          const forgeVersionB = b.split('-')[1] || '';
-          return forgeVersionB.localeCompare(forgeVersionA, undefined, { numeric: true, sensitivity: 'base' });
-        });
-
-        forgeVersion = compatibleVersions[0];
-        console.log(`[Forge Install] Versión seleccionada: ${forgeVersion}`);
+      // Solo validar/obtener la versión del loader si no está especificada
+      // NO descargar nada aquí - eso lo hace ensureForgeCompleteInstallation con el nuevo método
+      if (!loaderVersion) {
+        console.log(`[Forge Install] Versión del loader no especificada, se obtendrá en ensureForgeCompleteInstallation`);
+      } else {
+        console.log(`[Forge Install] Versión del loader especificada: ${loaderVersion}`);
       }
 
-      console.log(`Usando Forge ${forgeVersion} para Minecraft ${mcVersion}`);
-
-      // Crear carpeta para el loader
+      // Crear carpeta para el loader (por si acaso)
       const loaderDir = path.join(instancePath, 'loader');
       this.ensureDir(loaderDir);
 
-      // Para Forge moderno (1.17+), intentar primero el universal JAR que es más fácil de usar
-      // El universal JAR puede ser usado directamente sin necesidad de instalador
-      const forgeUniversalUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-universal.jar`;
-      const forgeUniversalPath = path.join(loaderDir, `forge-${forgeVersion}-universal.jar`);
-
-      console.log(`[Forge Install] Intentando descargar Universal JAR desde: ${forgeUniversalUrl}`);
-      const responseUniversal = await fetch(forgeUniversalUrl, {
-        headers: {
-          'User-Agent': 'DRK-Launcher/1.0'
-        }
-      });
-
-      if (responseUniversal.ok) {
-        const buffer = Buffer.from(await responseUniversal.arrayBuffer());
-        fs.writeFileSync(forgeUniversalPath, buffer);
-        console.log(`[Forge Install] Forge Universal JAR descargado exitosamente en: ${forgeUniversalPath}`);
-        return;
-      }
-
-      // Si el universal no está disponible, intentar con el instalador como fallback
-      console.log(`[Forge Install] Universal JAR no disponible (${responseUniversal.status}), intentando instalador...`);
-      const forgeInstallerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-installer.jar`;
-      const forgeInstallerPath = path.join(loaderDir, `forge-${forgeVersion}-installer.jar`);
-
-      const responseInstaller = await fetch(forgeInstallerUrl, {
-        headers: {
-          'User-Agent': 'DRK-Launcher/1.0'
-        }
-      });
-
-      if (!responseInstaller.ok) {
-        throw new Error(`No se pudo descargar Forge ${forgeVersion} para Minecraft ${mcVersion} (universal: ${responseUniversal.status}, instalador: ${responseInstaller.status})`);
-      }
-
-      // Descargar el instalador como último recurso
-      const buffer = Buffer.from(await responseInstaller.arrayBuffer());
-      fs.writeFileSync(forgeInstallerPath, buffer);
-      console.log(`[Forge Install] Forge Installer descargado en: ${forgeInstallerPath}`);
-      console.log(`[Forge Install] Nota: El instalador de Forge necesita ser ejecutado para completar la instalación.`);
+      // NO descargar nada aquí - el nuevo método installForgeLoader lo hará
+      console.log(`[Forge Install] Preparación completada. La instalación real se hará en ensureForgeCompleteInstallation usando el método basado en Maven.`);
     } catch (error) {
-      console.error(`[Forge Install] Error al instalar Forge:`, error);
+      console.error(`[Forge Install] Error al preparar instalación de Forge:`, error);
       throw error;
     }
   }
@@ -766,10 +665,13 @@ export class EnhancedInstanceCreationService {
     loaderVersion: string | undefined,
     instancePath: string
   ): Promise<void> {
+    console.log(`[Forge Complete Install] Iniciando instalación completa de ${loader} para Minecraft ${mcVersion}`);
+    console.log(`[Forge Complete Install] loaderVersion proporcionada: ${loaderVersion || 'NO ESPECIFICADA'}`);
     const launcherDataPath = getLauncherDataPath();
     
     // Si no hay loaderVersion, intentar obtenerla
     if (!loaderVersion) {
+      console.log(`[Forge Complete Install] Obteniendo versión de ${loader} automáticamente...`);
       const forgeApiUrls = [
         `https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml`,
       ];
@@ -791,19 +693,23 @@ export class EnhancedInstanceCreationService {
                   return forgeVersionB.localeCompare(forgeVersionA, undefined, { numeric: true, sensitivity: 'base' });
                 });
                 loaderVersion = compatibleVersions[0];
+                console.log(`[Forge Complete Install] Versión de ${loader} obtenida automáticamente: ${loaderVersion}`);
                 break;
               }
             }
           }
         } catch (err) {
-          console.warn(`Error al obtener versión de Forge:`, err);
+          console.warn(`[Forge Complete Install] Error al obtener versión de ${loader}:`, err);
         }
       }
     }
     
     if (!loaderVersion) {
+      console.error(`[Forge Complete Install] ERROR: No se pudo obtener versión de ${loader} para Minecraft ${mcVersion}`);
       throw new Error(`No se pudo obtener versión de Forge para Minecraft ${mcVersion}`);
     }
+    
+    console.log(`[Forge Complete Install] Usando versión de ${loader}: ${loaderVersion}`);
     
     // MODELO MODRINTH: Verificar si ya existe un version.json válido
     // Si existe, reutilizarlo en lugar de ejecutar el instalador
@@ -827,9 +733,9 @@ export class EnhancedInstanceCreationService {
     if (!versionJsonExists) {
       // Intentar construir el version.json sin usar el instalador (modelo Modrinth)
       try {
-        console.log(`[Forge Install] Intentando construcción directa del version.json (modelo Modrinth)...`);
+        console.log(`[Forge Complete Install] Version.json no existe, construyendo directamente desde Maven (modelo Modrinth)...`);
         await this.buildForgeVersionJsonDirectly(mcVersion, loaderVersion);
-        console.log(`[Forge Install] Version.json construido exitosamente sin usar instalador`);
+        console.log(`[Forge Complete Install] Version.json construido exitosamente desde Maven`);
       } catch (error) {
         console.warn(`[Forge Install] Error al construir version.json directamente: ${error}`);
         console.log(`[Forge Install] Usando instalador como fallback...`);
@@ -886,8 +792,50 @@ export class EnhancedInstanceCreationService {
   /**
    * Construye el version.json de Forge directamente desde Maven (modelo Modrinth/Prism)
    * Sin usar el instalador.jar
+   * Usa installForgeLoader del gameLaunchService
    */
   private async buildForgeVersionJsonDirectly(
+    mcVersion: string,
+    loaderVersion: string
+  ): Promise<void> {
+    console.log(`[Forge Build] Iniciando construcción directa de version.json para Forge ${loaderVersion} en Minecraft ${mcVersion}`);
+    const launcherDataPath = getLauncherDataPath();
+    const versionName = `${mcVersion}-forge-${loaderVersion}`;
+    const versionDir = path.join(launcherDataPath, 'versions', versionName);
+    this.ensureDir(versionDir);
+    
+    const versionJsonPath = path.join(versionDir, `${versionName}.json`);
+    
+    // Si ya existe, verificar que sea válido
+    if (fs.existsSync(versionJsonPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+        if (existing.mainClass && existing.libraries) {
+          console.log(`[Forge Build] Version.json ya existe y es válido en: ${versionJsonPath}`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`[Forge Build] Version.json existente es inválido, reconstruyendo...`);
+      }
+    }
+    
+    // Usar installForgeLoader del gameLaunchService para instalación basada en Maven
+    console.log(`[Forge Build] Llamando a gameLaunchService.installForgeLoader(${mcVersion}, 'forge', ${loaderVersion})...`);
+    try {
+      await gameLaunchService.installForgeLoader(mcVersion, 'forge', loaderVersion);
+      console.log(`[Forge Build] ✓ Version.json construido exitosamente usando installForgeLoader (Maven)`);
+    } catch (error) {
+      console.error(`[Forge Build] ✗ Error al usar installForgeLoader: ${error}`);
+      console.warn(`[Forge Build] Usando método alternativo (legacy)...`);
+      // Continuar con el método anterior como fallback
+      await this.buildForgeVersionJsonDirectlyLegacy(mcVersion, loaderVersion);
+    }
+  }
+
+  /**
+   * Método legacy para construir version.json (fallback)
+   */
+  private async buildForgeVersionJsonDirectlyLegacy(
     mcVersion: string,
     loaderVersion: string
   ): Promise<void> {
@@ -1261,8 +1209,8 @@ export class EnhancedInstanceCreationService {
         
         console.log(`[Forge Libraries] Iniciando descarga de ${toDownload} librerías (${alreadyExists} ya existen, ${skipped} omitidas)...`);
         
-        // Descargar en paralelo (máximo 10 simultáneas para no saturar)
-        const CONCURRENT_DOWNLOADS = 10;
+        // Descargar en paralelo (aumentado para mayor velocidad)
+        const CONCURRENT_DOWNLOADS = 70;
         let downloaded = 0;
         let failed = 0;
         
@@ -1318,6 +1266,51 @@ export class EnhancedInstanceCreationService {
 
     const updatedConfig = { ...config, ...updates };
     this.saveInstanceConfig(instancePath, updatedConfig);
+  }
+
+  /**
+   * Reanuda una descarga de instancia incompleta
+   */
+  async resumeInstanceDownload(downloadState: InstanceDownloadState): Promise<InstanceConfig> {
+    console.log(`[Instance Creation] Reanudando descarga de instancia: ${downloadState.instanceName}`);
+    
+    // Verificar que la instancia no esté completa
+    if (downloadState.status === 'completed') {
+      throw new Error('La instancia ya está completa');
+    }
+
+    // Crear configuración desde el estado guardado
+    const config: InstanceCreationConfig = {
+      name: downloadState.instanceName,
+      version: downloadState.mcVersion,
+      loader: downloadState.loader,
+      loaderVersion: downloadState.loaderVersion,
+      instancePath: downloadState.instancePath
+    };
+
+    // Actualizar estado a downloading
+    instanceDownloadPersistenceService.updateProgress(
+      downloadState.id,
+      downloadState.progress,
+      'Reanudando descarga...',
+      downloadState.completedSteps,
+      downloadState.totalSteps
+    );
+
+    // Continuar desde donde se quedó
+    try {
+      return await this.createInstance(config, downloadState.id);
+    } catch (error) {
+      instanceDownloadPersistenceService.markError(downloadState.id, (error as Error).message);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtiene todas las descargas incompletas
+   */
+  getIncompleteDownloads(): InstanceDownloadState[] {
+    return instanceDownloadPersistenceService.getIncompleteDownloads();
   }
 }
 

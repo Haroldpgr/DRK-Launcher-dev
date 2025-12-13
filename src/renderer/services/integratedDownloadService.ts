@@ -12,6 +12,7 @@ export class IntegratedDownloadService {
     name: string;
     version: string;
     loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge';
+    loaderVersion?: string; // IMPORTANTE: Versión del loader (ej: "61.0.2" para Forge)
     javaVersion?: string;
     maxMemory?: number;
     minMemory?: number;
@@ -21,6 +22,20 @@ export class IntegratedDownloadService {
       throw new Error('API de creación de instancias no disponible');
     }
     return await window.api.instance.createFull(payload);
+  }
+
+  async getIncompleteDownloads(): Promise<any[]> {
+    if (!window.api?.instance?.getIncompleteDownloads) {
+      return [];
+    }
+    return await window.api.instance.getIncompleteDownloads() || [];
+  }
+
+  async resumeDownload(downloadId: string): Promise<any> {
+    if (!window.api?.instance?.resumeDownload) {
+      throw new Error('API de reanudación de descargas no disponible');
+    }
+    return await window.api.instance.resumeDownload(downloadId);
   }
 
   // Métodos para el sistema de logs y progreso

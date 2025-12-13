@@ -34,3 +34,4 @@ Thumbs.db
 electron/
 electron-v*.*.*-win32-x64/
 web/
+release/

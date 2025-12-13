@@ -4,6 +4,8 @@ import { Profile, profileService } from '../services/profileService'
 import { instanceProfileService } from '../services/instanceProfileService'
 import CreateInstanceModal from '../components/CreateInstanceModal'
 import InstanceEditModal from '../components/InstanceEditModal'
+import ConfirmationModal from '../components/ConfirmationModal'
+import { notificationService } from '../services/notificationService'
 
 type InstanceType = 'owned' | 'imported' | 'shared';
 
@@ -44,6 +46,8 @@ export default function Instances({ onPlay }: InstancesProps) {
   const [importSource, setImportSource] = useState('')
   const [importType, setImportType] = useState<'link' | 'folder'>('link')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [instanceToDelete, setInstanceToDelete] = useState<Instance | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   // Estado para rastrear si las instancias están listas para jugar
   const [readyStatus, setReadyStatus] = useState<Record<string, boolean>>({});
@@ -182,27 +186,52 @@ export default function Instances({ onPlay }: InstancesProps) {
   }, [selectedProfile]);
 
   const remove = async (id: string) => {
-    // Mostrar confirmación de seguridad
     const instance = instances.find(inst => inst.id === id);
-    if (!instance || !window.confirm(`¿Estás seguro de que quieres eliminar la instancia "${instance.name}"? Esta acción no se puede deshacer y eliminará permanentemente todos los archivos de la instancia.`)) {
-      return; // Cancelar si el usuario no confirma
-    }
+    if (!instance) return;
+    
+    setInstanceToDelete(instance);
+    setShowDeleteModal(true);
+  }
+
+  const confirmDelete = async () => {
+    if (!instanceToDelete) return;
 
     // Verificar que la API esté completamente disponible
     if (!window.api?.instances) {
       setError('Servicio de instancias no disponible aún. Esperando inicialización...');
+      setShowDeleteModal(false);
+      setInstanceToDelete(null);
       return;
     }
 
     try {
       // Desvincular la instancia del perfil antes de eliminarla
-      instanceProfileService.unlinkInstance(id)
+      instanceProfileService.unlinkInstance(instanceToDelete.id)
 
-      await window.api.instances.delete(id)
+      await window.api.instances.delete(instanceToDelete.id)
+      
+      // Mostrar notificación de éxito
+      notificationService.showNotification({
+        type: 'success',
+        title: 'Instancia eliminada',
+        message: `La instancia "${instanceToDelete.name}" ha sido eliminada correctamente.`,
+        duration: 3000
+      });
+      
       autoDetectInstances(); // Recargar instancias después de eliminar
+      setShowDeleteModal(false);
+      setInstanceToDelete(null);
     } catch (err) {
       console.error('Error al eliminar instancia:', err)
       setError(`Error al eliminar instancia: ${(err as Error).message || 'Error desconocido'}`)
+      notificationService.showNotification({
+        type: 'error',
+        title: 'Error al eliminar',
+        message: `No se pudo eliminar la instancia "${instanceToDelete.name}".`,
+        duration: 4000
+      });
+      setShowDeleteModal(false);
+      setInstanceToDelete(null);
     }
   }
 
@@ -729,6 +758,28 @@ export default function Instances({ onPlay }: InstancesProps) {
       onCreated={() => {
         // Refrescar la lista de instancias después de crear una nueva
         autoDetectInstances();
+        // Mostrar notificación de éxito
+        notificationService.showNotification({
+          type: 'success',
+          title: 'Instancia creada',
+          message: 'La instancia se está descargando. Aparecerá cuando termine la descarga.',
+          duration: 4000
+        });
+      }}
+    />
+
+    {/* Modal de confirmación para eliminar */}
+    <ConfirmationModal
+      isOpen={showDeleteModal}
+      title="Eliminar Instancia"
+      message={`¿Estás seguro de que quieres eliminar la instancia "${instanceToDelete?.name}"? Esta acción no se puede deshacer y eliminará permanentemente todos los archivos de la instancia.`}
+      confirmText="Eliminar"
+      cancelText="Cancelar"
+      confirmColor="danger"
+      onConfirm={confirmDelete}
+      onCancel={() => {
+        setShowDeleteModal(false);
+        setInstanceToDelete(null);
       }}
     />
 

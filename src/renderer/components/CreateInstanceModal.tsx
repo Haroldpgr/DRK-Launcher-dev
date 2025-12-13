@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { integratedDownloadService } from '../services/integratedDownloadService';
 import { profileService } from '../services/profileService';
 import { instanceProfileService } from '../services/instanceProfileService';
+import { JavaConfigService } from '../../services/javaConfigService';
 import '../components/slider.css';
 
 interface CreateInstanceModalProps {
@@ -51,34 +52,68 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
   const [javaArgs, setJavaArgs] = useState('');
   const [javaPath, setJavaPath] = useState('');
   const [javaVersion, setJavaVersion] = useState<string>('17');
+  const [canCreateInstance, setCanCreateInstance] = useState(false);
 
   // Estados para progreso
   const [currentProgress, setCurrentProgress] = useState<ProgressStatus | null>(null);
   const [overallProgress, setOverallProgress] = useState<{ progress: number; statusText: string; activeOperations: number } | null>(null);
 
-  // Cargar la memoria total del sistema
+  // Cargar la memoria total del sistema y configurar Java estándar
   useEffect(() => {
     const loadSystemMemory = async () => {
       try {
-        if (window.api?.system?.getTotalMemory) {
-          const memory = await window.api.system.getTotalMemory();
+        const api = (window as any).api;
+        if (api?.system?.getTotalMemory) {
+          const memory = await api.system.getTotalMemory();
           const memoryInMB = Math.floor(memory / (1024 * 1024));
           setTotalMemory(memoryInMB);
-          setMinMemory(Math.min(2048, Math.floor(memoryInMB / 4)));
-          setMaxMemory(Math.min(8192, Math.floor(memoryInMB / 2)));
+          
+          // Usar configuración recomendada según el loader
+          const recommended = JavaConfigService.getRecommendedMemory(loaderType, memoryInMB);
+          setMinMemory(recommended.min);
+          setMaxMemory(recommended.max);
         } else {
-          const estimatedMemory = Math.min(16384, Math.max(4096, navigator.deviceMemory ? navigator.deviceMemory * 1024 : 8192));
+          const deviceMemory = (navigator as any).deviceMemory;
+          const estimatedMemory = Math.min(16384, Math.max(4096, deviceMemory ? deviceMemory * 1024 : 8192));
           setTotalMemory(estimatedMemory);
+          const recommended = JavaConfigService.getRecommendedMemory(loaderType, estimatedMemory);
+          setMinMemory(recommended.min);
+          setMaxMemory(recommended.max);
         }
       } catch (error) {
         console.warn('No se pudo obtener la memoria total del sistema:', error);
-        const memoryGuess = navigator.deviceMemory ? navigator.deviceMemory * 1024 : 8192;
+        const deviceMemory = (navigator as any).deviceMemory;
+        const memoryGuess = deviceMemory ? deviceMemory * 1024 : 8192;
         setTotalMemory(memoryGuess);
+        const recommended = JavaConfigService.getRecommendedMemory(loaderType, memoryGuess);
+        setMinMemory(recommended.min);
+        setMaxMemory(recommended.max);
       }
     };
 
     loadSystemMemory();
-  }, []);
+  }, [loaderType]);
+
+  // Actualizar versión de Java recomendada cuando cambia el loader o versión MC
+  useEffect(() => {
+    if (mcVersion) {
+      const recommendedJava = JavaConfigService.getRecommendedJavaVersion(loaderType, mcVersion);
+      setJavaVersion(recommendedJava);
+      
+      // Configurar parámetros Java estándar
+      const standardArgs = JavaConfigService.getStandardJvmArgs(loaderType, maxMemory);
+      setJavaArgs(standardArgs.join(' '));
+    }
+  }, [loaderType, mcVersion, maxMemory]);
+
+  // Verificar si se puede crear la instancia
+  useEffect(() => {
+    const canCreate = 
+      instanceName.trim() !== '' &&
+      mcVersion !== '' &&
+      (loaderType === 'vanilla' || loaderVersion !== '');
+    setCanCreateInstance(canCreate);
+  }, [instanceName, mcVersion, loaderType, loaderVersion]);
 
   // Cargar versiones cuando se abra el modal
   useEffect(() => {
@@ -267,15 +302,20 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
         }
       }
 
+      // Obtener parámetros Java estándar para el loader
+      const standardJvmArgs = JavaConfigService.getStandardJvmArgs(loaderType, maxMemory);
+      
       // Crear la instancia con el nuevo servicio
+      console.log(`[CreateInstanceModal] Creando instancia con loaderVersion: ${finalLoaderVersion || 'NO ESPECIFICADA'}`);
       const createdInstance = await integratedDownloadService.createInstance({
         name: instanceName,
         version: mcVersion,
         loader: loaderType,
-        javaVersion: javaVersion || '17',
+        loaderVersion: finalLoaderVersion, // IMPORTANTE: Pasar la versión del loader
+        javaVersion: javaVersion || JavaConfigService.getRecommendedJavaVersion(loaderType, mcVersion),
         maxMemory,
         minMemory,
-        jvmArgs: javaArgs ? javaArgs.split(' ') : undefined
+        jvmArgs: standardJvmArgs // Usar parámetros estándar, no los del usuario
       });
 
       // Enlazar la instancia recién creada con el perfil actual del usuario
@@ -368,50 +408,92 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                 </div>
               )}
 
-              {/* Indicador de progreso global */}
-              {overallProgress && (
-                <div className="mb-6 bg-gray-800/50 p-4 rounded-xl border border-gray-700/50">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-medium text-gray-300">Progreso general:</span>
-                    <span className="text-sm font-semibold text-blue-400">{Math.round(overallProgress.progress * 100)}%</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2.5">
-                    <div 
-                      className="bg-gradient-to-r from-blue-500 to-purple-600 h-2.5 rounded-full transition-all duration-300 ease-out" 
-                      style={{ width: `${overallProgress.progress * 100}%` }}
-                    ></div>
-                  </div>
-                  <div className="mt-2 text-xs text-gray-400 flex justify-between">
-                    <span>{overallProgress.statusText}</span>
-                    <span>{overallProgress.activeOperations} operaciones activas</span>
-                  </div>
-                </div>
-              )}
+              {/* Indicador de progreso global - Solo mostrar cuando hay descarga activa */}
+              <AnimatePresence>
+                {overallProgress && overallProgress.progress > 0 && overallProgress.activeOperations > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="mb-6 bg-gradient-to-r from-blue-900/30 to-purple-900/30 p-4 rounded-xl border border-blue-700/50 shadow-lg shadow-blue-500/10"
+                  >
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-medium text-gray-200 flex items-center gap-2">
+                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                        Progreso general:
+                      </span>
+                      <span className="text-sm font-semibold text-blue-400">{Math.round(overallProgress.progress * 100)}%</span>
+                    </div>
+                    <div className="w-full bg-gray-700/50 rounded-full h-3 overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${overallProgress.progress * 100}%` }}
+                        transition={{ duration: 0.5, ease: "easeOut" }}
+                        className="bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-600 h-3 rounded-full relative overflow-hidden"
+                      >
+                        <motion.div
+                          animate={{ x: ['-100%', '100%'] }}
+                          transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                        />
+                      </motion.div>
+                    </div>
+                    <div className="mt-2 text-xs text-gray-300 flex justify-between">
+                      <span>{overallProgress.statusText}</span>
+                      <span className="text-blue-400">{overallProgress.activeOperations} operaciones activas</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              {/* Estado de progreso actual */}
-              {currentProgress && currentProgress.status !== 'completed' && currentProgress.status !== 'error' && (
-                <div className="mb-6 bg-blue-900/20 p-3 rounded-lg border border-blue-700/50">
-                  <div className="flex items-center text-blue-300 text-sm">
-                    <svg className="animate-spin -ml-1 mr-3 h-4 w-4 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span className="font-medium">{currentProgress.target}</span>
-                  </div>
-                  <div className="mt-1 text-xs text-blue-400">
-                    {currentProgress.details || currentProgress.operation}
-                  </div>
-                  <div className="mt-2 w-full bg-blue-800/50 rounded-full h-1.5">
-                    <div 
-                      className="bg-blue-500 h-1.5 rounded-full transition-all duration-300 ease-out" 
-                      style={{ width: `${currentProgress.progress * 100}%` }}
-                    ></div>
-                  </div>
-                  <div className="mt-1 text-xs text-blue-300 text-right">
-                    {currentProgress.current} / {currentProgress.total}
-                  </div>
-                </div>
-              )}
+              {/* Estado de progreso actual - Solo mostrar cuando hay descarga activa */}
+              <AnimatePresence>
+                {currentProgress && currentProgress.status !== 'completed' && currentProgress.status !== 'error' && currentProgress.progress > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.3 }}
+                    className="mb-6 bg-gradient-to-br from-blue-900/20 to-indigo-900/20 p-4 rounded-xl border border-blue-700/50 shadow-lg"
+                  >
+                    <div className="flex items-center text-blue-200 text-sm mb-2">
+                      <motion.svg
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                        className="mr-3 h-5 w-5 text-blue-400"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </motion.svg>
+                      <span className="font-medium">{currentProgress.target}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-blue-300 mb-3">
+                      {currentProgress.details || currentProgress.operation}
+                    </div>
+                    <div className="w-full bg-blue-900/30 rounded-full h-2.5 overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${currentProgress.progress * 100}%` }}
+                        transition={{ duration: 0.5, ease: "easeOut" }}
+                        className="bg-gradient-to-r from-blue-500 to-cyan-500 h-2.5 rounded-full relative"
+                      >
+                        <motion.div
+                          animate={{ x: ['-100%', '100%'] }}
+                          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                        />
+                      </motion.div>
+                    </div>
+                    <div className="mt-2 text-xs text-blue-300 text-right font-medium">
+                      {currentProgress.current} / {currentProgress.total}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               <form onSubmit={handleSubmit}>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -443,7 +525,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                       </label>
                       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                         {(['vanilla', 'fabric', 'forge', 'quilt', 'neoforge'] as const).map(type => (
-                          <button
+                          <motion.button
                             key={type}
                             type="button"
                             onClick={() => {
@@ -453,7 +535,16 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                                 setLoaderVersion('');
                               }
                             }}
-                            className={`py-2 px-1 rounded-lg border transition-all duration-300 transform hover:scale-105 min-h-[50px] flex flex-col justify-center items-center ${
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            animate={{
+                              scale: loaderType === type ? 1.05 : 1,
+                              boxShadow: loaderType === type 
+                                ? '0 10px 25px rgba(59, 130, 246, 0.4)' 
+                                : '0 0 0 rgba(0, 0, 0, 0)'
+                            }}
+                            transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                            className={`py-2 px-1 rounded-lg border transition-all duration-300 min-h-[50px] flex flex-col justify-center items-center ${
                               loaderType === type
                                 ? 'bg-gradient-to-br from-blue-600 to-purple-600 border-blue-500 text-white shadow-lg shadow-blue-500/30'
                                 : 'bg-gray-700/50 border-gray-600/50 text-gray-300 hover:bg-gray-600/50 disabled:opacity-50'
@@ -461,7 +552,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                             disabled={loading}
                           >
                             <div className="text-[0.65rem] sm:text-xs font-medium text-center leading-tight">{type === 'neoforge' ? 'Neo\nForge' : type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                          </button>
+                          </motion.button>
                         ))}
                       </div>
                     </div>
@@ -598,47 +689,22 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
 
                             <div>
                               <label className="block text-sm font-medium text-gray-300 mb-2">
-                                Versión de Java
+                                Versión de Java (Configuración Automática)
                               </label>
-                              <select
-                                value={javaVersion}
-                                onChange={(e) => setJavaVersion(e.target.value)}
-                                className="w-full px-3 py-2 bg-gray-600/50 border border-gray-500/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                                disabled={loading}
-                              >
-                                <option value="8">Java 8</option>
-                                <option value="11">Java 11</option>
-                                <option value="17">Java 17</option>
-                                <option value="21">Java 21</option>
-                              </select>
+                              <div className="w-full px-3 py-2 bg-gray-600/30 border border-gray-500/30 rounded-lg text-gray-400 text-sm">
+                                {javaVersion} (Recomendada para {loaderType === 'vanilla' ? 'Vanilla' : loaderType === 'fabric' ? 'Fabric' : loaderType === 'forge' ? 'Forge' : loaderType === 'quilt' ? 'Quilt' : 'NeoForge'})
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1">La versión de Java se configura automáticamente según el loader seleccionado</p>
                             </div>
 
                             <div>
                               <label className="block text-sm font-medium text-gray-300 mb-2">
-                                Parámetros de Java
+                                Parámetros de Java (Configuración Automática)
                               </label>
-                              <input
-                                type="text"
-                                value={javaArgs}
-                                onChange={(e) => setJavaArgs(e.target.value)}
-                                className="w-full px-3 py-2 bg-gray-600/50 border border-gray-500/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                                placeholder="-XX:+UseG1GC -Dfml.earlyprogresswindow=false"
-                                disabled={loading}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium text-gray-300 mb-2">
-                                Ruta de Java (opcional)
-                              </label>
-                              <input
-                                type="text"
-                                value={javaPath}
-                                onChange={(e) => setJavaPath(e.target.value)}
-                                className="w-full px-3 py-2 bg-gray-600/50 border border-gray-500/50 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                                placeholder="C:/Program Files/Java/jdk/bin/java.exe"
-                                disabled={loading}
-                              />
+                              <div className="w-full px-3 py-2 bg-gray-600/30 border border-gray-500/30 rounded-lg text-gray-400 text-sm max-h-20 overflow-y-auto">
+                                {javaArgs || 'Configurando parámetros optimizados...'}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1">Los parámetros se configuran automáticamente para optimizar el rendimiento</p>
                             </div>
                           </motion.div>
                         )}
@@ -656,9 +722,17 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                   >
                     Cancelar
                   </button>
-                  <button
+                  <motion.button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || !canCreateInstance}
+                    whileHover={canCreateInstance && !loading ? { scale: 1.05 } : {}}
+                    whileTap={canCreateInstance && !loading ? { scale: 0.95 } : {}}
+                    animate={{
+                      opacity: canCreateInstance ? 1 : 0.5,
+                      boxShadow: canCreateInstance && !loading 
+                        ? '0 10px 25px rgba(59, 130, 246, 0.4)' 
+                        : '0 0 0 rgba(0, 0, 0, 0)'
+                    }}
                     className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl transition-all duration-300 disabled:opacity-50 font-medium flex items-center shadow-lg shadow-blue-500/20"
                   >
                     {loading && (
@@ -670,8 +744,12 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                     <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                     </svg>
-                    {loading ? 'Creando y descargando...' : 'Crear Instancia'}
-                  </button>
+                    {loading 
+                      ? 'Creando y descargando...' 
+                      : canCreateInstance
+                        ? `Crear Instancia de ${loaderType === 'vanilla' ? 'Vanilla' : loaderType === 'fabric' ? 'Fabric' : loaderType === 'forge' ? 'Forge' : loaderType === 'quilt' ? 'Quilt' : 'NeoForge'}`
+                        : 'Completa los campos requeridos'}
+                  </motion.button>
                 </div>
               </form>
             </div>

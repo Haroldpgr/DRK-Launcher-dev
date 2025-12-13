@@ -52,7 +52,8 @@ export class MinecraftDownloadService {
    */
   public async validateAndDownloadAssets(
     version: string,
-    onProgress?: (current: number, total: number, message: string) => void
+    onProgress?: (current: number, total: number, message: string) => void,
+    loaderName?: string
   ): Promise<boolean> {
     try {
       const versionJsonPath = await this.downloadVersionMetadata(version);
@@ -160,7 +161,7 @@ export class MinecraftDownloadService {
         onProgress?.(0, missingAssets, downloadStartMessage);
 
         // Descargar assets en paralelo con límite de concurrencia para mejorar velocidad
-        const CONCURRENT_DOWNLOADS = 45; // Número de descargas simultáneas
+        const CONCURRENT_DOWNLOADS = 70; // Número de descargas simultáneas
         let downloadedCount = 0;
         let failedCount = 0;
         
@@ -189,9 +190,10 @@ export class MinecraftDownloadService {
               const progressMessage = `Descargando assets... ${currentCount}/${missingAssets} (${Math.floor((currentCount / missingAssets) * 100)}%)`;
               onProgress?.(currentCount, missingAssets, progressMessage);
               
-              // Solo loguear cada 50 assets o al final para no saturar la consola
-              if (currentCount % 50 === 0 || currentCount === missingAssets) {
-                console.log(`Asset descargado y verificado: ${currentCount}/${missingAssets} (${Math.floor((currentCount / missingAssets) * 100)}%)`);
+              // Solo loguear cada 100 assets o al final para no saturar la consola (descargas más rápidas con 70 simultáneas)
+              if (currentCount % 100 === 0 || currentCount === missingAssets) {
+                const loaderPrefix = loaderName ? `[${loaderName}] ` : '';
+                console.log(`${loaderPrefix}Asset descargado y verificado: ${currentCount}/${missingAssets} (${Math.floor((currentCount / missingAssets) * 100)}%)`);
               }
               return true;
             } else {
@@ -381,18 +383,84 @@ export class MinecraftDownloadService {
     
     console.log(`Descargando ${libraries.length} librerías para la versión ${version}...`);
     
+    // Filtrar librerías que necesitan descarga
+    const librariesToDownload: any[] = [];
     for (const library of libraries) {
-      await this.downloadLibrary(library);
+      // Verificar reglas de compatibilidad
+      if (library.rules) {
+        const allowed = this.isLibraryAllowed(library.rules);
+        if (!allowed) {
+          continue;
+        }
+      }
+
+      const downloads = library.downloads;
+      if (!downloads || !downloads.artifact) {
+        continue;
+      }
+
+      const artifact = downloads.artifact;
+      const libraryPath = this.getLibraryPath(library.name);
+      
+      // Solo añadir si no existe
+      if (!fs.existsSync(libraryPath)) {
+        librariesToDownload.push(library);
+      }
     }
     
-    console.log(`Descarga de librerías para la versión ${version} completada`);
+    if (librariesToDownload.length === 0) {
+      console.log(`Todas las librerías para la versión ${version} ya están descargadas`);
+      return;
+    }
+    
+    // Descargar usando el servicio de cola (que maneja concurrencia y reintentos)
+    // El servicio de cola procesa 3 descargas a la vez para evitar sobrecarga
+    let downloaded = 0;
+    let failed = 0;
+    const failedLibraries: any[] = [];
+    
+    // Agregar todas las descargas a la cola
+    const downloadPromises = librariesToDownload.map(async (library) => {
+      try {
+        await this.downloadLibrary(library);
+        downloaded++;
+      } catch (error) {
+        failed++;
+        failedLibraries.push(library);
+        console.error(`Error al descargar librería ${library.name}:`, error);
+      }
+    });
+    
+    // Esperar a que todas las descargas se completen
+    await Promise.allSettled(downloadPromises);
+    
+    // Reintentar descargas fallidas (máximo 2 reintentos)
+    if (failedLibraries.length > 0) {
+      console.log(`Reintentando ${failedLibraries.length} librerías fallidas...`);
+      const retryPromises = failedLibraries.map(async (library) => {
+        try {
+          await this.downloadLibrary(library);
+          downloaded++;
+          failed--;
+        } catch (error) {
+          console.error(`Error al reintentar librería ${library.name}:`, error);
+        }
+      });
+      
+      await Promise.allSettled(retryPromises);
+    }
+    
+    // Reportar progreso final
+    console.log(`Progreso librerías: ${librariesToDownload.length}/${librariesToDownload.length} (${downloaded} descargadas, ${failed} fallidas)`);
+    
+    console.log(`Descarga de librerías para la versión ${version} completada: ${downloaded} nuevas, ${libraries.length - librariesToDownload.length} ya existían, ${failed} fallidas`);
   }
 
   /**
    * Descarga una librería específica
    * @param library Objeto de librería desde el version.json
    */
-  private async downloadLibrary(library: any): Promise<void> {
+  private async downloadLibrary(library: any, retryCount: number = 0): Promise<void> {
     // Verificar reglas de compatibilidad
     if (library.rules) {
       const allowed = this.isLibraryAllowed(library.rules);
@@ -414,10 +482,36 @@ export class MinecraftDownloadService {
     
     this.ensureDir(libraryDir);
 
-    // Verificar si la librería ya existe
+    // Verificar si la librería ya existe y es válida
     if (fs.existsSync(libraryPath)) {
-      console.log(`Librería ${library.name} ya existe, omitiendo...`);
-      return;
+      // Verificar integridad si hay hash esperado
+      const expectedHash = artifact.sha1 || library?.downloads?.artifact?.sha1;
+      if (expectedHash) {
+        try {
+          const crypto = require('crypto');
+          const fileBuffer = fs.readFileSync(libraryPath);
+          const hash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+          if (hash.toLowerCase() === expectedHash.toLowerCase()) {
+            console.log(`Librería ${library.name} ya existe y es válida, omitiendo...`);
+            return;
+          } else {
+            // Hash no coincide, eliminar y redescargar
+            console.log(`Librería ${library.name} existe pero hash no coincide, redescargando...`);
+            fs.unlinkSync(libraryPath);
+          }
+        } catch (hashError) {
+          // Si hay error al verificar hash, redescargar
+          console.log(`Error al verificar hash de ${library.name}, redescargando...`);
+          try {
+            fs.unlinkSync(libraryPath);
+          } catch (unlinkError) {
+            // Ignorar error si no se puede eliminar
+          }
+        }
+      } else {
+        console.log(`Librería ${library.name} ya existe, omitiendo...`);
+        return;
+      }
     }
 
     try {
@@ -426,7 +520,14 @@ export class MinecraftDownloadService {
       await this.downloadFile(artifact.url, libraryPath, expectedHash, 'sha1');
       console.log(`Librería ${library.name} descargada`);
     } catch (error) {
+      // Si falla y no hemos alcanzado el máximo de reintentos, reintentar
+      if (retryCount < 2) {
+        console.log(`Reintentando descarga de ${library.name} (intento ${retryCount + 1}/2)...`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Esperar antes de reintentar
+        return this.downloadLibrary(library, retryCount + 1);
+      }
       console.error(`Error al descargar librería ${library.name}:`, error);
+      throw error;
     }
   }
 
@@ -749,8 +850,8 @@ export class MinecraftDownloadService {
 
     console.log(`Iniciando descarga de ${totalAssets} assets para la versión ${version}...`);
 
-    // Procesar los assets en lotes para evitar sobrecargar el sistema
-    const batchSize = 5; // Reducir el tamaño del lote para mayor estabilidad
+    // Procesar los assets en lotes para mayor velocidad (70 simultáneas)
+    const batchSize = 70; // Aumentado para descargas más rápidas
     let downloadedCount = 0;
     let verifiedCount = 0;
     const assetsEntries = Object.entries(assetsObjects as any);

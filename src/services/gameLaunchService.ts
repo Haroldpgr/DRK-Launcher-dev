@@ -23,6 +23,8 @@ export type LaunchOptions = {
   loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge' | null;
   loaderVersion?: string;
   instanceConfig: InstanceConfig;
+  onData?: (chunk: string) => void;
+  onExit?: (code: number | null) => void;
 };
 
 /**
@@ -43,6 +45,32 @@ interface ForgeLaunchProfile {
   };
   assetIndex: string;
   assets: string;
+}
+
+/**
+ * Metadatos de instancia de Forge/NeoForge
+ */
+interface ForgeInstanceMetadata {
+  versionName: string;
+  mainClass: string;
+  libraries: Array<{
+    name: string;
+    path: string;
+    url: string;
+    mavenPath: string;
+  }>;
+  versionJsonPath: string;
+}
+
+/**
+ * Sesión de usuario para lanzamiento
+ */
+interface UserSession {
+  username: string;
+  uuid: string;
+  accessToken: string;
+  clientId?: string;
+  xuid?: string;
 }
 
 /**
@@ -752,10 +780,15 @@ export class GameLaunchService {
       forgeVersionData = JSON.parse(fs.readFileSync(forgeVersionJsonPath, 'utf-8'));
       logProgressService.info(`Version.json de Forge encontrado, usando existente`);
     } else {
-      // Construir version.json de Forge desde Maven
+      // Construir version.json de Forge desde Maven usando installForgeLoader
       logProgressService.info(`Construyendo version.json de Forge desde Maven...`);
-      await this.buildForgeVersionJsonFromMaven(minecraftVersion, forgeVersion);
-      forgeVersionData = JSON.parse(fs.readFileSync(forgeVersionJsonPath, 'utf-8'));
+      try {
+        await this.installForgeLoader(minecraftVersion, 'forge', forgeVersion);
+        forgeVersionData = JSON.parse(fs.readFileSync(forgeVersionJsonPath, 'utf-8'));
+      } catch (error) {
+        logProgressService.error(`Error al instalar Forge desde Maven: ${error}`);
+        throw error;
+      }
     }
     
     // 3. Normalizar el JSON: eliminar duplicados y referencias a universal.jar
@@ -848,86 +881,153 @@ export class GameLaunchService {
   }
 
   /**
-   * Construye el version.json de Forge desde Maven sin usar instalador
+   * Instala el loader de Forge/NeoForge descargando dependencias desde Maven
+   * FASE DE INSTALACIÓN: Resolver dependencias Maven
    */
-  private async buildForgeVersionJsonFromMaven(
+  async installForgeLoader(
     mcVersion: string,
-    forgeVersion: string
-  ): Promise<void> {
+    loaderType: 'forge' | 'neoforge',
+    loaderVersion: string
+  ): Promise<ForgeInstanceMetadata> {
+    console.log(`[${loaderType}] installForgeLoader llamado: MC ${mcVersion}, Loader ${loaderVersion}`);
     const launcherDataPath = getLauncherDataPath();
-    const versionName = `${mcVersion}-forge-${forgeVersion}`;
+    const versionName = `${mcVersion}-${loaderType}-${loaderVersion}`;
     const versionDir = path.join(launcherDataPath, 'versions', versionName);
     this.ensureDir(versionDir);
     
     const versionJsonPath = path.join(versionDir, `${versionName}.json`);
+    console.log(`[${loaderType}] Version.json se guardará en: ${versionJsonPath}`);
     
-    // Descargar version.json base de Minecraft
+    // Paso 1: Resolver Metadatos - Descargar y analizar el POM
+    console.log(`[${loaderType}] Paso 1: Descargando POM desde Maven...`);
+    logProgressService.info(`[${loaderType}] Descargando POM desde Maven...`);
+    const mavenBaseUrl = loaderType === 'forge' 
+      ? 'https://maven.minecraftforge.net'
+      : 'https://maven.neoforged.net';
+    
+    const groupId = loaderType === 'forge' ? 'net.minecraftforge' : 'net.neoforged';
+    const artifactId = loaderType === 'forge' ? 'forge' : 'neoforge';
+    
+    // Normalizar loaderVersion: puede venir como "1.21.11-61.0.2" o solo "61.0.2"
+    let normalizedLoaderVersion = loaderVersion;
+    if (loaderVersion.includes('-')) {
+      // Si tiene formato "1.21.11-61.0.2", extraer solo la parte de Forge
+      const parts = loaderVersion.split('-');
+      if (parts.length > 1) {
+        normalizedLoaderVersion = parts[parts.length - 1]; // Tomar la última parte
+      }
+    }
+    
+    const pomUrl = `${mavenBaseUrl}/${groupId.replace(/\./g, '/')}/${artifactId}/${normalizedLoaderVersion}/${artifactId}-${normalizedLoaderVersion}.pom`;
+    
+    let pomText: string;
+    try {
+      const pomResponse = await fetch(pomUrl, {
+        headers: { 'User-Agent': 'DRK-Launcher/1.0' }
+      });
+      
+      if (!pomResponse.ok) {
+        throw new Error(`No se pudo descargar POM (${pomResponse.status})`);
+      }
+      
+      pomText = await pomResponse.text();
+      console.log(`[${loaderType}] ✓ POM descargado exitosamente (${pomText.length} bytes)`);
+      logProgressService.info(`[${loaderType}] POM descargado exitosamente`);
+    } catch (error) {
+      console.error(`[${loaderType}] ✗ Error al descargar POM: ${error}`);
+      logProgressService.error(`[${loaderType}] Error al descargar POM: ${error}`);
+      throw error;
+    }
+    
+    // Paso 2: Analizar POM y extraer dependencias
+    console.log(`[${loaderType}] Paso 2: Analizando POM y extrayendo dependencias...`);
+    const dependencies = this.parsePomDependencies(pomText, loaderType, loaderVersion);
+    console.log(`[${loaderType}] ✓ ${dependencies.length} dependencias encontradas en el POM`);
+    logProgressService.info(`[${loaderType}] ${dependencies.length} dependencias encontradas en POM`);
+    
+    // Paso 3: Descargar version.json base de Minecraft (Vanilla)
     const baseVersionJsonPath = await minecraftDownloadService.downloadVersionMetadata(mcVersion);
     const baseVersionData = JSON.parse(fs.readFileSync(baseVersionJsonPath, 'utf-8'));
     
-    // Librerías conocidas de Forge (se pueden expandir parseando el POM)
-    const forgeLibraries: any[] = [
-      {
-        name: `net.minecraftforge:forge:${forgeVersion}`,
-        downloads: {
-          artifact: {
-            path: `net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-client.jar`,
-            url: `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-client.jar`
-          }
-        }
-      },
-      {
-        name: 'cpw.mods:modlauncher:9.1.3',
-        downloads: {
-          artifact: {
-            path: 'cpw/mods/modlauncher/9.1.3/modlauncher-9.1.3.jar',
-            url: 'https://maven.minecraftforge.net/cpw/mods/modlauncher/9.1.3/modlauncher-9.1.3.jar'
-          }
-        }
-      },
-      {
-        name: `net.minecraftforge:fmlcore:${forgeVersion}`,
-        downloads: {
-          artifact: {
-            path: `net/minecraftforge/fmlcore/${forgeVersion}/fmlcore-${forgeVersion}.jar`,
-            url: `https://maven.minecraftforge.net/net/minecraftforge/fmlcore/${forgeVersion}/fmlcore-${forgeVersion}.jar`
-          }
-        }
-      },
-      {
-        name: `net.minecraftforge:fmlloader:${forgeVersion}`,
-        downloads: {
-          artifact: {
-            path: `net/minecraftforge/fmlloader/${forgeVersion}/fmlloader-${forgeVersion}.jar`,
-            url: `https://maven.minecraftforge.net/net/minecraftforge/fmlloader/${forgeVersion}/fmlloader-${forgeVersion}.jar`
-          }
-        }
-      },
-      {
-        name: 'cpw.mods:bootstraplauncher:2.1.7',
-        downloads: {
-          artifact: {
-            path: 'cpw/mods/bootstraplauncher/2.1.7/bootstraplauncher-2.1.7.jar',
-            url: 'https://maven.minecraftforge.net/cpw/mods/bootstraplauncher/2.1.7/bootstraplauncher-2.1.7.jar'
-          }
-        }
-      },
-      {
-        name: 'cpw.mods:securejarhandler:2.1.10',
-        downloads: {
-          artifact: {
-            path: 'cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar',
-            url: 'https://maven.minecraftforge.net/cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar'
-          }
-        }
-      }
-    ];
+    // Paso 4: Descargar artefactos principales
+    // Usar normalizedLoaderVersion ya calculado arriba
+    const mainArtifactPath = `${groupId.replace(/\./g, '/')}/${artifactId}/${normalizedLoaderVersion}/${artifactId}-${normalizedLoaderVersion}-client.jar`;
+    const mainArtifactUrl = `${mavenBaseUrl}/${mainArtifactPath}`;
+    const mainArtifactLocalPath = path.join(launcherDataPath, 'libraries', mainArtifactPath);
     
-    // Combinar librerías evitando duplicados
+    logProgressService.info(`[${loaderType}] Descargando JAR principal: ${mainArtifactUrl}`);
+    try {
+      await this.downloadArtifact(mainArtifactUrl, mainArtifactLocalPath);
+    } catch (error) {
+      logProgressService.error(`[${loaderType}] Error crítico al descargar JAR principal: ${error}`);
+      throw error;
+    }
+    
+    // Paso 5: Descargar todas las dependencias del POM
+    logProgressService.info(`[${loaderType}] Descargando ${dependencies.length} dependencias...`);
+    const downloadedLibraries: Array<{ name: string; path: string; url: string; mavenPath: string }> = [];
+    
+    // Añadir el JAR principal
+    downloadedLibraries.push({
+      name: `${groupId}:${artifactId}:${normalizedLoaderVersion}`,
+      path: mainArtifactPath,
+      url: mainArtifactUrl,
+      mavenPath: mainArtifactPath
+    });
+    
+    // Descargar dependencias en paralelo (aumentado para mayor velocidad)
+    console.log(`[${loaderType}] Paso 3: Descargando ${dependencies.length} dependencias (70 simultáneas)...`);
+    logProgressService.info(`[${loaderType}] Descargando ${dependencies.length} dependencias (70 simultáneas)...`);
+    const CONCURRENT_DOWNLOADS = 70;
+    let downloadedCount = 0;
+    let failedCount = 0;
+    
+    for (let i = 0; i < dependencies.length; i += CONCURRENT_DOWNLOADS) {
+      const batch = dependencies.slice(i, i + CONCURRENT_DOWNLOADS);
+      
+      const results = await Promise.allSettled(
+        batch.map(async (dep) => {
+          try {
+            const libPath = path.join(launcherDataPath, 'libraries', dep.mavenPath);
+            if (!fs.existsSync(libPath)) {
+              await this.downloadArtifact(dep.url, libPath);
+              downloadedCount++;
+            } else {
+              // Ya existe, verificar que sea válido
+              const stats = fs.statSync(libPath);
+              if (stats.size === 0) {
+                // Archivo corrupto, re-descargar
+                fs.unlinkSync(libPath);
+                await this.downloadArtifact(dep.url, libPath);
+                downloadedCount++;
+              }
+            }
+            downloadedLibraries.push(dep);
+            return { success: true, dep };
+          } catch (err) {
+            failedCount++;
+            logProgressService.warning(`[${loaderType}] Error al descargar ${dep.name}: ${err}`);
+            return { success: false, dep, error: err };
+          }
+        })
+      );
+      
+      // Reportar progreso
+      const currentProgress = Math.min(i + CONCURRENT_DOWNLOADS, dependencies.length);
+      if (currentProgress % 20 === 0 || currentProgress >= dependencies.length) {
+        console.log(`[${loaderType}] Progreso descarga: ${currentProgress}/${dependencies.length} (${downloadedCount} nuevas, ${failedCount} fallidas)`);
+        logProgressService.info(`[${loaderType}] Progreso: ${currentProgress}/${dependencies.length} dependencias (${downloadedCount} descargadas, ${failedCount} fallidas)`);
+      }
+    }
+    
+    console.log(`[${loaderType}] ✓ Descarga completada: ${downloadedCount} nuevas, ${downloadedLibraries.length - downloadedCount} existentes, ${failedCount} fallidas`);
+    logProgressService.info(`[${loaderType}] Descarga completada: ${downloadedCount} nuevas, ${downloadedLibraries.length - downloadedCount} existentes, ${failedCount} fallidas`);
+    
+    // Paso 6: Combinar librerías de Vanilla y Forge/NeoForge
     const allLibraries: any[] = [];
     const seenNames = new Set<string>();
     
-    // Añadir librerías base de Minecraft
+    // Añadir librerías de Vanilla
     if (baseVersionData.libraries) {
       for (const lib of baseVersionData.libraries) {
         if (lib.name && !seenNames.has(lib.name)) {
@@ -937,15 +1037,23 @@ export class GameLaunchService {
       }
     }
     
-    // Añadir librerías de Forge
-    for (const lib of forgeLibraries) {
-      if (lib.name && !seenNames.has(lib.name)) {
-        allLibraries.push(lib);
-        seenNames.add(lib.name);
+    // Añadir librerías de Forge/NeoForge desde POM
+    for (const dep of downloadedLibraries) {
+      if (!seenNames.has(dep.name)) {
+        allLibraries.push({
+          name: dep.name,
+          downloads: {
+            artifact: {
+              path: dep.mavenPath,
+              url: dep.url
+            }
+          }
+        });
+        seenNames.add(dep.name);
       }
     }
     
-    // Construir version.json final
+    // Paso 7: Generar JSON Local
     const forgeVersionData = {
       id: versionName,
       time: new Date().toISOString(),
@@ -965,72 +1073,307 @@ export class GameLaunchService {
     };
     
     fs.writeFileSync(versionJsonPath, JSON.stringify(forgeVersionData, null, 2));
-    logProgressService.info(`Version.json de Forge construido: ${versionJsonPath}`);
+    console.log(`[${loaderType}] ✓ Version.json generado exitosamente: ${versionJsonPath}`);
+    console.log(`[${loaderType}] ✓ Total de librerías en version.json: ${allLibraries.length}`);
+    logProgressService.info(`[${loaderType}] Version.json generado: ${versionJsonPath}`);
+    
+    return {
+      versionName,
+      mainClass: 'cpw.mods.modlauncher.Launcher',
+      libraries: downloadedLibraries,
+      versionJsonPath
+    };
   }
 
   /**
-   * Clasifica librerías en module-path y classpath (modelo Modrinth/JPMS)
+   * Parsea el POM y extrae las dependencias
    */
-  private partitionLibraries(
+  private parsePomDependencies(
+    pomText: string,
+    loaderType: 'forge' | 'neoforge',
+    loaderVersion: string
+  ): Array<{ name: string; path: string; url: string; mavenPath: string }> {
+    const dependencies: Array<{ name: string; path: string; url: string; mavenPath: string }> = [];
+    const mavenBaseUrl = loaderType === 'forge' 
+      ? 'https://maven.minecraftforge.net'
+      : 'https://maven.neoforged.net';
+    
+    // Normalizar loaderVersion: puede venir como "1.21.11-61.0.2" o solo "61.0.2"
+    let normalizedLoaderVersion = loaderVersion;
+    if (loaderVersion.includes('-')) {
+      // Si tiene formato "1.21.11-61.0.2", extraer solo la parte de Forge
+      const parts = loaderVersion.split('-');
+      if (parts.length > 1) {
+        normalizedLoaderVersion = parts[parts.length - 1]; // Tomar la última parte
+      }
+    }
+    
+    // Extraer dependencias del POM usando regex mejorado
+    // Maneja espacios, comentarios y propiedades Maven básicas
+    const dependencyRegex = /<dependency>[\s\S]*?<groupId>\s*([^<\s]+)\s*<\/groupId>[\s\S]*?<artifactId>\s*([^<\s]+)\s*<\/artifactId>[\s\S]*?<version>\s*([^<\s${}]+)\s*<\/version>[\s\S]*?<\/dependency>/g;
+    const matches = Array.from(pomText.matchAll(dependencyRegex));
+    
+    const seenDeps = new Set<string>();
+    
+    for (const match of matches) {
+      let groupId = match[1].trim();
+      let artifactId = match[2].trim();
+      let version = match[3].trim();
+      
+      // Resolver propiedades Maven básicas (${...})
+      if (version.includes('${')) {
+        const propMatch = version.match(/\$\{([^}]+)\}/);
+        if (propMatch) {
+          const propName = propMatch[1];
+          // Buscar la propiedad en el POM
+          const propRegex = new RegExp(`<${propName}>\\s*([^<]+)\\s*</${propName}>`, 'i');
+          const propMatch2 = pomText.match(propRegex);
+          if (propMatch2) {
+            version = propMatch2[1].trim();
+          } else {
+            // Si no se encuentra, usar el valor por defecto o saltar
+            logProgressService.warning(`No se pudo resolver propiedad Maven: ${propName}`);
+            continue;
+          }
+        }
+      }
+      
+      // Saltar si la versión contiene propiedades no resueltas
+      if (version.includes('${') || !version || version === '') {
+        continue;
+      }
+      
+      const depName = `${groupId}:${artifactId}:${version}`;
+      
+      // Evitar duplicados
+      if (seenDeps.has(depName)) {
+        continue;
+      }
+      seenDeps.add(depName);
+      
+      // Construir ruta Maven
+      const groupPath = groupId.replace(/\./g, '/');
+      const mavenPath = `${groupPath}/${artifactId}/${version}/${artifactId}-${version}.jar`;
+      
+      // Determinar URL base según el grupo
+      let depUrl: string;
+      if (groupId.startsWith('net.minecraftforge') || groupId.startsWith('cpw.mods')) {
+        depUrl = `${mavenBaseUrl}/${mavenPath}`;
+      } else if (groupId.startsWith('net.neoforged')) {
+        depUrl = `https://maven.neoforged.net/${mavenPath}`;
+      } else if (groupId.startsWith('com.mojang') || groupId.startsWith('org.lwjgl')) {
+        // Librerías de Mojang van a libraries.minecraft.net
+        depUrl = `https://libraries.minecraft.net/${mavenPath}`;
+      } else {
+        // Otras librerías van a Maven Central
+        depUrl = `https://repo1.maven.org/maven2/${mavenPath}`;
+      }
+      
+      dependencies.push({
+        name: depName,
+        path: mavenPath,
+        url: depUrl,
+        mavenPath
+      });
+    }
+    
+    // Añadir dependencias conocidas críticas que pueden no estar en el POM
+    const criticalDeps = [
+      {
+        name: loaderType === 'forge' 
+          ? `net.minecraftforge:forge:${normalizedLoaderVersion}`
+          : `net.neoforged:neoforge:${normalizedLoaderVersion}`,
+        path: loaderType === 'forge'
+          ? `net/minecraftforge/forge/${normalizedLoaderVersion}/forge-${normalizedLoaderVersion}-client.jar`
+          : `net/neoforged/neoforge/${normalizedLoaderVersion}/neoforge-${normalizedLoaderVersion}-client.jar`,
+        url: loaderType === 'forge'
+          ? `https://maven.minecraftforge.net/net/minecraftforge/forge/${normalizedLoaderVersion}/forge-${normalizedLoaderVersion}-client.jar`
+          : `https://maven.neoforged.net/net/neoforged/neoforge/${normalizedLoaderVersion}/neoforge-${normalizedLoaderVersion}-client.jar`,
+        mavenPath: loaderType === 'forge'
+          ? `net/minecraftforge/forge/${normalizedLoaderVersion}/forge-${normalizedLoaderVersion}-client.jar`
+          : `net/neoforged/neoforge/${normalizedLoaderVersion}/neoforge-${normalizedLoaderVersion}-client.jar`
+      }
+    ];
+    
+    for (const dep of criticalDeps) {
+      if (!seenDeps.has(dep.name)) {
+        dependencies.push(dep);
+        seenDeps.add(dep.name);
+      }
+    }
+    
+    logProgressService.info(`[${loaderType}] Total de dependencias extraídas: ${dependencies.length}`);
+    
+    return dependencies;
+  }
+
+  /**
+   * Descarga un artefacto desde una URL
+   */
+  private async downloadArtifact(url: string, localPath: string, retries: number = 3): Promise<void> {
+    this.ensureDir(path.dirname(localPath));
+    
+    if (fs.existsSync(localPath)) {
+      // Verificar que el archivo no esté corrupto (tamaño > 0)
+      const stats = fs.statSync(localPath);
+      if (stats.size > 0) {
+        return; // Ya existe y es válido
+      } else {
+        // Archivo corrupto, eliminarlo
+        fs.unlinkSync(localPath);
+        logProgressService.warning(`Archivo corrupto detectado, re-descargando: ${path.basename(localPath)}`);
+      }
+    }
+    
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          headers: { 'User-Agent': 'DRK-Launcher/1.0' },
+          signal: AbortSignal.timeout(30000) // Timeout de 30 segundos
+        });
+        
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error(`Archivo no encontrado (404): ${url}`);
+          }
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const buffer = Buffer.from(await response.arrayBuffer());
+        
+        // Verificar que el buffer no esté vacío
+        if (buffer.length === 0) {
+          throw new Error('Archivo descargado está vacío');
+        }
+        
+        fs.writeFileSync(localPath, buffer);
+        logProgressService.info(`Descargado: ${path.basename(localPath)} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+        return; // Éxito
+      } catch (error: any) {
+        lastError = error;
+        if (attempt < retries) {
+          const waitTime = attempt * 1000; // Esperar 1s, 2s, 3s...
+          logProgressService.warning(`Intento ${attempt}/${retries} fallido para ${path.basename(localPath)}, reintentando en ${waitTime}ms...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+    }
+    
+    // Si llegamos aquí, todos los intentos fallaron
+    logProgressService.error(`Error al descargar ${url} después de ${retries} intentos: ${lastError}`);
+    throw lastError || new Error(`No se pudo descargar ${url}`);
+  }
+
+
+  /**
+   * Clasifica librerías en module-path y classpath (modelo Modrinth/JPMS)
+   * CLASIFICACIÓN ESTRICTA: Solo módulos de Forge/NeoForge van en module-path
+   */
+  private partitionForgeLibraries(
     libraries: Array<{ name: string; path: string; url?: string }>,
     launcherDataPath: string
   ): { modulePath: string[]; classpath: string[] } {
     const modulePath: string[] = [];
     const classpath: string[] = [];
     
-    // Palabras clave para identificar JARs modulares de Forge
-    const MODULE_KEYWORDS = [
-      'forge-', 'neoforge-',
-      'modlauncher-',
-      'fmlloader-', 'fmlcore-',
-      'bootstraplauncher-',
-      'securejarhandler-'
+    // ESTRATEGIA INVERTIDA: Por defecto al Module-path
+    // Solo excepciones específicas van al Classpath
+    // Esto asegura que la mayoría de las librerías se traten como módulos automáticos
+    const CLASSPATH_EXCEPTIONS = [
+      'client-', 
+      '-official.jar', // JAR oficial de Minecraft (debe estar en classpath)
+      // Librerías que sabemos que dan problemas si son módulos (si las hubiera)
     ];
-    
-    // Palabras clave para identificar dependencias no modulares (van en classpath)
-    const CLASSPATH_KEYWORDS = [
-      'log4j-api-', 'log4j-core-',
-      'guava-', 'gson-',
-      'commons-io-', 'commons-lang3-',
-      'jopt-simple-', 'jline-',
-      'oshi-', 'oshi-core-',
-      'asm-', 'asm-commons-', 'asm-tree-', 'asm-util-', 'asm-analysis-'
-    ];
-    
+
     for (const lib of libraries) {
       const basename = path.basename(lib.path).toLowerCase();
-      const libName = lib.name.toLowerCase();
       
-      // Construir ruta completa
+      // Construir ruta completa (absoluta)
       const fullPath = path.join(launcherDataPath, 'libraries', lib.path);
       
-      // Verificar si debe ir en module-path
-      const isModule = MODULE_KEYWORDS.some(keyword => 
-        basename.includes(keyword) || libName.includes(keyword.replace('-', ':'))
-      );
-      
-      // Verificar si debe ir en classpath
-      const isClasspathOnly = CLASSPATH_KEYWORDS.some(keyword => 
-        basename.includes(keyword) || libName.includes(keyword.replace('-', ':'))
-      );
-      
-      // Clasificar la librería
-      if (isModule) {
-        // JARs modulares de Forge van en module-path
-        if (!modulePath.includes(fullPath)) {
-          modulePath.push(fullPath);
+      // REGLA 1: Excluir universal.jar si ya tenemos client.jar
+      if (basename.includes('-universal.jar')) {
+        // Verificar si ya tenemos el client.jar
+        const hasClientJar = libraries.some(l => {
+          const otherBasename = path.basename(l.path).toLowerCase();
+          return otherBasename.includes('-client.jar') && 
+                 otherBasename.includes(basename.split('-')[0]); // Mismo prefijo (forge/neoforge)
+        });
+        if (hasClientJar) {
+          logProgressService.info(`Excluyendo universal.jar (ya tenemos client.jar): ${basename}`);
+          continue;
         }
-      } else if (isClasspathOnly || !isModule) {
-        // Dependencias no modulares van en classpath
+      }
+      
+      // REGLA 2: Excepciones forzadas al classpath
+      const isClasspathException = CLASSPATH_EXCEPTIONS.some(kw => basename.includes(kw));
+      
+      if (isClasspathException) {
         if (!classpath.includes(fullPath)) {
           classpath.push(fullPath);
+          logProgressService.info(`Asignado al Classpath (excepción): ${basename}`);
+        }
+      } else {
+        // REGLA 3: Todo lo demás va al Module-path
+        if (!modulePath.includes(fullPath)) {
+          modulePath.push(fullPath);
+          // Log solo para módulos críticos para no saturar
+          if (basename.includes('forge') || basename.includes('log4j') || basename.includes('modlauncher')) {
+             logProgressService.info(`Módulo identificado: ${basename}`);
+          }
         }
       }
     }
     
-    logProgressService.info(`Librerías clasificadas: ${modulePath.length} en module-path, ${classpath.length} en classpath`);
+    // VALIDACIÓN CRÍTICA: Si el module-path está vacío, algo falló
+    if (modulePath.length === 0) {
+      logProgressService.error(`ERROR CRÍTICO: No se encontraron JARs de Forge Loader (modlauncher, forge-client) para el Module-path.`);
+      logProgressService.error(`Librerías procesadas: ${libraries.length}`);
+      logProgressService.error(`Ejemplos de librerías: ${libraries.slice(0, 5).map(l => path.basename(l.path)).join(', ')}`);
+      
+      // Intentar buscar manualmente las librerías críticas
+      const criticalLibs = [
+        'modlauncher',
+        'forge-',
+        'neoforge-',
+        'fmlloader',
+        'fmlcore'
+      ];
+      
+      for (const criticalKeyword of criticalLibs) {
+        const found = libraries.find(l => {
+          const basename = path.basename(l.path).toLowerCase();
+          return basename.includes(criticalKeyword.toLowerCase());
+        });
+        if (found) {
+          const criticalPath = path.join(launcherDataPath, 'libraries', found.path);
+          if (fs.existsSync(criticalPath)) {
+            modulePath.push(criticalPath);
+            logProgressService.warning(`Librería crítica añadida manualmente: ${path.basename(found.path)}`);
+          }
+        }
+      }
+    }
+    
+    logProgressService.info(`Librerías clasificadas (estricto): ${modulePath.length} en module-path, ${classpath.length} en classpath`);
+    
+    if (modulePath.length > 0) {
+      logProgressService.info(`Módulos en module-path: ${modulePath.map(p => path.basename(p)).join(', ')}`);
+    }
     
     return { modulePath, classpath };
+  }
+
+  /**
+   * Alias para mantener compatibilidad
+   */
+  private partitionLibraries(
+    libraries: Array<{ name: string; path: string; url?: string }>,
+    launcherDataPath: string
+  ): { modulePath: string[]; classpath: string[] } {
+    return this.partitionForgeLibraries(libraries, launcherDataPath);
   }
 
   /**
@@ -1048,36 +1391,64 @@ export class GameLaunchService {
     const minMem = Math.min(512, mem / 4); // Usar 1/4 de la RAM máxima como mínima
 
     // Definir argumentos JVM (configuración de memoria y optimizaciones)
+    // Argumentos estándar para mejor rendimiento en Minecraft/Forge
     let updatedJvmArgs = [
-      // --illegal-access=permit fue removido en Java 17+, no es necesario
+      // Configuración de memoria
       `-Xms${minMem}m`,    // Memoria inicial
       `-Xmx${mem}m`,       // Memoria máxima
-      // Opciones recomendadas para rendimiento
+      
+      // Garbage Collector: G1GC (recomendado para Minecraft)
       '-XX:+UseG1GC',
       '-XX:+UnlockExperimentalVMOptions',
-      '-XX:MaxGCPauseMillis=100',
-      '-XX:+DisableExplicitGC',
-      '-XX:TargetSurvivorRatio=90',
-      '-XX:G1NewSizePercent=50',
-      '-XX:G1MaxNewSizePercent=80',
-      '-XX:G1MixedGCLiveThresholdPercent=35',
-      '-XX:+AlwaysPreTouch',
+      '-XX:MaxGCPauseMillis=200',
       '-XX:+ParallelRefProcEnabled',
-      '-XX:MaxInlineLevel=9',
+      '-XX:+DisableExplicitGC',
+      '-XX:+AlwaysPreTouch',
+      
+      // Optimizaciones G1GC
+      '-XX:G1NewSizePercent=30',
+      '-XX:G1MaxNewSizePercent=40',
+      '-XX:G1HeapRegionSize=8M',
+      '-XX:G1ReservePercent=20',
+      '-XX:G1HeapWastePercent=5',
+      '-XX:G1MixedGCCountTarget=4',
+      '-XX:InitiatingHeapOccupancyPercent=15',
+      '-XX:G1MixedGCLiveThresholdPercent=90',
+      '-XX:G1RSetUpdatingPauseTimePercent=5',
+      '-XX:SurvivorRatio=32',
+      '-XX:MaxTenuringThreshold=1',
+      '-XX:TargetSurvivorRatio=90',
+      
+      // Optimizaciones de compilación JIT
+      '-XX:+TieredCompilation',
+      '-XX:TieredStopAtLevel=1',
+      '-XX:MaxInlineLevel=15',
       '-XX:MaxTrivialSize=12',
       '-XX:-DontCompileHugeMethods',
-      // Optimizaciones adicionales para mejor rendimiento
+      '-XX:+UseFastUnorderedTimeStamps',
+      
+      // Optimizaciones de memoria
       '-XX:+UseStringDeduplication',
       '-XX:+OptimizeStringConcat',
       '-XX:+UseCompressedOops',
       '-XX:+UseCompressedClassPointers',
-      '-XX:+TieredCompilation',
-      '-XX:TieredStopAtLevel=1',
-      '-XX:+UseFastUnorderedTimeStamps',
-      // Nota: UseTransparentHugePages no es compatible con Java 21 en Windows
-      // UseLargePages requiere configuración especial y privilegios de administrador en Windows
-      // Se omiten para evitar errores de compatibilidad
-      // Args adicionales si se proporcionaron
+      '-XX:+PerfDisableSharedMem',
+      
+      // Flags de Aikar (optimizaciones populares para Minecraft)
+      '-Dusing.aikars.flags=https://mcflags.emc.gs',
+      '-Daikars.new.flags=true',
+      
+      // Nota: Los siguientes argumentos fueron removidos en Java 21 o no son compatibles:
+      // - UseFastAccessorMethods: Removido en Java 21
+      // - UseThreadPriorities: Removido en Java 21
+      // - ThreadPriorityPolicy: Removido en Java 21
+      // - ReduceSignalUsage: Removido en Java 21
+      // - UseTransparentHugePages: Solo Linux
+      // - UseLargePages: Requiere configuración especial en Windows
+      // - UseBiasedLocking: Removido en Java 15+
+      // - UseCompressedStrings: Removido en Java 9+
+      
+      // Args adicionales personalizados si se proporcionaron
       ...(opts.jvmArgs || [])
     ];
 
@@ -1228,9 +1599,49 @@ export class GameLaunchService {
         // MODELO MODRINTH: Simplificado - usar directamente modlauncher.Launcher
         mainClass = 'cpw.mods.modlauncher.Launcher';
         
-        // Argumentos JVM mínimos (Modrinth usa solo lo esencial)
+        // Argumentos JVM para Forge/NeoForge (completos y optimizados)
+        // Solución para Java 21: nashorn fue removido pero Forge lo requiere
         additionalJvmArgs = [
-          '--add-modules=ALL-MODULE-PATH'
+          // JPMS: Módulos
+          '--add-modules=ALL-MODULE-PATH',
+          // Añadir explícitamente log4j como módulo automático (requerido por coremod)
+          '--add-modules', 'org.apache.logging.log4j.core,org.apache.logging.log4j',
+          
+          // Apertura de módulos para coremod (nashorn fue removido en Java 15+)
+          '--add-opens', 'java.base/java.lang=net.minecraftforge.coremod',
+          '--add-opens', 'java.base/java.util=net.minecraftforge.coremod',
+          '--add-opens', 'java.base/java.lang.reflect=net.minecraftforge.coremod',
+          '--add-opens', 'java.base/java.util.concurrent=net.minecraftforge.coremod',
+          '--add-opens', 'java.base/java.lang.invoke=net.minecraftforge.coremod',
+          '--add-opens', 'java.base/java.util.jar=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.net=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.io=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.text=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.util.regex=ALL-UNNAMED',
+          '--add-opens', 'java.base/java.util.zip=ALL-UNNAMED',
+          
+          // Apertura de módulos para log4j (requerido por coremod - CRÍTICO)
+          '--add-opens', 'java.base/java.lang=org.apache.logging.log4j.core',
+          '--add-opens', 'java.base/java.util=org.apache.logging.log4j.core',
+          '--add-opens', 'java.base/java.lang.reflect=org.apache.logging.log4j.core',
+          '--add-opens', 'java.base/java.util.concurrent=org.apache.logging.log4j.core',
+          '--add-opens', 'java.base/java.lang=org.apache.logging.log4j',
+          '--add-opens', 'java.base/java.util=org.apache.logging.log4j',
+          
+          // Exports necesarios
+          '--add-exports', 'java.base/sun.nio.ch=ALL-UNNAMED',
+          '--add-exports', 'java.base/java.io=ALL-UNNAMED',
+          
+          // Propiedades del sistema para Forge
+          '-Dforge.logging.console.level=info',
+          '-Dforge.logging.markers=REGISTRIES',
+          '-Dfml.earlyprogresswindow=false',
+          '-Dnashorn.args=--no-deprecation-warning',
+          
+          // Configuración de Log4j
+          '-Dlog4j.configurationFile=log4j2.xml',
+          '-Dlog4j2.formatMsgNoLookups=true',
+          '-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.core.impl.Log4jContextFactory'
         ];
         
         // Argumentos del juego (modelo Modrinth exacto - ModLauncher recibe estos argumentos)
@@ -1393,8 +1804,45 @@ export class GameLaunchService {
       }
       
       // Para Fabric y Quilt, necesitamos agregar las dependencias del loader
+      // IMPORTANTE: Usar el version.json con mappings Intermediary de la instancia
       if (loader === 'fabric' || loader === 'quilt') {
-        await this.addLoaderDependencies(libraryJars, loader, opts.mcVersion, opts.loaderVersion, launcherPath);
+        // Intentar usar el version.json de la instancia primero (tiene mappings Intermediary)
+        const instanceVersionJsonPath = path.join(opts.instancePath, 'loader', 'version.json');
+        if (fs.existsSync(instanceVersionJsonPath)) {
+          logProgressService.info(`[${loader.charAt(0).toUpperCase() + loader.slice(1)}] Usando version.json con mappings Intermediary de la instancia`);
+          try {
+            const loaderVersionData = JSON.parse(fs.readFileSync(instanceVersionJsonPath, 'utf-8'));
+            // Agregar todas las librerías del version.json
+            if (loaderVersionData.libraries && Array.isArray(loaderVersionData.libraries)) {
+              for (const lib of loaderVersionData.libraries) {
+                // Verificar reglas de compatibilidad
+                if (lib.rules && !this.isLibraryAllowed(lib.rules)) {
+                  continue;
+                }
+
+                if (lib.downloads?.artifact?.path) {
+                  const libPath = path.join(launcherPath, 'libraries', lib.downloads.artifact.path);
+                  if (fs.existsSync(libPath) && !libraryJars.includes(libPath)) {
+                    libraryJars.push(libPath);
+                  }
+                } else if (lib.name) {
+                  // Construir ruta desde el nombre de la librería
+                  const libPath = path.join(launcherPath, 'libraries', this.getLibraryPath(lib.name));
+                  if (fs.existsSync(libPath) && !libraryJars.includes(libPath)) {
+                    libraryJars.push(libPath);
+                  }
+                }
+              }
+              logProgressService.info(`[${loader.charAt(0).toUpperCase() + loader.slice(1)}] Librerías del version.json con mappings Intermediary agregadas al classpath`);
+            }
+          } catch (error) {
+            logProgressService.warning(`[${loader.charAt(0).toUpperCase() + loader.slice(1)}] Error al leer version.json de la instancia, usando método alternativo:`, error);
+            await this.addLoaderDependencies(libraryJars, loader, opts.mcVersion, opts.loaderVersion, launcherPath);
+          }
+        } else {
+          // Fallback al método original
+          await this.addLoaderDependencies(libraryJars, loader, opts.mcVersion, opts.loaderVersion, launcherPath);
+        }
       }
     } else {
       logProgressService.warning(`No se encontró archivo JAR del loader ${loader}, usando client.jar`);
@@ -2030,6 +2478,12 @@ export class GameLaunchService {
       if (modulePathLibs.length > 0) {
         modulePath = modulePathLibs.join(path.delimiter);
         logProgressService.info(`Module-path configurado con ${modulePathLibs.length} librerías modulares: ${modulePathLibs.map(p => path.basename(p)).slice(0, 5).join(', ')}${modulePathLibs.length > 5 ? '...' : ''}`);
+      } else {
+        logProgressService.error(`ERROR CRÍTICO: No se encontraron librerías modulares para el module-path.`);
+        logProgressService.error(`Total de librerías procesadas: ${finalLibraryJars.length}`);
+        if (finalLibraryJars.length > 0) {
+          logProgressService.error(`Ejemplos: ${finalLibraryJars.slice(0, 10).map(p => path.basename(p)).join(', ')}`);
+        }
       }
       
       if (classpathOnlyLibs.length > 0) {
@@ -2066,18 +2520,27 @@ export class GameLaunchService {
       const forgeModulePath = (this as any)._forgeModulePath as string[] | undefined;
       const forgeClasspath = (this as any)._forgeClasspath as string[] | undefined;
       
-      if (forgeModulePath && forgeClasspath) {
+      if (forgeModulePath && forgeModulePath.length > 0 && forgeClasspath) {
         // Usar las rutas del perfil construido (modelo Modrinth)
         const modulePathStr = forgeModulePath.join(path.delimiter);
         const classpathStr = forgeClasspath.join(path.delimiter);
         
-        launchArgs.push('--module-path', modulePathStr);
-        if (classpathStr) {
+        // CRÍTICO: Validar que module-path no esté vacío
+        if (modulePathStr && modulePathStr.length > 0) {
+          launchArgs.push('--module-path', modulePathStr);
+          logProgressService.info(`Module-path configurado: ${forgeModulePath.length} módulos`);
+        } else {
+          logProgressService.error(`ERROR: Module-path está vacío. No se puede lanzar el juego.`);
+          throw new Error('Module-path está vacío. Las librerías de Forge no se clasificaron correctamente.');
+        }
+        
+        if (classpathStr && classpathStr.length > 0) {
           launchArgs.push('-cp', classpathStr);
+          logProgressService.info(`Classpath configurado: ${forgeClasspath.length} librerías`);
         }
         
         logProgressService.info(`Usando module-path (${forgeModulePath.length} librerías) y classpath (${forgeClasspath.length} librerías) para ${mainClass} [Modelo Modrinth]`);
-      } else if (modulePath && classpathForLaunch) {
+      } else if (modulePath && modulePath.length > 0 && classpathForLaunch) {
         // Fallback: usar las rutas construidas por el método anterior
       launchArgs.push('--module-path', modulePath);
         launchArgs.push('-cp', classpathForLaunch);
@@ -2109,6 +2572,194 @@ export class GameLaunchService {
     
     // Asegurar que todos los argumentos sean strings antes de retornar
     return launchArgs.map(arg => typeof arg === 'string' ? arg : String(arg));
+  }
+
+  /**
+   * Construye argumentos de lanzamiento para Forge/NeoForge (FASE DE EJECUCIÓN)
+   * Lógica JPMS completa con clasificación estricta de librerías
+   */
+  buildForgeLaunchArguments(
+    metadata: ForgeInstanceMetadata,
+    user: UserSession,
+    instancePath: string,
+    mcVersion: string,
+    loaderType: 'forge' | 'neoforge',
+    ramMb: number = 4096,
+    windowSize?: { width: number; height: number }
+  ): string[] {
+    const launcherDataPath = getLauncherDataPath();
+    const minMem = Math.min(512, ramMb / 4);
+    
+    // A. Clasificación Estricta de Librerías
+    const { modulePath: modulePathLibs, classpath: classpathLibs } = this.partitionForgeLibraries(
+      metadata.libraries.map(lib => ({ name: lib.name, path: lib.path, url: lib.url })),
+      launcherDataPath
+    );
+    
+    // Filtrar solo las que existen
+    const modulePathFull = modulePathLibs.filter(p => fs.existsSync(p));
+    const classpathFull = classpathLibs.filter(p => fs.existsSync(p));
+    
+    // Construir strings de rutas
+    const modulePathStr = modulePathFull.join(path.delimiter);
+    const classpathStr = classpathFull.join(path.delimiter);
+    
+    // B. Argumentos JVM completos (JPMS)
+    const jvmArgs: string[] = [
+      // Configuración de memoria
+      `-Xms${minMem}m`,
+      `-Xmx${ramMb}m`,
+      
+      // Garbage Collector: G1GC (recomendado para Minecraft/Forge)
+      '-XX:+UseG1GC',
+      '-XX:+UnlockExperimentalVMOptions',
+      '-XX:MaxGCPauseMillis=200',
+      '-XX:+ParallelRefProcEnabled',
+      '-XX:+DisableExplicitGC',
+      '-XX:+AlwaysPreTouch',
+      
+      // Optimizaciones G1GC
+      '-XX:G1NewSizePercent=30',
+      '-XX:G1MaxNewSizePercent=40',
+      '-XX:G1HeapRegionSize=8M',
+      '-XX:G1ReservePercent=20',
+      '-XX:G1HeapWastePercent=5',
+      '-XX:G1MixedGCCountTarget=4',
+      '-XX:InitiatingHeapOccupancyPercent=15',
+      '-XX:G1MixedGCLiveThresholdPercent=90',
+      '-XX:G1RSetUpdatingPauseTimePercent=5',
+      '-XX:SurvivorRatio=32',
+      '-XX:MaxTenuringThreshold=1',
+      '-XX:TargetSurvivorRatio=90',
+      
+      // Optimizaciones de compilación JIT
+      '-XX:+TieredCompilation',
+      '-XX:TieredStopAtLevel=1',
+      '-XX:MaxInlineLevel=15',
+      '-XX:MaxTrivialSize=12',
+      '-XX:-DontCompileHugeMethods',
+      '-XX:+UseFastUnorderedTimeStamps',
+      
+      // Optimizaciones de memoria
+      '-XX:+UseStringDeduplication',
+      '-XX:+OptimizeStringConcat',
+      '-XX:+UseCompressedOops',
+      '-XX:+UseCompressedClassPointers',
+      '-XX:+PerfDisableSharedMem',
+      
+      // Flags de Aikar (optimizaciones populares para Minecraft)
+      '-Dusing.aikars.flags=https://mcflags.emc.gs',
+      '-Daikars.new.flags=true',
+      
+      // Nota: Los siguientes argumentos fueron removidos en Java 21 o no son compatibles:
+      // - UseFastAccessorMethods: Removido en Java 21
+      // - UseThreadPriorities: Removido en Java 21
+      // - ThreadPriorityPolicy: Removido en Java 21
+      // - ReduceSignalUsage: Removido en Java 21
+      // - UseBiasedLocking: Removido en Java 15+
+      // - UseTransparentHugePages: Solo Linux
+      // - UseLargePages: Requiere configuración especial en Windows
+      
+      // JPMS: Apertura de módulos (completo)
+      '--add-modules=ALL-MODULE-PATH',
+      // Añadir explícitamente log4j como módulo automático (requerido por coremod)
+      '--add-modules', 'org.apache.logging.log4j.core,org.apache.logging.log4j',
+      '--add-opens', 'java.base/java.util.jar=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.lang.invoke=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.net=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.io=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.lang.reflect=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.text=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.util.concurrent=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.util.regex=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.util.zip=ALL-UNNAMED',
+      '--add-exports', 'java.base/sun.nio.ch=ALL-UNNAMED',
+      '--add-exports', 'java.base/java.io=ALL-UNNAMED',
+      
+      // Solución para Java 21: nashorn fue removido, pero Forge lo requiere
+      // Añadir argumentos para permitir que Forge funcione sin nashorn
+      '--add-opens', 'java.base/java.lang=net.minecraftforge.coremod',
+      '--add-opens', 'java.base/java.util=net.minecraftforge.coremod',
+      '--add-opens', 'java.base/java.lang.reflect=net.minecraftforge.coremod',
+      '--add-opens', 'java.base/java.util.concurrent=net.minecraftforge.coremod',
+      
+      // Apertura de módulos para log4j (requerido por coremod - CRÍTICO)
+      '--add-opens', 'java.base/java.lang=org.apache.logging.log4j.core',
+      '--add-opens', 'java.base/java.util=org.apache.logging.log4j.core',
+      '--add-opens', 'java.base/java.lang.reflect=org.apache.logging.log4j.core',
+      '--add-opens', 'java.base/java.util.concurrent=org.apache.logging.log4j.core',
+      '--add-opens', 'java.base/java.lang=org.apache.logging.log4j',
+      '--add-opens', 'java.base/java.util=org.apache.logging.log4j',
+      
+      // Propiedades del sistema para Forge
+      '-Dforge.logging.console.level=info',
+      '-Dforge.logging.markers=REGISTRIES',
+      '-Dfml.earlyprogresswindow=false',
+      '-Dnashorn.args=--no-deprecation-warning',
+      
+      // Configuración de Log4j
+      '-Dlog4j.configurationFile=log4j2.xml',
+      '-Dlog4j2.formatMsgNoLookups=true',
+      '-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.core.impl.Log4jContextFactory'
+    ];
+    
+    // CRÍTICO: Validar y añadir Module-path y Classpath
+    // Solo añadir --module-path si tiene contenido
+    if (modulePathStr && modulePathStr.length > 0) {
+      jvmArgs.push('--module-path', modulePathStr);
+      logProgressService.info(`Module-path configurado con ${modulePathFull.length} módulos`);
+    } else {
+      logProgressService.error(`ERROR: La cadena Module-path está vacía. No se puede lanzar el juego.`);
+      throw new Error('Module-path está vacío. Las librerías de Forge no se clasificaron correctamente.');
+    }
+    
+    // Classpath siempre se necesita
+    if (classpathStr && classpathStr.length > 0) {
+      jvmArgs.push('-cp', classpathStr);
+      logProgressService.info(`Classpath configurado con ${classpathFull.length} librerías`);
+    } else {
+      logProgressService.warning(`Advertencia: Classpath está vacío. Esto puede causar errores.`);
+    }
+    
+    // C. Clase Principal
+    const mainClass = metadata.mainClass || 'cpw.mods.modlauncher.Launcher';
+    
+    // D. Argumentos de Minecraft
+    const gameArgs: string[] = [
+      '--username', user.username,
+      '--version', mcVersion,
+      '--gameDir', instancePath,
+      '--assetsDir', path.join(launcherDataPath, 'assets'),
+      '--assetIndex', '29', // TODO: Obtener del version.json
+      '--uuid', user.uuid,
+      '--accessToken', user.accessToken,
+      '--userType', 'mojang',
+      '--versionType', 'release',
+      '--clientId', user.clientId || 'c4502edb-87c6-40cb-b595-64a280cf8906',
+      '--xuid', user.xuid || '0'
+    ];
+    
+    // Añadir tamaño de ventana si está definido
+    if (windowSize) {
+      gameArgs.push('--width', windowSize.width.toString());
+      gameArgs.push('--height', windowSize.height.toString());
+    }
+    
+    // E. Argumentos específicos de Forge/NeoForge
+    const forgeArgs: string[] = [
+      '--launchTarget', loaderType === 'forge' ? 'forge_client' : 'neoforge_client'
+    ];
+    
+    // Combinar todos los argumentos
+    return [
+      ...jvmArgs,
+      mainClass,
+      ...gameArgs,
+      ...forgeArgs
+    ];
   }
 
   /**
@@ -2167,53 +2818,110 @@ export class GameLaunchService {
     libraries: Array<{ name: string; path: string; url?: string }>,
     launcherDataPath: string
   ): Promise<void> {
-    const librariesToDownload: Array<{ lib: { name: string; path: string; url?: string }; libPath: string }> = [];
+    const librariesToDownload: Array<{ lib: { name: string; path: string; url: string }; libPath: string }> = [];
     
     for (const lib of libraries) {
       const libPath = path.join(launcherDataPath, 'libraries', lib.path);
-      if (!fs.existsSync(libPath) && lib.url) {
-        librariesToDownload.push({ lib, libPath });
+      
+      // Verificar si existe y es válido
+      let needsDownload = false;
+      if (!fs.existsSync(libPath)) {
+        needsDownload = true;
+      } else {
+        // Verificar que el archivo no esté corrupto
+        try {
+          const stats = fs.statSync(libPath);
+          if (stats.size === 0) {
+            needsDownload = true;
+            fs.unlinkSync(libPath); // Eliminar archivo corrupto
+            logProgressService.warning(`Archivo corrupto detectado, re-descargando: ${path.basename(libPath)}`);
+          }
+        } catch (err) {
+          needsDownload = true;
+        }
+      }
+      
+      if (needsDownload) {
+        // Obtener URL: usar la proporcionada o construirla desde el nombre Maven
+        let url = lib.url;
+        if (!url) {
+          url = this.constructMavenUrl(lib.name, lib.path);
+        }
+        
+        if (url) {
+          librariesToDownload.push({ lib: { ...lib, url }, libPath });
+        } else {
+          logProgressService.warning(`No se puede descargar ${lib.name}: falta URL y no se puede construir`);
+        }
       }
     }
     
     if (librariesToDownload.length === 0) {
+      logProgressService.info(`Todas las librerías están presentes y son válidas`);
       return;
     }
     
     logProgressService.info(`Descargando ${librariesToDownload.length} librerías faltantes...`);
     
-    // Descargar en paralelo (máximo 10 simultáneas)
-    const CONCURRENT_DOWNLOADS = 10;
+    // Descargar en paralelo (aumentado para mayor velocidad)
+    const CONCURRENT_DOWNLOADS = 70;
     let downloaded = 0;
+    let failed = 0;
     
     for (let i = 0; i < librariesToDownload.length; i += CONCURRENT_DOWNLOADS) {
       const batch = librariesToDownload.slice(i, i + CONCURRENT_DOWNLOADS);
       
-      await Promise.all(
+      await Promise.allSettled(
         batch.map(async ({ lib, libPath }) => {
           try {
-            this.ensureDir(path.dirname(libPath));
-            const response = await fetch(lib.url!, {
-              headers: { 'User-Agent': 'DRK-Launcher/1.0' }
-            });
-            if (response.ok) {
-              const buffer = Buffer.from(await response.arrayBuffer());
-              fs.writeFileSync(libPath, buffer);
-              downloaded++;
-              if (downloaded % 5 === 0 || downloaded === librariesToDownload.length) {
-                logProgressService.info(`Descargadas: ${downloaded}/${librariesToDownload.length} librerías`);
-              }
-            } else {
-              logProgressService.warning(`Error al descargar ${lib.name}: HTTP ${response.status}`);
-            }
+            await this.downloadArtifact(lib.url, libPath);
+            downloaded++;
           } catch (err) {
-            logProgressService.warning(`Error al descargar ${lib.name}:`, err);
+            failed++;
+            logProgressService.warning(`Error al descargar ${lib.name}: ${err}`);
           }
         })
       );
+      
+      // Reportar progreso cada 20 librerías o al final
+      const currentProgress = Math.min(i + CONCURRENT_DOWNLOADS, librariesToDownload.length);
+      if (currentProgress % 20 === 0 || currentProgress >= librariesToDownload.length) {
+        logProgressService.info(`Progreso: ${currentProgress}/${librariesToDownload.length} (${downloaded} descargadas, ${failed} fallidas)`);
+      }
     }
     
-    logProgressService.info(`Descarga de librerías completada: ${downloaded}/${librariesToDownload.length}`);
+    logProgressService.info(`Descarga de librerías completada: ${downloaded} descargadas, ${failed} fallidas, ${librariesToDownload.length - downloaded - failed} ya existían`);
+  }
+
+  /**
+   * Construye URL Maven desde el nombre de la librería
+   */
+  private constructMavenUrl(libName: string, libPath: string): string | null {
+    try {
+      // Formato: groupId:artifactId:version
+      const parts = libName.split(':');
+      if (parts.length < 3) {
+        return null;
+      }
+      
+      const groupId = parts[0];
+      
+      // Determinar repositorio base
+      let baseUrl: string;
+      if (groupId.startsWith('net.minecraftforge') || groupId.startsWith('cpw.mods')) {
+        baseUrl = 'https://maven.minecraftforge.net';
+      } else if (groupId.startsWith('net.neoforged')) {
+        baseUrl = 'https://maven.neoforged.net';
+      } else if (groupId.startsWith('com.mojang') || groupId.startsWith('org.lwjgl')) {
+        baseUrl = 'https://libraries.minecraft.net';
+      } else {
+        baseUrl = 'https://repo1.maven.org/maven2';
+      }
+      
+      return `${baseUrl}/${libPath}`;
+    } catch (err) {
+      return null;
+    }
   }
 
   /**
@@ -3224,15 +3932,3 @@ export class GameLaunchService {
 }
 
 export const gameLaunchService = new GameLaunchService();
-
-// Tipos para los callbacks que no estaban definidos en el original
-type LaunchDataCallback = (data: string) => void;
-type LaunchExitCallback = (code: number | null) => void;
-
-// Añadir los callbacks al tipo LaunchOptions
-declare module './gameLaunchService' {
-  interface LaunchOptions {
-    onData?: LaunchDataCallback;
-    onExit?: LaunchExitCallback;
-  }
-}

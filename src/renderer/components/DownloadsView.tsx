@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Card from './Card';
 import Button from './Button';
 import { integratedDownloadService } from '../services/integratedDownloadService';
+import { notificationService } from '../services/notificationService';
 
 interface Download {
   id: string;
@@ -42,6 +44,23 @@ interface ProgressStatus {
   details?: string;
 }
 
+interface IncompleteDownload {
+  id: string;
+  instanceName: string;
+  instancePath: string;
+  loader: string;
+  mcVersion: string;
+  loaderVersion?: string;
+  status: string;
+  progress: number;
+  currentStep: string;
+  totalSteps: number;
+  completedSteps: number;
+  startedAt: number;
+  lastUpdated: number;
+  error?: string;
+}
+
 const DownloadsView = () => {
   const [activeDownloads, setActiveDownloads] = useState<ProgressStatus[]>([]);
   const [completedDownloads, setCompletedDownloads] = useState<LogEvent[]>([]);
@@ -50,10 +69,15 @@ const DownloadsView = () => {
   const [activeTab, setActiveTab] = useState<'active' | 'completed' | 'logs'>('active');
   const [overallProgress, setOverallProgress] = useState<{ progress: number; statusText: string; activeOperations: number } | null>(null);
   const [stats, setStats] = useState<{ totalLogs: number, recentLogs: number, activeDownloads: number, totalProgressUpdates: number } | null>(null);
+  const [incompleteDownloads, setIncompleteDownloads] = useState<IncompleteDownload[]>([]);
+  const [resumingDownload, setResumingDownload] = useState<string | null>(null);
 
   useEffect(() => {
     // Cargar datos iniciales
     loadInitialData();
+    
+    // Cargar descargas incompletas al iniciar
+    loadIncompleteDownloads();
 
     // Configurar intervalos de actualización
     const progressInterval = setInterval(async () => {
@@ -94,6 +118,47 @@ const DownloadsView = () => {
       clearInterval(logsInterval);
     };
   }, []);
+
+  const loadIncompleteDownloads = async () => {
+    try {
+      const incomplete = await integratedDownloadService.getIncompleteDownloads();
+      setIncompleteDownloads(incomplete);
+      
+      if (incomplete.length > 0) {
+        console.log(`[DownloadsView] Encontradas ${incomplete.length} descargas incompletas`);
+      }
+    } catch (err) {
+      console.error('Error cargando descargas incompletas:', err);
+    }
+  };
+
+  const handleResumeDownload = async (downloadId: string) => {
+    try {
+      setResumingDownload(downloadId);
+      await integratedDownloadService.resumeDownload(downloadId);
+      
+      // Recargar descargas incompletas
+      await loadIncompleteDownloads();
+      
+      // Mostrar notificación de éxito
+      notificationService.showNotification({
+        type: 'success',
+        title: 'Descarga reanudada',
+        message: 'La descarga se ha reanudado correctamente.',
+        duration: 3000
+      });
+    } catch (error) {
+      console.error('Error al reanudar descarga:', error);
+      notificationService.showNotification({
+        type: 'error',
+        title: 'Error al reanudar',
+        message: `No se pudo reanudar la descarga: ${(error as Error).message}`,
+        duration: 4000
+      });
+    } finally {
+      setResumingDownload(null);
+    }
+  };
 
   const loadInitialData = async () => {
     try {
@@ -314,70 +379,194 @@ const DownloadsView = () => {
         {/* Descargas Activas */}
         {activeTab === 'active' && (
           <div className="mb-8">
-            <h3 className="text-xl font-semibold text-gray-200 mb-4 flex items-center">
-              <span className="mr-2">📥</span> Descargas Activas
-              <span className="ml-2 text-sm text-gray-400 bg-gray-700/50 py-0.5 px-2 rounded-full">
-                {activeDownloads.length}
-              </span>
-            </h3>
-            {activeDownloads.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 bg-gray-800/30 rounded-xl border border-dashed border-gray-700/50">
-                No hay descargas activas en este momento
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-gray-200 flex items-center">
+                <span className="mr-2">📥</span> Descargas Activas
+                <span className="ml-2 text-sm text-gray-400 bg-gray-700/50 py-0.5 px-2 rounded-full">
+                  {activeDownloads.length + incompleteDownloads.length}
+                </span>
+              </h3>
+              {incompleteDownloads.length > 0 && (
+                <button
+                  onClick={loadIncompleteDownloads}
+                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Actualizar
+                </button>
+              )}
+            </div>
+
+            {/* Descargas incompletas (pendientes de reanudar) */}
+            {incompleteDownloads.length > 0 && (
+              <div className="mb-6 space-y-4">
+                <h4 className="text-sm font-medium text-yellow-400 flex items-center gap-2">
+                  <span>⚠️</span> Descargas Incompletas ({incompleteDownloads.length})
+                </h4>
+                {incompleteDownloads.map((download) => (
+                  <motion.div
+                    key={download.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="p-5 bg-gradient-to-br from-yellow-900/20 to-orange-900/20 backdrop-blur-sm rounded-xl border border-yellow-700/50 hover:border-yellow-500/50 transition-all duration-300 shadow-lg"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-semibold text-gray-100 truncate">{download.instanceName}</h3>
+                          <span className="text-xs px-2.5 py-1 rounded-full font-medium text-yellow-400 bg-yellow-500/20 border border-yellow-500/30">
+                            {download.loader} {download.mcVersion}
+                          </span>
+                        </div>
+                        <div className="text-sm text-gray-400 mt-1">
+                          {download.currentStep}
+                        </div>
+                        {download.error && (
+                          <div className="text-xs text-red-400 mt-1">
+                            Error: {download.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="w-full bg-gray-700/50 rounded-full h-3.5 overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${download.progress * 100}%` }}
+                          className="bg-gradient-to-r from-yellow-500 to-orange-500 h-3.5 rounded-full"
+                        />
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-gray-400 mt-2">
+                        <span>{Math.round(download.progress * 100)}%</span>
+                        <span>{download.completedSteps} / {download.totalSteps} pasos</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-700/50">
+                      <div className="text-xs text-gray-500">
+                        Iniciada: {new Date(download.startedAt).toLocaleString()}
+                      </div>
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleResumeDownload(download.id)}
+                        disabled={resumingDownload === download.id}
+                        className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-lg transition-all text-sm font-medium border border-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {resumingDownload === download.id ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Reanudando...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Reanudar Descarga
+                          </>
+                        )}
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                ))}
               </div>
+            )}
+            {activeDownloads.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-center py-12 text-gray-500 bg-gradient-to-br from-gray-800/30 to-gray-900/30 rounded-xl border border-dashed border-gray-700/50"
+              >
+                <div className="text-4xl mb-3">📭</div>
+                <p className="text-gray-400">No hay descargas activas en este momento</p>
+              </motion.div>
             ) : (
               <div className="space-y-4">
-                {activeDownloads.map(download => (
-                  <div
+                {activeDownloads.map((download, index) => (
+                  <motion.div
                     key={download.id}
-                    className="p-4 bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-700/50 transition-all duration-300"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className="p-5 bg-gradient-to-br from-gray-800/60 to-gray-900/60 backdrop-blur-sm rounded-xl border border-gray-700/50 hover:border-blue-500/50 transition-all duration-300 shadow-lg hover:shadow-blue-500/10"
                   >
-                    <div className="flex justify-between items-start mb-2">
+                    <div className="flex justify-between items-start mb-3">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium text-gray-100 truncate">{download.target || download.operation}</h3>
-                          <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(download.status)} bg-opacity-20`}>
-                            {download.status}
-                          </span>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-semibold text-gray-100 truncate">{download.target || download.operation}</h3>
+                          <motion.span
+                            animate={{ scale: [1, 1.1, 1] }}
+                            transition={{ repeat: Infinity, duration: 2 }}
+                            className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(download.status)} bg-opacity-20 border border-current border-opacity-30`}
+                          >
+                            {download.status === 'in-progress' ? 'Descargando...' : download.status}
+                          </motion.span>
                         </div>
                         {download.details && (
                           <div className="text-sm text-gray-400 mt-1 truncate">{download.details}</div>
                         )}
                       </div>
-                      <div className="text-right text-sm text-gray-400 whitespace-nowrap ml-4">
+                      <div className="text-right text-sm text-blue-400 whitespace-nowrap ml-4 font-medium">
                         {download.speed && formatSpeed(download.speed)}
                       </div>
                     </div>
 
-                    <div className="mb-2">
-                      <div className="w-full bg-gray-700 rounded-full h-3">
-                        <div
-                          className={`h-3 rounded-full ${
-                            download.status === 'completed' ? 'bg-green-500' :
-                            download.status === 'error' ? 'bg-red-500' :
-                            download.status === 'pending' ? 'bg-yellow-500' :
-                            'bg-gradient-to-r from-blue-500 to-indigo-600'
+                    <div className="mb-3">
+                      <div className="w-full bg-gray-700/50 rounded-full h-3.5 overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${download.progress * 100}%` }}
+                          transition={{ duration: 0.5, ease: "easeOut" }}
+                          className={`h-3.5 rounded-full relative ${
+                            download.status === 'completed' ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
+                            download.status === 'error' ? 'bg-gradient-to-r from-red-500 to-rose-500' :
+                            download.status === 'pending' ? 'bg-gradient-to-r from-yellow-500 to-amber-500' :
+                            'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600'
                           }`}
-                          style={{ width: `${download.progress * 100}%` }}
-                        ></div>
+                        >
+                          <motion.div
+                            animate={{ x: ['-100%', '100%'] }}
+                            transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                          />
+                        </motion.div>
                       </div>
-                      <div className="text-right text-xs text-gray-400 mt-1">
-                        {Math.round(download.progress * 100)}%
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center text-xs text-gray-500">
-                      <div>
-                        {download.current} / {download.total} - {download.operation}
-                      </div>
-                      <div className="flex gap-2">
+                      <div className="flex justify-between items-center text-xs text-gray-400 mt-2">
+                        <span>{Math.round(download.progress * 100)}%</span>
                         {download.estimatedTimeRemaining && (
-                          <span className="text-gray-400">
+                          <span className="text-blue-400">
                             Quedan: {formatTimeRemaining(download.estimatedTimeRemaining)}
                           </span>
                         )}
                       </div>
                     </div>
-                  </div>
+
+                    <div className="flex justify-between items-center text-xs text-gray-500 pt-2 border-t border-gray-700/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-400">{download.current} / {download.total}</span>
+                        <span className="text-gray-600">•</span>
+                        <span className="text-gray-400">{download.operation}</span>
+                      </div>
+                      {download.status === 'error' && (
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => {
+                            // TODO: Implementar reanudar descarga
+                            console.log('Reanudar descarga:', download.id);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-lg transition-all text-xs font-medium border border-blue-500/30"
+                        >
+                          Reintentar
+                        </motion.button>
+                      )}
+                    </div>
+                  </motion.div>
                 ))}
               </div>
             )}

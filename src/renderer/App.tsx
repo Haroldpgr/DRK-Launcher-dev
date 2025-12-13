@@ -153,7 +153,7 @@ export default function App() {
     console.log('[App] Todos los perfiles actualizados:', updatedProfiles.map(p => ({ username: p.username, type: p.type })));
     setAccounts(updatedProfiles);
     setCurrentUser(username);
-  }, []);
+  };
 
   const handleDeleteAccount = async (username: string) => {
     // Verificar si la cuenta a eliminar es de tipo DRK
