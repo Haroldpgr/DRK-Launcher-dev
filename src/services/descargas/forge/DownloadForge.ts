@@ -48,14 +48,22 @@ export class DownloadForge {
         fs.mkdirSync(instancePath, { recursive: true });
       }
 
-      // Descargar el cliente base de Minecraft
-      await minecraftDownloadService.downloadClientJar(mcVersion, instancePath);
+      // 1. Descargar metadata de la versión
+      logProgressService.info(`[Forge] Descargando metadata de la versión...`);
+      const versionJsonPath = await this.downloadVersionMetadata(mcVersion);
+      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+
+      // 2. Descargar el cliente base de Minecraft
+      logProgressService.info(`[Forge] Descargando client.jar...`);
+      await this.downloadClientJar(mcVersion, instancePath, versionMetadata);
       
-      // Descargar assets
-      await minecraftDownloadService.validateAndDownloadAssets(mcVersion, undefined, 'Forge');
+      // 3. Descargar assets
+      logProgressService.info(`[Forge] Descargando assets...`);
+      await this.downloadAssets(mcVersion, versionMetadata);
       
-      // Descargar librerías base
-      await minecraftDownloadService.downloadVersionLibraries(mcVersion);
+      // 4. Descargar librerías base
+      logProgressService.info(`[Forge] Descargando librerías base...`);
+      await this.downloadLibraries(versionMetadata);
 
       // Instalar Forge usando el servicio de lanzamiento (que tiene la lógica de Maven)
       // Nota: installForgeLoader guarda los archivos en la carpeta de versiones del launcher
