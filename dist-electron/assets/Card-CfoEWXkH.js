@@ -1,0 +1,1 @@
+import{j as s}from"./index-DGqiwtp4.js";function d({children:r,className:o=""}){return s.jsx("div",{className:`bg-dark rounded-xl shadow-soft p-4 border border-gray-800 ${o}`,children:r})}export{d as C};

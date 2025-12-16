@@ -13,7 +13,7 @@ yarn-error.log*
 # Archivos específicos del sistema operativo
 .DS_Store
 Thumbs.db
-
+ANALISIS_MINECRAFT_LAUNCHER
 # Editores e IDEs (Opcional)
 .vscode/
 .idea/

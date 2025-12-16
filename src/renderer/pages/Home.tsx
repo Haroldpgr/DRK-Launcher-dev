@@ -29,6 +29,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
   const [shadersCurseForge, setShadersCurseForge] = useState<any[]>([]); // Estado para almacenar shaders de CurseForge
   const [servers, setServers] = useState<any[]>([]); // Estado para almacenar servidores
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [isLaunching, setIsLaunching] = useState(false); // CRÍTICO: Protección contra dobles clics
   const last = useMemo(() => instances[instances.length - 1], [instances])
 
   useEffect(() => {
@@ -245,7 +246,32 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
     };
   }, [currentUser, staticServers]) // Agregar currentUser como dependencia para refrescar cuando cambie el perfil
 
-  const play = async () => { if (!last) return; onPlay(last.id); }
+  // CRÍTICO: Protección contra dobles clics y ejecuciones múltiples
+  const play = useCallback(async () => {
+    if (!last) return;
+    
+    // CRÍTICO: Verificar si ya hay un lanzamiento en progreso
+    if (isLaunching) {
+      console.warn(`[Home] ⚠️ BLOQUEADO: Ya hay un lanzamiento en progreso para la instancia ${last.id}. Ignorando doble clic.`);
+      return;
+    }
+    
+    // Marcar que hay un lanzamiento en progreso
+    setIsLaunching(true);
+    console.log(`[Home] Iniciando lanzamiento para instancia: ${last.id}`);
+    
+    try {
+      await onPlay(last.id);
+    } catch (error) {
+      console.error(`[Home] Error al lanzar instancia ${last.id}:`, error);
+    } finally {
+      // Limpiar el flag después de un delay para permitir que el proceso se inicie
+      setTimeout(() => {
+        setIsLaunching(false);
+        console.log(`[Home] Flag de lanzamiento limpiado para instancia: ${last.id}`);
+      }, 5000); // 5 segundos deberían ser suficientes
+    }
+  }, [last, isLaunching, onPlay]);
 
   const connectToServer = (ip: string) => {
     navigator.clipboard.writeText(ip)
@@ -286,7 +312,9 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
                 <div className="text-sm text-gray-400">{last.version} {last.loader}</div>
               </div>
               <div className="flex gap-2">
-                <Button onClick={play}>Jugar</Button>
+                <Button onClick={play} disabled={isLaunching || !last}>
+                  {isLaunching ? 'Iniciando...' : 'Jugar'}
+                </Button>
                 <Button variant="secondary" onClick={() => location.assign('#/instances')}>Más opciones</Button>
               </div>
             </div>

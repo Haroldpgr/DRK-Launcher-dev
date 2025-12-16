@@ -381,11 +381,11 @@ const DownloadsView = () => {
           <div className="mb-8">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-gray-200 flex items-center">
-                <span className="mr-2">📥</span> Descargas Activas
-                <span className="ml-2 text-sm text-gray-400 bg-gray-700/50 py-0.5 px-2 rounded-full">
+              <span className="mr-2">📥</span> Descargas Activas
+              <span className="ml-2 text-sm text-gray-400 bg-gray-700/50 py-0.5 px-2 rounded-full">
                   {activeDownloads.length + incompleteDownloads.length}
-                </span>
-              </h3>
+              </span>
+            </h3>
               {incompleteDownloads.length > 0 && (
                 <button
                   onClick={loadIncompleteDownloads}
@@ -565,7 +565,7 @@ const DownloadsView = () => {
                           Reintentar
                         </motion.button>
                       )}
-                    </div>
+                  </div>
                   </motion.div>
                 ))}
               </div>

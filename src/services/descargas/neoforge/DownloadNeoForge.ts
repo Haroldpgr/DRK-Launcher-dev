@@ -1,463 +1,287 @@
-import path from 'node:path';
-import fs from 'node:fs';
-import crypto from 'node:crypto';
-import { gameLaunchService } from '../../gameLaunchService';
-import { logProgressService } from '../../logProgressService';
+// src/services/descargas/neoforge/DownloadNeoForge.ts
+// Lógica CORRECTA para instalar NeoForge usando el installer oficial
+// Basado en: https://minecraft-launcher-lib.readthedocs.io/
+// NeoForge moderno (1.20.5+ / 1.21+) requiere el installer.jar oficial
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { spawn } from 'child_process';
+import fetch from 'node-fetch';
 import { getLauncherDataPath } from '../../../utils/paths';
-import { downloadQueueService } from '../../downloadQueueService';
+import { logProgressService } from '../../logProgressService';
+import { javaDownloadService } from '../../javaDownloadService';
 
 /**
- * Servicio para descargar instancias NeoForge de Minecraft
+ * Servicio para instalar NeoForge usando el installer oficial
+ * 
+ * IMPORTANTE: NeoForge moderno NO funciona descargando librerías manualmente.
+ * Debe ejecutarse el installer.jar oficial con --installClient.
+ * El installer genera el version.json y descarga todas las dependencias correctamente.
+ * 
+ * NO descarga vanilla antes - el installer lo hace internamente.
+ * 
+ * Similar a Forge pero usa maven.neoforged.net
  */
 export class DownloadNeoForge {
-  private versionsPath: string;
-  private librariesPath: string;
-  private assetsPath: string;
+  private launcherDir: string;
 
   constructor() {
-    const launcherPath = getLauncherDataPath();
-    this.versionsPath = path.join(launcherPath, 'versions');
-    this.librariesPath = path.join(launcherPath, 'libraries');
-    this.assetsPath = path.join(launcherPath, 'assets');
-    this.ensureDir(this.versionsPath);
-    this.ensureDir(this.librariesPath);
-    this.ensureDir(this.assetsPath);
+    this.launcherDir = getLauncherDataPath();
   }
 
-  private ensureDir(dir: string): void {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  }
   /**
    * Descarga una instancia NeoForge completa
-   * @param mcVersion Versión de Minecraft (ej. '1.20.1')
-   * @param loaderVersion Versión de NeoForge (ej. '1.20.1-20.1.0')
-   * @param instancePath Ruta donde se creará la instancia
+   * 
+   * Este método solo ejecuta el installer.jar oficial de NeoForge.
+   * 
+   * CRÍTICO:
+   * - NO descarga vanilla antes del installer
+   * - NO instala client.jar en instancePath
+   * - NO instala NADA en instancePath
+   * 
+   * El installer de NeoForge:
+   * - Se ejecuta desde launcherDir (no desde instancePath)
+   * - Descarga su propia versión base de Minecraft
+   * - Genera version.json en launcherDir/versions/{mcVersion}-neoforge-{version}/
+   * - Descarga librerías en launcherDir/libraries/
+   * - Controla las versiones exactas de librerías vanilla
+   * 
+   * @param mcVersion Versión de Minecraft (ej. '1.21.11')
+   * @param loaderVersion Versión de NeoForge (ej. '21.1.0')
+   * @param instancePath NO SE USA. Solo se mantiene por compatibilidad con la interfaz común.
+   *                     Todo se instala en launcherDir, no en instancePath.
    */
   async downloadInstance(
     mcVersion: string,
     loaderVersion: string | undefined,
     instancePath: string
   ): Promise<void> {
+    if (!loaderVersion) {
+      throw new Error('La versión de NeoForge es requerida');
+    }
+
+    logProgressService.info(`[NeoForge] Instalando NeoForge ${loaderVersion} para Minecraft ${mcVersion}...`);
+    logProgressService.info(`[NeoForge] NOTA: El installer trabaja desde launcherDir, NO instala nada en instancePath`);
+    
+    // Instalar NeoForge usando el installer oficial
+    // El installer se encarga de TODO: descarga base, genera version.json, descarga librerías
+    // Todo se instala en launcherDir (versions/, libraries/, etc.), NO en instancePath
+    await this.installNeoForgeLoader(mcVersion, loaderVersion);
+    
+    logProgressService.info(`[NeoForge] Instalación completada exitosamente`);
+  }
+
+  /**
+   * Instala NeoForge usando el installer oficial
+   * 
+   * Este método:
+   * 1. Descarga el installer.jar desde Maven (maven.neoforged.net)
+   * 2. Lo ejecuta con --installClient
+   * 3. Valida que se creó el version.json en versions/
+   * 
+   * NO toca librerías, NO descarga assets, NO construye classpath.
+   * El installer de NeoForge hace TODO eso correctamente.
+   * 
+   * @param mcVersion Versión de Minecraft
+   * @param loaderVersion Versión del loader
+   */
+  async installNeoForgeLoader(
+    mcVersion: string,
+    loaderVersion: string
+  ): Promise<void> {
+    const mavenBaseUrl = 'https://maven.neoforged.net';
+    const groupId = 'net.neoforged';
+    const artifactId = 'neoforge';
+    
+    // Normalizar loaderVersion: puede venir como "1.21.11-21.1.0" o solo "21.1.0"
+    let normalizedLoaderVersion = loaderVersion;
+    if (loaderVersion.includes('-')) {
+      const parts = loaderVersion.split('-');
+      if (parts.length > 1) {
+        normalizedLoaderVersion = parts[parts.length - 1];
+      }
+    }
+    
+    // Validar formato de versión NeoForge (debe ser X.Y.Z)
+    if (!/^\d+\.\d+\.\d+/.test(normalizedLoaderVersion)) {
+      throw new Error(`Versión NeoForge inválida: ${loaderVersion} (normalizada: ${normalizedLoaderVersion})`);
+    }
+    
+    // Construir nombre del installer
+    // Formato: neoforge-<mcVersion>-<neoForgeVersion>-installer.jar
+    // Ejemplo: neoforge-1.21.11-21.1.0-installer.jar
+    const installerFileName = `${artifactId}-${mcVersion}-${normalizedLoaderVersion}-installer.jar`;
+    const installerUrl = `${mavenBaseUrl}/releases/${groupId.replace(/\./g, '/')}/${artifactId}/${mcVersion}-${normalizedLoaderVersion}/${installerFileName}`;
+    
+    // Descargar installer
+    const installersDir = path.join(this.launcherDir, 'installers');
+    if (!fs.existsSync(installersDir)) {
+      fs.mkdirSync(installersDir, { recursive: true });
+    }
+    
+    const installerPath = path.join(installersDir, installerFileName);
+    
+    if (!fs.existsSync(installerPath)) {
+      logProgressService.info(`[NeoForge] Descargando installer desde: ${installerUrl}`);
+      
+      const response = await fetch(installerUrl, {
+        headers: { 'User-Agent': 'DRK-Launcher/1.0' }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`No se pudo descargar installer de NeoForge: HTTP ${response.status}`);
+      }
+      
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(installerPath, buffer);
+      
+      logProgressService.info(`[NeoForge] Installer descargado: ${installerFileName}`);
+    } else {
+      logProgressService.info(`[NeoForge] Installer ya existe: ${installerFileName}`);
+    }
+    
+    // Obtener Java 17+ para ejecutar el installer
+    // NeoForge installer NO necesita el Java específico de la versión de Minecraft
+    // Necesita Java 17+ (Java 21 es OK, Java 8/11 NO funcionan)
+    let javaPath: string;
     try {
-      logProgressService.info(`[NeoForge] Iniciando descarga de NeoForge ${loaderVersion || 'latest'} para Minecraft ${mcVersion}...`);
+      // Intentar obtener Java 17 o superior
+      // Para MC 1.21+ normalmente devuelve Java 21, que es perfecto
+      const recommendedJava = javaDownloadService.getRecommendedJavaVersion(mcVersion);
+      const javaVersion = parseInt(recommendedJava);
       
-      // Asegurar que la carpeta de la instancia existe
-      if (!fs.existsSync(instancePath)) {
-        fs.mkdirSync(instancePath, { recursive: true });
-      }
-
-      // 1. Descargar metadata de la versión
-      logProgressService.info(`[NeoForge] Descargando metadata de la versión...`);
-      const versionJsonPath = await this.downloadVersionMetadata(mcVersion);
-      const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
-
-      // 2. Descargar el cliente base de Minecraft
-      logProgressService.info(`[NeoForge] Descargando client.jar...`);
-      await this.downloadClientJar(mcVersion, instancePath, versionMetadata);
-      
-      // 3. Descargar assets
-      logProgressService.info(`[NeoForge] Descargando assets...`);
-      await this.downloadAssets(mcVersion, versionMetadata);
-      
-      // 4. Descargar librerías base
-      logProgressService.info(`[NeoForge] Descargando librerías base...`);
-      await this.downloadLibraries(versionMetadata);
-
-      // Instalar NeoForge usando el servicio de lanzamiento (que tiene la lógica de Maven)
-      // Nota: installForgeLoader guarda los archivos en la carpeta de versiones del launcher
-      if (!loaderVersion) {
-        throw new Error('La versión de NeoForge es requerida');
-      }
-      
-      logProgressService.info(`[NeoForge] Instalando NeoForge ${loaderVersion} con todas sus dependencias...`);
-      await gameLaunchService.installForgeLoader(mcVersion, 'neoforge', loaderVersion);
-      
-      // Copiar version.json a la carpeta de la instancia
-      const launcherDataPath = require('../../utils/paths').getLauncherDataPath();
-      const versionName = `${mcVersion}-neoforge-${loaderVersion}`;
-      const versionJsonPath = path.join(launcherDataPath, 'versions', versionName, `${versionName}.json`);
-      const instanceLoaderDir = path.join(instancePath, 'loader');
-      if (!fs.existsSync(instanceLoaderDir)) {
-        fs.mkdirSync(instanceLoaderDir, { recursive: true });
-      }
-      
-      if (fs.existsSync(versionJsonPath)) {
-        const instanceVersionJsonPath = path.join(instanceLoaderDir, 'version.json');
-        fs.copyFileSync(versionJsonPath, instanceVersionJsonPath);
-        logProgressService.info(`[NeoForge] version.json copiado a la instancia`);
-        
-        // IMPORTANTE: Descargar todas las librerías de NeoForge del version.json
-        await this.downloadNeoForgeLibraries(versionJsonPath, instancePath);
+      if (javaVersion < 17) {
+        // Si la versión recomendada es menor a 17, forzar Java 17
+        logProgressService.info(`[NeoForge] Versión Java recomendada (${recommendedJava}) es menor a 17, usando Java 17`);
+        javaPath = await javaDownloadService.downloadJava('17');
       } else {
-        logProgressService.warning(`[NeoForge] version.json no encontrado en: ${versionJsonPath}`);
+        // Usar la versión recomendada (17 o superior)
+        javaPath = await javaDownloadService.getJavaForMinecraftVersion(mcVersion);
       }
-      
-      logProgressService.info(`[NeoForge] Descarga completada exitosamente con todas las dependencias`);
     } catch (error) {
-      logProgressService.error(`[NeoForge] Error al descargar instancia:`, error);
-      throw error;
+      // Fallback: intentar descargar Java 17 directamente
+      logProgressService.warning(`[NeoForge] Error al obtener Java recomendado, usando Java 17 como fallback`);
+      javaPath = await javaDownloadService.downloadJava('17');
     }
-  }
-
-  /**
-   * Descarga todas las librerías de NeoForge del version.json
-   */
-  private async downloadNeoForgeLibraries(versionJsonPath: string, instancePath: string): Promise<void> {
-    try {
-      logProgressService.info(`[NeoForge] Descargando librerías de NeoForge desde version.json...`);
-      
-      const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
-      const launcherDataPath = require('../../utils/paths').getLauncherDataPath();
-      const librariesDir = path.join(launcherDataPath, 'libraries');
-      
-      if (!versionData.libraries || !Array.isArray(versionData.libraries)) {
-        logProgressService.warning(`[NeoForge] No se encontraron librerías en el version.json`);
-        return;
-      }
-
-      let downloaded = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      for (const lib of versionData.libraries) {
-        try {
-          // Verificar reglas de compatibilidad
-          if (lib.rules && !this.isLibraryAllowed(lib.rules)) {
-            continue;
-          }
-
-          if (!lib.downloads?.artifact) {
-            continue;
-          }
-
-          const libPath = path.join(librariesDir, lib.downloads.artifact.path);
-          const libUrl = lib.downloads.artifact.url;
-
-          // Verificar si ya existe
-          if (fs.existsSync(libPath)) {
-            skipped++;
-            continue;
-          }
-
-          // Descargar la librería
-          const libDir = path.dirname(libPath);
-          if (!fs.existsSync(libDir)) {
-            fs.mkdirSync(libDir, { recursive: true });
-          }
-
-          const expectedHash = lib.downloads?.artifact?.sha1;
-          await this.downloadFile(libUrl, libPath, expectedHash, 'sha1');
-          downloaded++;
-          
-          if (downloaded % 10 === 0) {
-            logProgressService.info(`[NeoForge] Librerías descargadas: ${downloaded} (omitidas: ${skipped})`);
-          }
-        } catch (error) {
-          failed++;
-          logProgressService.warning(`[NeoForge] Error al procesar librería:`, error);
-        }
-      }
-
-      logProgressService.info(`[NeoForge] Librerías descargadas: ${downloaded} nuevas, ${skipped} existentes, ${failed} fallidas`);
-    } catch (error) {
-      logProgressService.error(`[NeoForge] Error al descargar librerías:`, error);
-      // No lanzar error, solo registrar
-    }
-  }
-
-  /**
-   * Verifica si una librería está permitida según sus reglas
-   */
-  private isLibraryAllowed(rules: any[]): boolean {
-    if (!rules || !Array.isArray(rules)) {
-      return true;
-    }
-
-    const os = process.platform;
-    const osName = os === 'win32' ? 'windows' : os === 'darwin' ? 'osx' : 'linux';
-    const arch = process.arch === 'x64' ? 'x86_64' : process.arch;
-
-    for (const rule of rules) {
-      if (rule.action === 'disallow') {
-        if (!rule.os) {
-          return false;
-        }
-        if (rule.os.name === osName || rule.os.arch === arch) {
-          return false;
-        }
-      } else if (rule.action === 'allow') {
-        if (!rule.os || rule.os.name === osName || rule.os.arch === arch) {
-          return true;
-        }
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Valida que todos los archivos necesarios estén presentes
-   */
-  validateDownload(instancePath: string, loaderVersion: string): boolean {
-    const clientJarPath = path.join(instancePath, 'client.jar');
-    const versionJsonPath = path.join(instancePath, 'loader', 'version.json');
     
-    if (!fs.existsSync(clientJarPath)) {
-      logProgressService.warning(`[NeoForge] client.jar no encontrado`);
-      return false;
+    if (!javaPath) {
+      throw new Error(`No se encontró Java 17+ para ejecutar el installer de NeoForge`);
     }
-
+    
+    // Crear launcher_profiles.json si no existe (NeoForge installer lo requiere)
+    // NeoForge busca este archivo en el directorio donde se ejecuta
+    this.ensureLauncherProfiles();
+    
+    // Ejecutar installer con --installClient
+    logProgressService.info(`[NeoForge] Ejecutando installer...`);
+    await this.runInstaller(javaPath, installerPath);
+    
+    // Validar que se creó el version.json
+    const versionName = `${mcVersion}-neoforge-${normalizedLoaderVersion}`;
+    const versionJsonPath = path.join(this.launcherDir, 'versions', versionName, `${versionName}.json`);
+    
     if (!fs.existsSync(versionJsonPath)) {
-      logProgressService.warning(`[NeoForge] version.json no encontrado`);
-      return false;
+      throw new Error(`El installer de NeoForge no generó el version.json esperado en: ${versionJsonPath}`);
     }
-
-    return true;
-  }
-
-  /**
-   * Descarga la metadata de una versión
-   */
-  private async downloadVersionMetadata(version: string): Promise<string> {
-    const versionDir = path.join(this.versionsPath, version);
-    this.ensureDir(versionDir);
     
-    const versionJsonPath = path.join(versionDir, 'version.json');
-    
-    if (fs.existsSync(versionJsonPath)) {
-      return versionJsonPath;
-    }
-
-    const manifestResponse = await fetch('https://launchermeta.mojang.com/mc/game/version_manifest.json');
-    const manifest = await manifestResponse.json();
-    
-    const versionInfo = manifest.versions.find((v: any) => v.id === version);
-    if (!versionInfo) {
-      throw new Error(`Versión ${version} no encontrada en el manifest`);
-    }
-
-    const versionMetadataResponse = await fetch(versionInfo.url);
-    const versionMetadata = await versionMetadataResponse.json();
-    
-    fs.writeFileSync(versionJsonPath, JSON.stringify(versionMetadata, null, 2));
-    return versionJsonPath;
-  }
-
-  /**
-   * Descarga el client.jar
-   */
-  private async downloadClientJar(mcVersion: string, instancePath: string, versionMetadata: any): Promise<void> {
-    const clientJarPath = path.join(instancePath, 'client.jar');
-    
-    if (fs.existsSync(clientJarPath)) {
-      const stats = fs.statSync(clientJarPath);
-      if (stats.size > 1024 * 1024) {
-        return;
+    // Validar que el version.json es válido
+    try {
+      const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+      if (!versionData.mainClass || !versionData.libraries) {
+        throw new Error(`Version.json generado por NeoForge es inválido`);
       }
-    }
-
-    const clientDownloadUrl = versionMetadata.downloads?.client?.url;
-    if (!clientDownloadUrl) {
-      throw new Error(`No se encontró URL de descarga para client.jar de la versión ${mcVersion}`);
-    }
-
-    const expectedHash = versionMetadata.downloads?.client?.sha1;
-    await this.downloadFile(clientDownloadUrl, clientJarPath, expectedHash, 'sha1');
-
-    if (!fs.existsSync(clientJarPath)) {
-      throw new Error(`client.jar no se descargó correctamente`);
-    }
-
-    const stats = fs.statSync(clientJarPath);
-    if (stats.size < 1024 * 1024) {
-      throw new Error(`client.jar descargado tiene un tamaño inusualmente pequeño: ${stats.size} bytes`);
+      logProgressService.info(`[NeoForge] Version.json generado correctamente: ${versionName}`);
+    } catch (error) {
+      throw new Error(`Error al validar version.json de NeoForge: ${error}`);
     }
   }
 
   /**
-   * Descarga los assets
+   * Crea launcher_profiles.json si no existe
+   * 
+   * NeoForge installer requiere este archivo para funcionar.
+   * Solo necesita que exista, no que sea real (NeoForge no lo valida en detalle).
    */
-  private async downloadAssets(mcVersion: string, versionMetadata: any): Promise<void> {
-    const assetIndexId = versionMetadata.assetIndex?.id || mcVersion;
-    const assetIndexUrl = versionMetadata.assetIndex?.url;
+  private ensureLauncherProfiles(): void {
+    const launcherProfilesPath = path.join(this.launcherDir, 'launcher_profiles.json');
     
-    if (!assetIndexUrl) {
-      throw new Error(`No se encontró URL del asset index para la versión ${mcVersion}`);
-    }
-
-    const indexesDir = path.join(this.assetsPath, 'indexes');
-    this.ensureDir(indexesDir);
-    const assetIndexPath = path.join(indexesDir, `${assetIndexId}.json`);
-    
-    if (!fs.existsSync(assetIndexPath)) {
-      await this.downloadFile(assetIndexUrl, assetIndexPath);
-    }
-
-    const assetIndex = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
-    const objects = assetIndex.objects || {};
-    const objectsDir = path.join(this.assetsPath, 'objects');
-    this.ensureDir(objectsDir);
-
-    const assetsToDownload: Array<{ assetPath: string; hash: string; assetName: string }> = [];
-    
-    for (const [assetName, assetInfo] of Object.entries(objects) as [string, any][]) {
-      const hash = assetInfo.hash;
-      const assetPath = path.join(objectsDir, hash.substring(0, 2), hash);
-      
-      if (!fs.existsSync(assetPath)) {
-        assetsToDownload.push({ assetPath, hash, assetName });
-      }
-    }
-
-    if (assetsToDownload.length > 0) {
-      logProgressService.info(`[NeoForge] Descargando ${assetsToDownload.length} assets...`);
-      
-      const CONCURRENT_DOWNLOADS = 70;
-      let downloadedCount = 0;
-
-      for (let i = 0; i < assetsToDownload.length; i += CONCURRENT_DOWNLOADS) {
-        const batch = assetsToDownload.slice(i, i + CONCURRENT_DOWNLOADS);
-        
-        for (const { assetPath } of batch) {
-          this.ensureDir(path.dirname(assetPath));
-        }
-
-        await Promise.allSettled(
-          batch.map(async ({ assetPath, hash, assetName }) => {
-            try {
-              const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
-              await this.downloadFile(assetUrl, assetPath, hash, 'sha1');
-              
-              downloadedCount++;
-              if (downloadedCount % 100 === 0 || downloadedCount === assetsToDownload.length) {
-                logProgressService.info(`[NeoForge] Asset descargado y verificado: ${downloadedCount}/${assetsToDownload.length} (${Math.floor((downloadedCount / assetsToDownload.length) * 100)}%)`);
-              }
-            } catch (error) {
-              logProgressService.warning(`[NeoForge] Error al descargar asset ${assetName}:`, error);
-            }
-          })
-        );
-      }
-    }
-  }
-
-  /**
-   * Descarga las librerías base de Minecraft
-   */
-  private async downloadLibraries(versionMetadata: any): Promise<void> {
-    const libraries = versionMetadata.libraries || [];
-    const librariesToDownload: any[] = [];
-
-    for (const library of libraries) {
-      if (library.rules && !this.isLibraryAllowed(library.rules)) {
-        continue;
-      }
-
-      const downloads = library.downloads;
-      if (!downloads || !downloads.artifact) {
-        continue;
-      }
-
-      const artifact = downloads.artifact;
-      const libraryPath = this.getLibraryPath(library.name);
-      
-      if (fs.existsSync(libraryPath)) {
-        const expectedHash = artifact.sha1;
-        if (expectedHash) {
-          try {
-            const fileBuffer = fs.readFileSync(libraryPath);
-            const hash = crypto.createHash('sha1').update(fileBuffer).digest('hex');
-            if (hash.toLowerCase() === expectedHash.toLowerCase()) {
-              continue;
-            }
-          } catch {
-            // Redescargar si hay error
-          }
-        } else {
-          continue;
-        }
-      }
-
-      librariesToDownload.push(library);
-    }
-
-    if (librariesToDownload.length === 0) {
-      return;
-    }
-
-    logProgressService.info(`[NeoForge] Descargando ${librariesToDownload.length} librerías base...`);
-
-    const downloadPromises = librariesToDownload.map(async (library) => {
-      try {
-        await this.downloadLibrary(library);
-      } catch (error) {
-        logProgressService.warning(`[NeoForge] Error al descargar librería ${library.name}:`, error);
-      }
-    });
-
-    await Promise.allSettled(downloadPromises);
-  }
-
-  /**
-   * Descarga una librería específica
-   */
-  private async downloadLibrary(library: any): Promise<void> {
-    const artifact = library.downloads.artifact;
-    const libraryPath = this.getLibraryPath(library.name);
-    const libraryDir = path.dirname(libraryPath);
-    
-    this.ensureDir(libraryDir);
-
-    const expectedHash = artifact.sha1;
-    await this.downloadFile(artifact.url, libraryPath, expectedHash, 'sha1');
-  }
-
-  /**
-   * Convierte el nombre de la librería al formato de ruta
-   */
-  private getLibraryPath(libraryName: string): string {
-    const parts = libraryName.split(':');
-    if (parts.length < 3) {
-      throw new Error(`Formato de librería inválido: ${libraryName}`);
-    }
-
-    const [group, artifact, version] = parts;
-    const groupPath = group.replace(/\./g, '/');
-    const libraryDir = path.join(this.librariesPath, groupPath, artifact, version);
-    const fileName = `${artifact}-${version}.jar`;
-    
-    return path.join(libraryDir, fileName);
-  }
-
-  /**
-   * Descarga un archivo usando el servicio de cola
-   */
-  private async downloadFile(url: string, outputPath: string, expectedHash?: string, hashAlgorithm: string = 'sha1'): Promise<void> {
-    const downloadId = await downloadQueueService.addDownload(url, outputPath, expectedHash, hashAlgorithm);
-
-    return new Promise((resolve, reject) => {
-      const checkStatus = () => {
-        const status = downloadQueueService.getDownloadStatus(downloadId);
-        if (!status) {
-          reject(new Error(`Download ${downloadId} not found`));
-          return;
-        }
-
-        if (status.status === 'completed') {
-          resolve();
-        } else if (status.status === 'error') {
-          reject(new Error(status.error || 'Download failed'));
-        } else {
-          setTimeout(checkStatus, 500);
+    if (!fs.existsSync(launcherProfilesPath)) {
+      const launcherProfiles = {
+        profiles: {},
+        clientToken: 'drk-launcher',
+        launcherVersion: {
+          name: 'DRK Launcher',
+          format: 21
         }
       };
+      
+      fs.writeFileSync(
+        launcherProfilesPath,
+        JSON.stringify(launcherProfiles, null, 2)
+      );
+      
+      logProgressService.info(`[NeoForge] launcher_profiles.json creado en: ${launcherProfilesPath}`);
+    }
+  }
 
-      checkStatus();
+  /**
+   * Ejecuta el installer de NeoForge
+   * 
+   * CRÍTICO: El installer debe ejecutarse desde el root del launcher (launcherDir),
+   * no desde la carpeta del installer. NeoForge busca launcher_profiles.json en el cwd.
+   * 
+   * @param javaPath Ruta al ejecutable de Java
+   * @param installerJar Ruta al installer.jar
+   */
+  private runInstaller(javaPath: string, installerJar: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      logProgressService.info(`[NeoForge Installer] Ejecutando: ${javaPath} -jar ${installerJar} --installClient`);
+      
+      const proc = spawn(
+        javaPath,
+        ['-jar', installerJar, '--installClient'],
+        {
+          cwd: this.launcherDir, // CRÍTICO: NeoForge debe ejecutarse desde el root del launcher
+          stdio: 'pipe'
+        }
+      );
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data: Buffer) => {
+        const text = data.toString();
+        stdout += text;
+        logProgressService.info(`[NeoForge Installer] ${text.trim()}`);
+      });
+
+      proc.stderr.on('data', (data: Buffer) => {
+        const text = data.toString();
+        stderr += text;
+        // Algunos installers escriben información en stderr, no es necesariamente un error
+        logProgressService.info(`[NeoForge Installer] ${text.trim()}`);
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          logProgressService.info(`[NeoForge Installer] Instalación completada exitosamente`);
+          resolve();
+        } else {
+          const errorMsg = `Installer de NeoForge falló con código ${code}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
+          logProgressService.error(`[NeoForge Installer] ${errorMsg}`);
+          reject(new Error(errorMsg));
+        }
+      });
+
+      proc.on('error', (error: Error) => {
+        const errorMsg = `Error al ejecutar installer de NeoForge: ${error.message}`;
+        logProgressService.error(`[NeoForge Installer] ${errorMsg}`);
+        reject(new Error(errorMsg));
+      });
     });
   }
 }
 
+// Exportar solo la instancia (patrón singleton)
 export const downloadNeoForge = new DownloadNeoForge();
 

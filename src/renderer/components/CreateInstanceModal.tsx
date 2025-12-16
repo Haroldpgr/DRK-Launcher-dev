@@ -304,7 +304,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
 
       // Obtener parámetros Java estándar para el loader
       const standardJvmArgs = JavaConfigService.getStandardJvmArgs(loaderType, maxMemory);
-      
+
       // Crear la instancia con el nuevo servicio
       console.log(`[CreateInstanceModal] Creando instancia con loaderVersion: ${finalLoaderVersion || 'NO ESPECIFICADA'}`);
       const createdInstance = await integratedDownloadService.createInstance({
@@ -418,13 +418,13 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                     transition={{ duration: 0.3 }}
                     className="mb-6 bg-gradient-to-r from-blue-900/30 to-purple-900/30 p-4 rounded-xl border border-blue-700/50 shadow-lg shadow-blue-500/10"
                   >
-                    <div className="flex justify-between items-center mb-2">
+                  <div className="flex justify-between items-center mb-2">
                       <span className="text-sm font-medium text-gray-200 flex items-center gap-2">
                         <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
                         Progreso general:
                       </span>
-                      <span className="text-sm font-semibold text-blue-400">{Math.round(overallProgress.progress * 100)}%</span>
-                    </div>
+                    <span className="text-sm font-semibold text-blue-400">{Math.round(overallProgress.progress * 100)}%</span>
+                  </div>
                     <div className="w-full bg-gray-700/50 rounded-full h-3 overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
@@ -438,13 +438,13 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                           className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
                         />
                       </motion.div>
-                    </div>
+                  </div>
                     <div className="mt-2 text-xs text-gray-300 flex justify-between">
-                      <span>{overallProgress.statusText}</span>
+                    <span>{overallProgress.statusText}</span>
                       <span className="text-blue-400">{overallProgress.activeOperations} operaciones activas</span>
-                    </div>
+                  </div>
                   </motion.div>
-                )}
+              )}
               </AnimatePresence>
 
               {/* Estado de progreso actual - Solo mostrar cuando hay descarga activa */}
@@ -466,14 +466,14 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                         fill="none"
                         viewBox="0 0 24 24"
                       >
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </motion.svg>
-                      <span className="font-medium">{currentProgress.target}</span>
-                    </div>
+                    <span className="font-medium">{currentProgress.target}</span>
+                  </div>
                     <div className="mt-1 text-xs text-blue-300 mb-3">
-                      {currentProgress.details || currentProgress.operation}
-                    </div>
+                    {currentProgress.details || currentProgress.operation}
+                  </div>
                     <div className="w-full bg-blue-900/30 rounded-full h-2.5 overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
@@ -487,12 +487,12 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                           className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
                         />
                       </motion.div>
-                    </div>
+                  </div>
                     <div className="mt-2 text-xs text-blue-300 text-right font-medium">
-                      {currentProgress.current} / {currentProgress.total}
-                    </div>
+                    {currentProgress.current} / {currentProgress.total}
+                  </div>
                   </motion.div>
-                )}
+              )}
               </AnimatePresence>
 
               <form onSubmit={handleSubmit}>
@@ -703,7 +703,7 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                               </label>
                               <div className="w-full px-3 py-2 bg-gray-600/30 border border-gray-500/30 rounded-lg text-gray-400 text-sm max-h-20 overflow-y-auto">
                                 {javaArgs || 'Configurando parámetros optimizados...'}
-                              </div>
+                            </div>
                               <p className="text-xs text-gray-500 mt-1">Los parámetros se configuran automáticamente para optimizar el rendimiento</p>
                             </div>
                           </motion.div>

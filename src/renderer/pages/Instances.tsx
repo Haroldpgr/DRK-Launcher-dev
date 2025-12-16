@@ -5,6 +5,7 @@ import { instanceProfileService } from '../services/instanceProfileService'
 import CreateInstanceModal from '../components/CreateInstanceModal'
 import InstanceEditModal from '../components/InstanceEditModal'
 import ConfirmationModal from '../components/ConfirmationModal'
+import GameLogsModal from '../components/GameLogsModal'
 import { notificationService } from '../services/notificationService'
 
 type InstanceType = 'owned' | 'imported' | 'shared';
@@ -48,6 +49,8 @@ export default function Instances({ onPlay }: InstancesProps) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [instanceToDelete, setInstanceToDelete] = useState<Instance | null>(null)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showLogsModal, setShowLogsModal] = useState(false)
+  const [selectedInstanceForLogs, setSelectedInstanceForLogs] = useState<Instance | null>(null)
 
   // Estado para rastrear si las instancias están listas para jugar
   const [readyStatus, setReadyStatus] = useState<Record<string, boolean>>({});
@@ -211,11 +214,10 @@ export default function Instances({ onPlay }: InstancesProps) {
       await window.api.instances.delete(instanceToDelete.id)
       
       // Mostrar notificación de éxito
-      notificationService.showNotification({
+      notificationService.show({
         type: 'success',
         title: 'Instancia eliminada',
-        message: `La instancia "${instanceToDelete.name}" ha sido eliminada correctamente.`,
-        duration: 3000
+        message: `La instancia "${instanceToDelete.name}" ha sido eliminada correctamente.`
       });
       
       autoDetectInstances(); // Recargar instancias después de eliminar
@@ -224,11 +226,10 @@ export default function Instances({ onPlay }: InstancesProps) {
     } catch (err) {
       console.error('Error al eliminar instancia:', err)
       setError(`Error al eliminar instancia: ${(err as Error).message || 'Error desconocido'}`)
-      notificationService.showNotification({
+      notificationService.show({
         type: 'error',
         title: 'Error al eliminar',
-        message: `No se pudo eliminar la instancia "${instanceToDelete.name}".`,
-        duration: 4000
+        message: `No se pudo eliminar la instancia "${instanceToDelete.name}".`
       });
       setShowDeleteModal(false);
       setInstanceToDelete(null);
@@ -250,9 +251,32 @@ export default function Instances({ onPlay }: InstancesProps) {
     }
   }
 
+  // CRÍTICO: Protección contra dobles clics y ejecuciones múltiples
+  const launchingInstances = new Set<string>();
+
   const handlePlay = async (id: string) => {
-    // Usar la función onPlay pasada como prop
-    onPlay(id);
+    // CRÍTICO: Verificar si ya hay un lanzamiento en progreso para esta instancia
+    if (launchingInstances.has(id)) {
+      console.warn(`[Instances] ⚠️ BLOQUEADO: Ya hay un lanzamiento en progreso para la instancia ${id}. Ignorando doble clic.`);
+      return;
+    }
+    
+    // Marcar que hay un lanzamiento en progreso
+    launchingInstances.add(id);
+    console.log(`[Instances] Iniciando lanzamiento para instancia: ${id}`);
+    
+    try {
+      // Usar la función onPlay pasada como prop
+      await onPlay(id);
+    } catch (error) {
+      console.error(`[Instances] Error al lanzar instancia ${id}:`, error);
+    } finally {
+      // Limpiar el flag después de un delay para permitir que el proceso se inicie
+      setTimeout(() => {
+        launchingInstances.delete(id);
+        console.log(`[Instances] Flag de lanzamiento limpiado para instancia: ${id}`);
+      }, 5000); // 5 segundos deberían ser suficientes
+    }
   }
 
   const startEdit = (instance: Instance) => {
@@ -604,13 +628,13 @@ export default function Instances({ onPlay }: InstancesProps) {
                 <button
                   onClick={() => handlePlay(instance.id)}
                   className={`flex-1 min-w-[70px] px-3 py-2 rounded-lg transition-colors text-sm ${
-                    checkInstanceReady(instance)
+                    checkInstanceReady(instance) && !launchingInstances.has(instance.id)
                       ? 'bg-green-600 hover:bg-green-500 text-white' 
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-400 cursor-not-allowed'
                   }`}
-                  disabled={!checkInstanceReady(instance)}
+                  disabled={!checkInstanceReady(instance) || launchingInstances.has(instance.id)}
                 >
-                  {checkInstanceReady(instance) ? 'Jugar' : 'Pendiente'}
+                  {launchingInstances.has(instance.id) ? 'Iniciando...' : checkInstanceReady(instance) ? 'Jugar' : 'Pendiente'}
                 </button>
                 <button
                   onClick={() => open(instance.id)}
@@ -628,8 +652,21 @@ export default function Instances({ onPlay }: InstancesProps) {
                   </svg>
                 </button>
                 <button
+                  onClick={() => {
+                    setSelectedInstanceForLogs(instance);
+                    setShowLogsModal(true);
+                  }}
+                  className="px-3 py-2 bg-purple-700 hover:bg-purple-600 text-white rounded-lg transition-colors text-sm"
+                  title="Ver Logs"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </button>
+                <button
                   onClick={() => viewInstanceDetails(instance)}
                   className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm"
+                  title="Ver Detalles"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -759,11 +796,10 @@ export default function Instances({ onPlay }: InstancesProps) {
         // Refrescar la lista de instancias después de crear una nueva
         autoDetectInstances();
         // Mostrar notificación de éxito
-        notificationService.showNotification({
+        notificationService.show({
           type: 'success',
           title: 'Instancia creada',
-          message: 'La instancia se está descargando. Aparecerá cuando termine la descarga.',
-          duration: 4000
+          message: 'La instancia se está descargando. Aparecerá cuando termine la descarga.'
         });
       }}
     />
@@ -791,6 +827,19 @@ export default function Instances({ onPlay }: InstancesProps) {
         onClose={closeEdit}
         onSave={handleSaveEdit}
         onDelete={remove}
+      />
+    )}
+
+    {/* Modal de logs del juego */}
+    {selectedInstanceForLogs && (
+      <GameLogsModal
+        instanceId={selectedInstanceForLogs.id}
+        instanceName={selectedInstanceForLogs.name}
+        isOpen={showLogsModal}
+        onClose={() => {
+          setShowLogsModal(false);
+          setSelectedInstanceForLogs(null);
+        }}
       />
     )}
     </>

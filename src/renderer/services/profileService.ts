@@ -14,6 +14,9 @@ export interface Profile {
   // Tokens para Yggdrasil (opcional, solo para tipo 'yggdrasil')
   accessToken?: string;
   clientToken?: string;
+  // Campos adicionales para Microsoft/premium
+  clientId?: string;
+  xuid?: string;
 }
 
 const STORAGE_KEY = 'launcher_profiles';

@@ -6,6 +6,7 @@ import { themeService } from './services/themeService';
 import { processMonitorService } from './services/processMonitorService';
 import NotificationContainer from './components/NotificationContainer';
 import DownloadProgressWidget from './components/DownloadProgressWidget';
+import SplashScreen from './components/SplashScreen';
 
 // Lazy loading de componentes pesados para optimizar memoria
 const Home = lazy(() => import('./pages/Home'));
@@ -35,6 +36,7 @@ export default function App() {
   const [javaInstallations, setJavaInstallations] = useState([]) // State for Java installations
   const [accounts, setAccounts] = useState<Profile[]>([]);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [showSplash, setShowSplash] = useState(true); // Estado para mostrar/ocultar splash screen
 
   // Escuchar eventos de actualización de perfiles
   useEffect(() => {
@@ -56,6 +58,11 @@ export default function App() {
   const loc = useLocation()
 
   useEffect(() => {
+    // Mostrar splash screen por un tiempo mínimo (2.5 segundos para que se vea la animación completa)
+    const splashTimer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
+
     // Load profiles and current user from service
     const initialProfiles = profileService.getAllProfiles();
     setAccounts(initialProfiles);
@@ -89,6 +96,8 @@ export default function App() {
         });
       }
     }
+
+    return () => clearTimeout(splashTimer);
   }, [])
 
   useEffect(() => {
@@ -219,10 +228,11 @@ export default function App() {
     setLoginModalOpen(false);
   };
 
-  const handleMicrosoftLogin = () => {
-    console.log("Microsoft Login attempt - currently under maintenance.");
-    // No additional logic here, modal component will show maintenance message
-  };
+  const handleMicrosoftLogin = useCallback(async () => {
+    console.log("[App] Iniciando autenticación con Microsoft...");
+    // La lógica de autenticación se maneja directamente en LoginModal
+    // Este handler se mantiene para compatibilidad pero no hace nada adicional
+  }, []);
 
   const handleNonPremiumLogin = useCallback((username: string) => {
     const newProfile = profileService.addProfile(username, 'non-premium');
@@ -258,23 +268,89 @@ export default function App() {
     handleCloseLoginModal();
   }, []);
 
+  // CRÍTICO: Protección contra doble clic o llamadas múltiples
+  const launchingInstances = new Set<string>();
+
   const handlePlay = async (instanceId: string) => {
+    // CRÍTICO: Obtener stack trace para identificar de dónde viene la llamada
+    const stackTrace = new Error().stack;
+    const callerInfo = stackTrace?.split('\n')[2]?.trim() || 'Desconocido';
+    
+    console.log(`[App] ===== INTENTO DE LANZAMIENTO DETECTADO =====`);
+    console.log(`[App] Instancia: ${instanceId}`);
+    console.log(`[App] Llamado desde: ${callerInfo}`);
+    console.log(`[App] Stack trace completo:`, stackTrace);
+    console.log(`[App] Timestamp: ${new Date().toISOString()}`);
+    console.log(`[App] ===========================================`);
+
+    // CRÍTICO: Verificar si ya hay un lanzamiento en progreso para esta instancia
+    if (launchingInstances.has(instanceId)) {
+      console.warn(`[App] ⚠️ BLOQUEADO: Ya hay un lanzamiento en progreso para la instancia ${instanceId}.`);
+      console.warn(`[App] Esta llamada fue bloqueada. Llamado desde: ${callerInfo}`);
+      console.warn(`[App] Stack trace de la llamada bloqueada:`, stackTrace);
+      return;
+    }
+
+    // Marcar que hay un lanzamiento en progreso
+    launchingInstances.add(instanceId);
+    console.log(`[App] ✓ Flag de lanzamiento activado para instancia: ${instanceId}`);
+
     try {
       // Usar la API de Electron para lanzar el juego
       if (window.api?.game?.launch) {
-        // Pasar también el perfil de usuario actual
-        await window.api.game.launch({
+        console.log(`[App] Llamando a window.api.game.launch para instancia: ${instanceId}`);
+        
+        // Obtener el perfil de usuario actual
+        let userProfile = currentUser ? profileService.getProfileByUsername(currentUser) : undefined;
+        
+        // Validar que el perfil tenga un accessToken válido
+        if (userProfile) {
+          // Verificar si el perfil tiene un accessToken válido
+          if (!userProfile.accessToken || userProfile.accessToken === '0' || userProfile.accessToken.trim() === '') {
+            console.warn(`[App] El perfil ${userProfile.username} no tiene un accessToken válido. El juego se ejecutará en modo offline.`);
+            // El juego se ejecutará en modo offline, pero aún pasamos el perfil para el username
+          } else {
+            console.log(`[App] Usando perfil autenticado: ${userProfile.username} (tipo: ${userProfile.type})`);
+          }
+        } else {
+          console.warn('[App] No se encontró perfil de usuario. El juego se ejecutará en modo offline.');
+        }
+        
+        console.log(`[App] Enviando solicitud de lanzamiento al proceso principal...`);
+        // Pasar el perfil al juego (aunque no tenga accessToken, para usar el username)
+        const result = await window.api.game.launch({
           instanceId,
-          userProfile: currentUser ? profileService.getProfileByUsername(currentUser) : undefined
+          userProfile: userProfile
         });
-        console.log(`Juego iniciado para la instancia: ${instanceId}`);
+        
+        if (result?.started) {
+          console.log(`[App] ✓ Juego iniciado exitosamente para la instancia: ${instanceId} (PID: ${result.pid})`);
+          console.log(`[App] Llamado desde: ${callerInfo}`);
+        } else {
+          console.warn(`[App] ⚠️ El lanzamiento fue rechazado: ${result?.reason || 'Razón desconocida'}`);
+          console.warn(`[App] Llamado desde: ${callerInfo}`);
+        }
       } else {
-        console.error('La API de juego no está disponible');
+        console.error('[App] ❌ La API de juego no está disponible');
       }
     } catch (error) {
-      console.error('Error al iniciar el juego:', error);
+      console.error('[App] ❌ Error al iniciar el juego:', error);
+      console.error(`[App] Error ocurrido en llamada desde: ${callerInfo}`);
+      console.error(`[App] Stack trace del error:`, error instanceof Error ? error.stack : 'N/A');
+    } finally {
+      // CRÍTICO: Limpiar el flag después de un breve delay para permitir que el proceso se inicie
+      // El flag se limpiará automáticamente cuando el proceso termine (manejado en main.ts)
+      setTimeout(() => {
+        launchingInstances.delete(instanceId);
+        console.log(`[App] Flag de lanzamiento limpiado para instancia: ${instanceId}`);
+      }, 5000); // 5 segundos deberían ser suficientes para que el proceso se inicie
     }
   };
+
+  // Mostrar splash screen mientras carga
+  if (showSplash) {
+    return <SplashScreen />;
+  }
 
   return (
     <div className="h-full flex">

@@ -1,7 +1,14 @@
+// src/services/instanceService.ts
+// Servicio para gestionar la configuración y estructura de instancias
+// IMPORTANTE: No mezcla lógica entre loaders, cada uno tiene validaciones específicas
+
 import path from 'node:path';
 import fs from 'node:fs';
 import { getLauncherDataPath } from '../utils/paths';
 
+/**
+ * Interfaz para la configuración de una instancia
+ */
 export interface InstanceConfig {
   id: string;
   name: string;
@@ -11,11 +18,13 @@ export interface InstanceConfig {
   javaPath?: string;
   javaId?: string;
   maxMemory?: number;
+  minMemory?: number;
   windowWidth?: number;
   windowHeight?: number;
   jvmArgs?: string[];
   createdAt: number;
   path: string;
+  ready?: boolean;
 }
 
 /**
@@ -25,120 +34,85 @@ export class InstanceService {
   private basePath: string;
 
   constructor() {
-    const launcherPath = getLauncherDataPath();
-    this.basePath = path.join(launcherPath, 'instances');
+    this.basePath = path.join(getLauncherDataPath(), 'instances');
     this.ensureDir(this.basePath);
   }
 
   /**
-   * Crea una nueva instancia con la estructura correcta
-   * @param config Configuración de la instancia
-   * @returns La instancia creada
+   * Asegura que un directorio exista
    */
-  public createInstance(config: Omit<InstanceConfig, 'path' | 'createdAt'> & Partial<Pick<InstanceConfig, 'id'>>): InstanceConfig {
-    const id = config.id || this.generateInstanceId(config.name);
-    const instancePath = path.join(this.basePath, id);
-
-    // Verificar que no exista ya una instancia con este ID
-    if (fs.existsSync(instancePath)) {
-      // Si ya existe, agregar un sufijo numérico
-      let counter = 1;
-      let uniqueId = `${id}_${counter}`;
-      let uniquePath = path.join(this.basePath, uniqueId);
-
-      while (fs.existsSync(uniquePath)) {
-        counter++;
-        uniqueId = `${id}_${counter}`;
-        uniquePath = path.join(this.basePath, uniqueId);
-      }
-
-      // Actualizar el ID y path para la nueva instancia única
-      const newInstanceId = uniqueId;
-      const newInstancePath = path.join(this.basePath, newInstanceId);
-
-      // Crear la carpeta de la instancia con el nuevo ID
-      this.ensureDir(newInstancePath);
-
-      // Crear la estructura de carpetas necesaria para el juego
-      this.createInstanceStructure(newInstancePath);
-
-      // Crear el archivo de configuración de la instancia
-      const instanceConfig: InstanceConfig = {
-        ...config,
-        id: newInstanceId,
-        createdAt: Date.now(),
-        path: newInstancePath
-      };
-
-      this.saveInstanceConfig(newInstancePath, instanceConfig);
-
-      return instanceConfig;
+  private ensureDir(dir: string): void {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
-
-    // Crear la carpeta de la instancia
-    this.ensureDir(instancePath);
-
-    // Crear la estructura de carpetas necesaria para el juego
-    this.createInstanceStructure(instancePath);
-
-    // Crear el archivo de configuración de la instancia
-    const instanceConfig: InstanceConfig = {
-      ...config,
-      id: config.id || id,
-      createdAt: Date.now(),
-      path: instancePath
-    };
-
-    this.saveInstanceConfig(instancePath, instanceConfig);
-
-    return instanceConfig;
   }
 
   /**
-   * Genera un ID para la instancia basado en el nombre
+   * Genera un ID único para la instancia basado en el nombre
    */
   private generateInstanceId(name: string): string {
-    // Convertir el nombre a un formato seguro para usar como nombre de carpeta
     return name
       .toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Eliminar tildes
       .replace(/[^\w\s-]/g, '') // Eliminar caracteres especiales
       .replace(/\s+/g, '-') // Reemplazar espacios con guiones
       .replace(/-+/g, '-') // Eliminar múltiples guiones seguidos
-      .trim(); // Eliminar espacios al inicio y final
+      .trim();
   }
 
   /**
-   * Crea la estructura de carpetas necesaria para una instancia de Minecraft
-   * @param instancePath Ruta de la instancia
+   * Crea una nueva instancia con la estructura de carpetas básica
    */
-  private createInstanceStructure(instancePath: string): void {
-    // Carpetas necesarias para que el juego funcione correctamente
+  createInstance(config: {
+    name: string;
+    version: string;
+    loader?: 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge';
+    loaderVersion?: string;
+    javaPath?: string;
+    maxMemory?: number;
+    minMemory?: number;
+    jvmArgs?: string[];
+    id?: string;
+  }): InstanceConfig {
+    const id = config.id || this.generateInstanceId(config.name);
+    const instancePath = path.join(this.basePath, id);
+
+    // Crear la estructura de carpetas necesaria
     const requiredFolders = [
-      'mods',           // Mods de juego
-      'resourcepacks',  // Paquetes de recursos
-      'shaderpacks',    // Shaders (para OptiFine/Iris)
-      'config',         // Configuración de mods y loader
-      'saves',          // Mundos guardados
-      'logs',           // Registros del cliente
-      'assets',         // Assets del juego (texturas, sonidos, etc.)
-      'natives'         // Bibliotecas nativas
+      'mods',
+      'config',
+      'saves',
+      'logs',
+      'resourcepacks',
+      'shaderpacks',
+      'screenshots'
     ];
 
+    this.ensureDir(instancePath);
     requiredFolders.forEach(folder => {
-      const folderPath = path.join(instancePath, folder);
-      this.ensureDir(folderPath);
+      this.ensureDir(path.join(instancePath, folder));
     });
-  }
 
-  /**
-   * Asegura que un directorio exista, creándolo si es necesario
-   * @param dir Directorio a asegurar
-   */
-  private ensureDir(dir: string): void {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    // Crear la configuración de la instancia
+    const instanceConfig: InstanceConfig = {
+      id,
+      name: config.name,
+      version: config.version,
+      loader: config.loader,
+      loaderVersion: config.loaderVersion,
+      javaPath: config.javaPath,
+      maxMemory: config.maxMemory,
+      minMemory: config.minMemory,
+      jvmArgs: config.jvmArgs,
+      createdAt: Date.now(),
+      path: instancePath,
+      ready: false
+    };
+
+    // Guardar la configuración
+    this.saveInstanceConfig(instancePath, instanceConfig);
+
+    return instanceConfig;
   }
 
   /**
@@ -150,96 +124,7 @@ export class InstanceService {
   }
 
   /**
-   * Verifica si una instancia está lista para ejecutarse
-   * @param instancePath Ruta de la instancia
-   * @returns true si la instancia tiene los archivos necesarios
-   */
-  public isInstanceReady(instancePath: string): boolean {
-    // Verificar que exista el archivo client.jar principal
-    const clientJarPath = path.join(instancePath, 'client.jar');
-    if (!fs.existsSync(clientJarPath)) {
-      console.log(`client.jar no encontrado en ${clientJarPath}`);
-      try {
-        const files = fs.readdirSync(instancePath);
-        console.log(`Archivos en la instancia:`, files.join(', '));
-      } catch (dirError) {
-        console.log(`No se pudo leer el directorio de la instancia:`, dirError);
-      }
-      return false;
-    }
-
-    // Verificar si podemos acceder al archivo y obtener su tamaño
-    let clientJarStats;
-    try {
-      clientJarStats = fs.statSync(clientJarPath);
-    } catch (statError) {
-      console.log(`No se pudo acceder al archivo client.jar: ${statError}`);
-      return false;
-    }
-
-    // Verificar si el client.jar tiene un tamaño razonable (al menos 1MB para ser considerado válido)
-    if (clientJarStats.size < 1024 * 1024) { // 1MB en bytes
-      console.log(`client.jar es demasiado pequeño (${clientJarStats.size} bytes), probablemente no esté completamente descargado`);
-      return false;
-    }
-
-    console.log(`client.jar encontrado y válido: ${clientJarPath} (${clientJarStats.size} bytes)`);
-
-    // Verificar que exista la carpeta de assets o que exista en la ubicación compartida
-    const launcherPath = getLauncherDataPath();
-    const launcherAssetsPath = path.join(launcherPath, 'assets');
-
-    // Solo verificamos que exista la carpeta compartida donde están los assets
-    if (!fs.existsSync(launcherAssetsPath)) {
-      console.log(`No se encontró la carpeta de assets compartida en (${launcherAssetsPath})`);
-      return false;
-    }
-
-    // Verificar que exista la estructura de carpetas básica
-    const requiredFolders = ['mods', 'config', 'saves', 'logs'];
-    for (const folder of requiredFolders) {
-      const folderPath = path.join(instancePath, folder);
-      if (!fs.existsSync(folderPath)) {
-        // Creamos la carpeta si no existe
-        try {
-          fs.mkdirSync(folderPath, { recursive: true });
-          console.log(`Carpeta creada: ${folderPath}`);
-        } catch (mkdirErr) {
-          console.log(`No se pudo crear carpeta ${folder}:`, mkdirErr);
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Genera el comando de ejecución para la instancia
-   * @param instancePath Ruta de la instancia
-   * @param javaPath Ruta al ejecutable de Java
-   * @param maxMemory Memoria máxima en MB
-   * @returns Comando de ejecución completo
-   */
-  public buildGameCommand(instancePath: string, javaPath: string, maxMemory: number): string {
-    // Parámetros JVM (Memoria, etc.)
-    const jvmArgs = [
-      `-Xmx${maxMemory}M`, // Límite de RAM (Ej. 4096M)
-      `-Dminecraft.client.dir=${instancePath}`, // CRUCIAL: Le dice al juego dónde está la carpeta de trabajo
-      '-jar',
-      path.join(instancePath, 'client.jar') // Apunta al archivo que inicia el proceso de juego/loader
-    ];
-
-    const fullCommand = `${javaPath} ${jvmArgs.join(' ')}`;
-    console.log("Comando a ejecutar:", fullCommand);
-    
-    return fullCommand;
-  }
-
-  /**
-   * Obtiene la configuración de una instancia desde su archivo
-   * @param instancePath Ruta de la instancia
-   * @returns Configuración de la instancia o null si no existe
+   * Obtiene la configuración de una instancia existente
    */
   public getInstanceConfig(instancePath: string): InstanceConfig | null {
     const configPath = path.join(instancePath, 'instance.json');
@@ -257,9 +142,89 @@ export class InstanceService {
   }
 
   /**
-   * Actualiza la configuración de la instancia
-   * @param instancePath Ruta de la instancia
-   * @param updates Actualizaciones a aplicar
+   * Verifica si una instancia está lista para jugar
+   * 
+   * IMPORTANTE: Cada loader tiene diferentes requisitos:
+   * - Vanilla/Fabric/Quilt: Requieren client.jar en la instancia
+   * - Forge/NeoForge: NO requieren client.jar, usan version.json en versions/
+   */
+  public isInstanceReady(instancePath: string): boolean {
+    try {
+      // Verificar que exista la configuración
+      const config = this.getInstanceConfig(instancePath);
+      if (!config) {
+        console.log(`[VERIFICACIÓN] Configuración de instancia no encontrada: ${instancePath}`);
+        return false;
+      }
+
+      const loader = config.loader || 'vanilla';
+
+      // Verificación específica por loader
+      if (loader === 'forge' || loader === 'neoforge') {
+        // Forge/NeoForge: Validar version.json en versions/
+        // NO existe client.jar en la instancia
+        if (!config.loaderVersion) {
+          console.log(`[VERIFICACIÓN] Configuración de instancia incompleta: falta loaderVersion para ${loader}`);
+          return false;
+        }
+
+        // Normalizar loaderVersion
+        let normalizedLoaderVersion = config.loaderVersion;
+        if (config.loaderVersion.includes('-')) {
+          const parts = config.loaderVersion.split('-');
+          if (parts.length > 1) {
+            normalizedLoaderVersion = parts[parts.length - 1];
+          }
+        }
+
+        const launcherDataPath = getLauncherDataPath();
+        const versionName = `${config.version}-${loader}-${normalizedLoaderVersion}`;
+        const versionJsonPath = path.join(launcherDataPath, 'versions', versionName, `${versionName}.json`);
+
+        if (!fs.existsSync(versionJsonPath)) {
+          console.log(`[VERIFICACIÓN] Version.json de ${loader} no encontrado: ${versionJsonPath}`);
+          return false;
+        }
+
+        // Validar que el version.json es válido
+        try {
+          const versionData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+          if (!versionData.mainClass || !versionData.libraries) {
+            console.log(`[VERIFICACIÓN] Version.json de ${loader} es inválido`);
+            return false;
+          }
+        } catch (error) {
+          console.log(`[VERIFICACIÓN] Error al validar version.json de ${loader}: ${error}`);
+          return false;
+        }
+
+        console.log(`[VERIFICACIÓN] Instancia ${loader} lista: version.json válido`);
+        return true;
+      } else {
+        // Vanilla/Fabric/Quilt: Validar client.jar en la instancia
+        const clientJarPath = path.join(instancePath, 'client.jar');
+        if (!fs.existsSync(clientJarPath)) {
+          console.log(`[VERIFICACIÓN] client.jar no encontrado: ${clientJarPath}`);
+          return false;
+        }
+
+        const stats = fs.statSync(clientJarPath);
+        if (stats.size < 1024 * 1024) { // Menos de 1MB
+          console.log(`[VERIFICACIÓN] client.jar tiene tamaño inusualmente pequeño: ${stats.size} bytes`);
+          return false;
+        }
+
+        console.log(`[VERIFICACIÓN] Instancia ${loader || 'vanilla'} lista: client.jar válido (${stats.size} bytes)`);
+        return true;
+      }
+    } catch (error) {
+      console.error(`[VERIFICACIÓN] Error al verificar instancia: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Actualiza la configuración de una instancia existente
    */
   public updateInstanceConfig(instancePath: string, updates: Partial<InstanceConfig>): void {
     const config = this.getInstanceConfig(instancePath);
@@ -270,6 +235,40 @@ export class InstanceService {
     const updatedConfig = { ...config, ...updates };
     this.saveInstanceConfig(instancePath, updatedConfig);
   }
+
+  /**
+   * Lista todas las instancias disponibles
+   */
+  public listInstances(): InstanceConfig[] {
+    if (!fs.existsSync(this.basePath)) {
+      return [];
+    }
+
+    const instances: InstanceConfig[] = [];
+    const dirs = fs.readdirSync(this.basePath, { withFileTypes: true });
+
+    for (const dir of dirs) {
+      if (dir.isDirectory()) {
+        const instancePath = path.join(this.basePath, dir.name);
+        const config = this.getInstanceConfig(instancePath);
+        if (config) {
+          instances.push(config);
+        }
+      }
+    }
+
+    return instances;
+  }
+
+  /**
+   * Elimina una instancia
+   */
+  public deleteInstance(instancePath: string): void {
+    if (fs.existsSync(instancePath)) {
+      fs.rmSync(instancePath, { recursive: true, force: true });
+    }
+  }
 }
 
 export const instanceService = new InstanceService();
+

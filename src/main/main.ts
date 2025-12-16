@@ -24,10 +24,15 @@ import { javaDownloadService } from '../services/javaDownloadService';
 import { loaderService } from '../services/loaderService';
 import { logProgressService } from '../services/logProgressService';
 import { gameLaunchService } from '../services/gameLaunchService';
+import { gameLogsService } from '../services/gameLogsService';
 import { tempModpackService } from '../services/tempModpackService';
 import { fileAnalyzerService } from '../services/fileAnalyzerService';
 import { YggdrasilClient, yggdrasilClient } from './yggdrasilClient';
 import { DrkAuthClient, drkAuthClient } from './drkAuthClient';
+import { MicrosoftAuthClient, microsoftAuthClient } from './microsoftAuthClient';
+import { ModDetectionService } from '../services/modDetectionService';
+import { ModDiagnosticService } from '../services/modDiagnosticService';
+import { ModCompatibilityService } from '../services/modCompatibilityService';
 
 let win: BrowserWindow | null = null;
 
@@ -478,16 +483,46 @@ type UserProfile = {
   skinUrl?: string;
 };
 
+// CRÍTICO: Protección contra ejecuciones múltiples del mismo juego
+const activeLaunches = new Map<string, boolean>();
+
 ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: UserProfile }) => {
+  // CRÍTICO: Obtener información del proceso que está llamando
+  const callerStack = new Error().stack;
+  const callerInfo = callerStack?.split('\n').slice(1, 4).join('\n') || 'Desconocido';
+  
+  logProgressService.info(`[GameLaunch] ===== SOLICITUD DE LANZAMIENTO RECIBIDA =====`);
+  logProgressService.info(`[GameLaunch] Instancia ID: ${p.instanceId}`);
+  logProgressService.info(`[GameLaunch] Timestamp: ${new Date().toISOString()}`);
+  logProgressService.info(`[GameLaunch] Información del llamador:`, { callerStack: callerInfo });
+  
   const i = listInstances().find(x => x.id === p.instanceId)
   const s = settings()
-  if (!i) return null
+  if (!i) {
+    logProgressService.error(`[GameLaunch] ❌ Instancia no encontrada: ${p.instanceId}`);
+    return null;
+  }
+
+  // CRÍTICO: Verificar si ya hay un lanzamiento en progreso para esta instancia
+  if (activeLaunches.get(i.id)) {
+    logProgressService.warning(`[GameLaunch] ⚠️ BLOQUEADO: Ya hay un lanzamiento en progreso para la instancia ${i.name}.`, {
+      instanceId: i.id,
+      callerInfo: callerInfo
+    });
+    logProgressService.warning(`[GameLaunch] Esta solicitud fue bloqueada. Llamado desde:`, { callerStack: callerInfo });
+    return { started: false, reason: 'Ya hay un lanzamiento en progreso' };
+  }
+
+  // Marcar que hay un lanzamiento en progreso
+  activeLaunches.set(i.id, true);
+  logProgressService.info(`[GameLaunch] ✓ Flag de lanzamiento activado para instancia: ${i.id}`);
 
   // Registrar inicio del proceso de lanzamiento
   logProgressService.launch(`Iniciando lanzamiento de la instancia ${i.name}`, {
     instanceId: i.id,
     version: i.version,
-    loader: i.loader
+    loader: i.loader,
+    callerInfo: callerInfo
   });
 
   try {
@@ -578,7 +613,78 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
         ...p.userProfile,
         id: ensureValidUUID(p.userProfile.id)
       };
+      
+      // Log de depuración para verificar el perfil
+      logProgressService.info(`Perfil de usuario para lanzamiento:`, {
+        username: validatedUserProfile.username,
+        type: validatedUserProfile.type,
+        hasAccessToken: !!validatedUserProfile.accessToken,
+        accessTokenLength: validatedUserProfile.accessToken?.length || 0,
+        accessTokenPreview: validatedUserProfile.accessToken ? `${validatedUserProfile.accessToken.substring(0, 20)}...` : 'NO HAY'
+      });
+    } else {
+      logProgressService.warning('No se proporcionó perfil de usuario al lanzar el juego');
     }
+
+    // Analizar y deshabilitar mods incompatibles antes del lanzamiento
+    if (i.loader && i.loader !== 'vanilla') {
+      try {
+        const compatibilityReport = ModCompatibilityService.getCompatibilityReport(
+          i.path,
+          i.loader as 'fabric' | 'forge' | 'quilt' | 'neoforge',
+          i.version
+        );
+
+        if (compatibilityReport.total > 0) {
+          logProgressService.warning(
+            `[Mods] Se detectaron ${compatibilityReport.total} mod(s) incompatible(s): ` +
+            `${compatibilityReport.critical} crítico(s), ` +
+            `${compatibilityReport.problematic} problemático(s), ` +
+            `${compatibilityReport.conflicts} conflicto(s)`
+          );
+
+          // Deshabilitar automáticamente mods críticos
+          const result = await ModCompatibilityService.disableIncompatibleMods(
+            i.path,
+            i.loader as 'fabric' | 'forge' | 'quilt' | 'neoforge',
+            i.version,
+            {
+              disableCritical: true, // Deshabilitar mods críticos automáticamente
+              disableProblematic: false, // Solo advertir sobre problemáticos
+              disableConflicts: false // Solo advertir sobre conflictos
+            }
+          );
+
+          if (result.disabled.length > 0) {
+            logProgressService.info(
+              `[Mods] ${result.disabled.length} mod(s) incompatible(s) deshabilitado(s) automáticamente: ${result.disabled.join(', ')}`
+            );
+            logProgressService.info(
+              `[Mods] Los mods deshabilitados se encuentran en: mods-disabled/`
+            );
+          }
+
+          if (result.warnings.length > 0) {
+            for (const warning of result.warnings) {
+              logProgressService.warning(`[Mods] ${warning}`);
+            }
+          }
+        } else {
+          logProgressService.info(`[Mods] No se detectaron mods incompatibles.`);
+        }
+      } catch (error: any) {
+        logProgressService.warning(`[Mods] Error al analizar compatibilidad de mods: ${error.message}`);
+        // Continuar con el lanzamiento aunque haya error en el análisis
+      }
+    }
+
+    // Registrar instancia para análisis de logs en tiempo real
+    gameLogsService.registerInstance(i.id, i.path, i.loader as 'fabric' | 'forge' | 'quilt' | 'neoforge' | undefined);
+
+    // Callback para capturar logs del juego
+    const onGameData = (chunk: string) => {
+      gameLogsService.addLog(i.id, chunk);
+    };
 
     // Launch the game with all configurations using the enhanced service
     const childProcess = await gameLaunchService.launchGame({
@@ -594,7 +700,8 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
       },
       loader: i.loader || 'vanilla', // Pasar el tipo de loader de la instancia
       loaderVersion: instanceConfig?.loaderVersion, // Versión específica del loader si está disponible
-      instanceConfig: instanceConfig as any // Ajuste de tipo temporal
+      instanceConfig: instanceConfig as any, // Ajuste de tipo temporal
+      onData: onGameData // Agregar callback para capturar logs
     });
 
     logProgressService.success(`Minecraft lanzado exitosamente para la instancia ${i.name}`, {
@@ -602,8 +709,26 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
       pid: childProcess.pid
     });
 
+    // CRÍTICO: Registrar callback para limpiar el flag cuando el proceso termine
+    childProcess.on('close', () => {
+      logProgressService.info(`[GameLaunch] Proceso terminado para instancia ${i.name}, limpiando flag de lanzamiento activo`, {
+        instanceId: i.id
+      });
+      activeLaunches.delete(i.id);
+    });
+
+    childProcess.on('error', () => {
+      logProgressService.error(`[GameLaunch] Error en proceso para instancia ${i.name}, limpiando flag de lanzamiento activo`, {
+        instanceId: i.id
+      });
+      activeLaunches.delete(i.id);
+    });
+
     return { started: true, pid: childProcess.pid }
   } catch (error) {
+    // CRÍTICO: Limpiar flag en caso de error
+    activeLaunches.delete(i.id);
+    
     logProgressService.error(`Error al lanzar la instancia ${i.name}: ${(error as Error).message}`, {
       instanceId: i.id,
       error: (error as Error).message
@@ -642,6 +767,26 @@ ipcMain.handle('instance:resume-download', async (_e, downloadId: string) => {
     return instance;
   } catch (error) {
     console.error('Error al reanudar descarga:', error);
+    throw error;
+  }
+});
+
+// Handlers para logs del juego
+ipcMain.handle('game:get-logs', async (_e, instanceId: string) => {
+  try {
+    return gameLogsService.getLogs(instanceId);
+  } catch (error) {
+    console.error('Error al obtener logs:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('game:clear-logs', async (_e, instanceId: string) => {
+  try {
+    gameLogsService.clearLogs(instanceId);
+    return { success: true };
+  } catch (error) {
+    console.error('Error al limpiar logs:', error);
     throw error;
   }
 });
@@ -876,6 +1021,69 @@ ipcMain.handle('instance:install-content', async (_e, payload: {
   } catch (error) {
     console.error('Error installing content to instance:', error);
     throw error;
+  }
+});
+
+// Handler para detectar mods en una instancia
+ipcMain.handle('mods:detect', async (_e, payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge' }) => {
+  try {
+    const mods = ModDetectionService.detectInstalledMods(payload.instancePath, payload.loader);
+    return { success: true, mods };
+  } catch (error: any) {
+    console.error('Error al detectar mods:', error);
+    return { success: false, error: error.message, mods: [] };
+  }
+});
+
+// Handler para obtener estadísticas de mods
+ipcMain.handle('mods:get-stats', async (_e, payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge' }) => {
+  try {
+    const stats = ModDetectionService.getModStats(payload.instancePath, payload.loader);
+    return { success: true, stats };
+  } catch (error: any) {
+    console.error('Error al obtener estadísticas de mods:', error);
+    return { success: false, error: error.message, stats: null };
+  }
+});
+
+// Handler para detectar mods de optimización faltantes
+ipcMain.handle('mods:detect-missing-optimization', async (_e, payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge'; mcVersion: string }) => {
+  try {
+    const missingMods = ModDetectionService.detectMissingOptimizationMods(
+      payload.instancePath,
+      payload.loader,
+      payload.mcVersion
+    );
+    return { success: true, missingMods };
+  } catch (error: any) {
+    console.error('Error al detectar mods de optimización faltantes:', error);
+    return { success: false, error: error.message, missingMods: [] };
+  }
+});
+
+// Handler para diagnosticar problemas con mods
+ipcMain.handle('mods:diagnose', async (_e, payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge'; mcVersion: string }) => {
+  try {
+    const diagnosis = await ModDiagnosticService.diagnoseMods(
+      payload.instancePath,
+      payload.loader,
+      payload.mcVersion
+    );
+    return { success: true, diagnosis };
+  } catch (error: any) {
+    console.error('Error al diagnosticar mods:', error);
+    return { success: false, error: error.message, diagnosis: null };
+  }
+});
+
+// Handler para listar archivos en la carpeta mods
+ipcMain.handle('mods:list-files', async (_e, instancePath: string) => {
+  try {
+    const files = ModDiagnosticService.listModsFiles(instancePath);
+    return { success: true, files };
+  } catch (error: any) {
+    console.error('Error al listar archivos de mods:', error);
+    return { success: false, error: error.message, files: [] };
   }
 });
 
@@ -2022,6 +2230,76 @@ ipcMain.handle('drkauth:validate', async (_event, accessToken: string) => {
     };
   } catch (error: any) {
     console.error('[DrkAuth IPC] Error en validate:', error);
+    return {
+      success: false,
+      isValid: false,
+      error: error.message || 'Error desconocido al validar token'
+    };
+  }
+});
+
+// --- Microsoft Auth IPC Handlers --- //
+
+// IPC Handler para autenticar con Microsoft
+ipcMain.handle('microsoft:authenticate', async (_event) => {
+  try {
+    console.log(`[Microsoft Auth IPC] Iniciando autenticación...`);
+    const result = await microsoftAuthClient.authenticate();
+    return {
+      success: true,
+      accessToken: result.accessToken,
+      clientToken: result.accessToken, // Usar accessToken como clientToken para Microsoft
+      selectedProfile: result.selectedProfile,
+      user: result.user
+    };
+  } catch (error: any) {
+    console.error('[Microsoft Auth IPC] Error en authenticate:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido al autenticar con Microsoft'
+    };
+  }
+});
+
+// IPC Handler para refrescar tokens Microsoft
+ipcMain.handle('microsoft:refresh', async (_event, accessToken: string, clientToken: string) => {
+  try {
+    console.log(`[Microsoft Auth IPC] Refrescando tokens...`);
+    // Nota: Microsoft usa refresh tokens, pero por ahora retornamos error
+    // ya que necesitaríamos almacenar el refresh token
+    return {
+      success: false,
+      error: 'Refresh de tokens no implementado aún. Por favor, inicia sesión de nuevo.'
+    };
+  } catch (error: any) {
+    console.error('[Microsoft Auth IPC] Error en refresh:', error);
+    return {
+      success: false,
+      error: error.message || 'Error desconocido al refrescar tokens'
+    };
+  }
+});
+
+// IPC Handler para validar token Microsoft
+ipcMain.handle('microsoft:validate', async (_event, accessToken: string) => {
+  try {
+    console.log(`[Microsoft Auth IPC] Validando token...`);
+    // Validar token consultando el perfil de Minecraft
+    const response = await fetch('https://api.minecraftservices.com/minecraft/profile', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const isValid = response.ok;
+    return {
+      success: true,
+      isValid: isValid
+    };
+  } catch (error: any) {
+    console.error('[Microsoft Auth IPC] Error en validate:', error);
     return {
       success: false,
       isValid: false,

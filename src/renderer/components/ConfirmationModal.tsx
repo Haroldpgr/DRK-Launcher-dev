@@ -100,11 +100,11 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                   className="text-gray-400 hover:text-white p-1.5 rounded-full hover:bg-gray-700/50 transition-colors"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
                 </motion.button>
-              </div>
-              
+        </div>
+        
               <motion.div
                 initial={{ y: 10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
@@ -113,7 +113,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               >
                 <p className="text-gray-300 leading-relaxed">{message}</p>
               </motion.div>
-              
+        
               <motion.div
                 initial={{ y: 10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
@@ -123,21 +123,21 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={onCancel}
+            onClick={onCancel}
                   className="px-5 py-2.5 bg-gray-700/50 text-gray-300 rounded-xl hover:bg-gray-600/50 transition-all font-medium border border-gray-600/50"
-                >
-                  {cancelText}
+          >
+            {cancelText}
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={onConfirm}
+            onClick={onConfirm}
                   className={`px-5 py-2.5 text-white rounded-xl transition-all font-medium shadow-lg ${colorClasses[confirmColor]}`}
-                >
-                  {confirmText}
+          >
+            {confirmText}
                 </motion.button>
               </motion.div>
-            </div>
+        </div>
           </motion.div>
         </>
       )}

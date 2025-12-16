@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld('api', {
     validate: (accessToken: string) =>
       ipcRenderer.invoke('drkauth:validate', accessToken)
   },
+  microsoft: {
+    authenticate: () =>
+      ipcRenderer.invoke('microsoft:authenticate'),
+    refresh: (accessToken: string, clientToken: string) =>
+      ipcRenderer.invoke('microsoft:refresh', accessToken, clientToken),
+    validate: (accessToken: string) =>
+      ipcRenderer.invoke('microsoft:validate', accessToken)
+  },
 
   // Métodos de descarga
   download: {
@@ -124,7 +132,23 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   game: {
-    launch: (p: { instanceId: string, userProfile?: any }) => ipcRenderer.invoke('game:launch', p)
+    launch: (p: { instanceId: string, userProfile?: any }) => ipcRenderer.invoke('game:launch', p),
+    getLogs: (instanceId: string) => ipcRenderer.invoke('game:get-logs', instanceId),
+    clearLogs: (instanceId: string) => ipcRenderer.invoke('game:clear-logs', instanceId)
+  },
+
+  // API de detección de mods
+  mods: {
+    detect: (payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge' }) =>
+      ipcRenderer.invoke('mods:detect', payload),
+    getStats: (payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge' }) =>
+      ipcRenderer.invoke('mods:get-stats', payload),
+    detectMissingOptimization: (payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge'; mcVersion: string }) =>
+      ipcRenderer.invoke('mods:detect-missing-optimization', payload),
+    diagnose: (payload: { instancePath: string; loader: 'vanilla' | 'fabric' | 'forge' | 'quilt' | 'neoforge'; mcVersion: string }) =>
+      ipcRenderer.invoke('mods:diagnose', payload),
+    listFiles: (instancePath: string) =>
+      ipcRenderer.invoke('mods:list-files', instancePath)
   },
 
   java: {
@@ -186,6 +210,16 @@ declare global {
         refresh: (accessToken: string, clientToken: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
         validate: (accessToken: string) => Promise<{ success: boolean; isValid: boolean; error?: string }>;
       };
+      drkauth: {
+        authenticate: (username: string, password: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; availableProfiles?: Array<{ id: string; name: string }>; user?: any; error?: string }>;
+        refresh: (accessToken: string, clientToken: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+        validate: (accessToken: string) => Promise<{ success: boolean; isValid: boolean; error?: string }>;
+      };
+      microsoft: {
+        authenticate: () => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+        refresh: (accessToken: string, clientToken: string) => Promise<{ success: boolean; accessToken?: string; clientToken?: string; selectedProfile?: { id: string; name: string }; user?: any; error?: string }>;
+        validate: (accessToken: string) => Promise<{ success: boolean; isValid: boolean; error?: string }>;
+      };
       download: {
         start: (data: { url: string; filename: string; itemId: string }) => void;
         onProgress: (callback: (event: any, data: any) => void) => () => void;
@@ -234,6 +268,8 @@ declare global {
       };
       game: {
         launch: (p: { instanceId: string, userProfile?: any }) => Promise<any>;
+        getLogs: (instanceId: string) => Promise<string[]>;
+        clearLogs: (instanceId: string) => Promise<{ success: boolean }>;
       };
       java: {
         getAll: () => Promise<any[]>;

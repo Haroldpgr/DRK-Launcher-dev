@@ -3,6 +3,7 @@ import Button from './Button'; // Assuming Button component is available
 import { elyByService } from '../services/elyByService';
 import { yggdrasilService } from '../services/yggdrasilService';
 import { drkAuthService } from '../services/drkAuthService';
+import { microsoftAuthService } from '../services/microsoftAuthService';
 import { showModernAlert } from '../utils/uiUtils';
 
 type LoginModalProps = {
@@ -30,6 +31,7 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
   const [drkAuthUsername, setDrkAuthUsername] = useState('');
   const [drkAuthPassword, setDrkAuthPassword] = useState('');
   const [isDrkAuthAuthenticating, setIsDrkAuthAuthenticating] = useState(false);
+  const [isMicrosoftAuthenticating, setIsMicrosoftAuthenticating] = useState(false);
 
   if (!isOpen) {
     return null;
@@ -47,8 +49,52 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
     setSelectedLoginType('microsoft');
   };
 
-  const handleMicrosoftLoginConfirm = () => {
-    onMicrosoftLogin(); // Call parent handler to initiate Microsoft login flow
+  const handleMicrosoftLoginConfirm = async () => {
+    if (isMicrosoftAuthenticating) {
+      return;
+    }
+
+    setIsMicrosoftAuthenticating(true);
+    
+    try {
+      const result = await microsoftAuthService.authenticate();
+      
+      if (result && result.success && result.selectedProfile) {
+        // Autenticación exitosa, agregar al perfil
+        const profileService = await import('../services/profileService');
+        profileService.profileService.addProfile(
+          result.selectedProfile.name,
+          'microsoft',
+          {
+            accessToken: result.accessToken,
+            clientToken: result.clientToken
+          }
+        );
+        
+        if (onElyByLogin) {
+          onElyByLogin(result.selectedProfile.name);
+        }
+        
+        setSelectedLoginType('none');
+        setIsMicrosoftAuthenticating(false);
+      } else {
+        const errorMessage = result?.error || 'Error al autenticar con Microsoft. Por favor, inténtalo de nuevo.';
+        await showModernAlert(
+          'Error de autenticación',
+          errorMessage,
+          'error'
+        );
+        setIsMicrosoftAuthenticating(false);
+      }
+    } catch (error: any) {
+      console.error('Error al autenticar con Microsoft:', error);
+      await showModernAlert(
+        'Error de conexión',
+        'No se pudo completar la autenticación con Microsoft. Por favor, verifica tu conexión e inténtalo de nuevo.',
+        'error'
+      );
+      setIsMicrosoftAuthenticating(false);
+    }
   };
 
   const handleBack = () => {
@@ -280,7 +326,7 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
                 </svg>
                 <div className="text-left">
                   <div className="text-white font-semibold">Iniciar sesión con Microsoft</div>
-                  <div className="text-xs text-gray-400">Próximamente disponible</div>
+                  <div className="text-xs text-gray-400">Autenticación oficial de Minecraft</div>
                 </div>
               </div>
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
@@ -493,17 +539,38 @@ export default function LoginModal({ isOpen, onClose, onMicrosoftLogin, onNonPre
                 </div>
                 <div className="text-center">
                   <h3 className="text-lg font-bold mb-2">Inicio de Sesión con Microsoft</h3>
-                  <p className="text-blue-200 text-sm mb-3">Esta funcionalidad está en desarrollo</p>
-                  <div className="inline-block bg-blue-700/80 text-blue-100 px-4 py-1.5 rounded-full text-sm font-semibold mx-auto">
-                    Próximamente
-                  </div>
+                  <p className="text-blue-200 text-sm mb-3">Inicia sesión con tu cuenta de Microsoft para acceder a Minecraft</p>
                 </div>
               </div>
+              
+              {/* Explicación del flujo */}
+              <div className="mb-4 p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+                <p className="text-sm text-blue-200 text-center">
+                  <span className="font-semibold">💡 Autenticación oficial:</span> Al hacer clic, se abrirá tu navegador 
+                  para que inicies sesión con tu cuenta de Microsoft. Este es el método oficial de autenticación de Minecraft.
+                </p>
+              </div>
+              
               <Button
                 onClick={handleMicrosoftLoginConfirm}
-                className="w-full py-4 text-lg font-semibold bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-lg shadow-blue-500/40 hover:shadow-blue-500/50 transition-all duration-300 transform hover:-translate-y-0.5 rounded-xl"
+                disabled={isMicrosoftAuthenticating}
+                className={`w-full py-4 text-lg font-semibold transition-all duration-300 shadow-lg rounded-xl ${
+                  !isMicrosoftAuthenticating
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-blue-500/40 hover:shadow-blue-500/50 transform hover:-translate-y-0.5'
+                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
               >
-                Iniciar sesión con Microsoft
+                {isMicrosoftAuthenticating ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Autenticando...
+                  </span>
+                ) : (
+                  'Iniciar sesión con Microsoft'
+                )}
               </Button>
             </div>
           )}

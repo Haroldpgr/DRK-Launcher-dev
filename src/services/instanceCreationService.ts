@@ -283,6 +283,9 @@ export class InstanceCreationService {
     if (loader === 'fabric') {
       await this.downloadFabricLoader(version, instancePath);
     } else if (loader === 'forge') {
+      // DEPRECADO: Forge moderno NO requiere client.jar aquí.
+      // El installer oficial se ejecuta desde src/services/descargas/forge/DownloadForge.ts
+      // Este método ya no descarga client.jar.
       await this.downloadForgeLoader(version, instancePath);
     } else if (loader === 'quilt') {
       await this.downloadQuiltLoader(version, instancePath);
@@ -344,67 +347,20 @@ export class InstanceCreationService {
 
   /**
    * Descarga el loader de Forge
+   * 
+   * DEPRECADO: Este método está obsoleto. Forge moderno NO usa client.jar.
+   * El código correcto está en src/services/descargas/forge/DownloadForge.ts
+   * que ejecuta el installer.jar oficial.
+   * 
+   * Este método ya NO descarga client.jar para Forge.
    */
   private async downloadForgeLoader(version: string, instancePath: string): Promise<void> {
-    try {
-      console.log(`Descargando Forge para Minecraft ${version}...`);
-
-      // Para Forge, necesitamos encontrar la versión compatible
-      // Usamos el API de Forge para obtener la lista de versiones
-      const forgeApiUrl = 'https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json';
-      const response = await fetch(forgeApiUrl);
-      const forgeMetadata = await response.json();
-
-      // Buscar una versión compatible con la versión de Minecraft
-      // Esto es una simplificación: en realidad, se necesitaría una búsqueda más detallada
-      let forgeVersion = null;
-      const versions = forgeMetadata.versioning.versions;
-
-      // Buscar la versión más reciente compatible con la versión de Minecraft
-      for (let i = versions.length - 1; i >= 0; i--) {
-        const v = versions[i];
-        if (v.startsWith(`${version}-`)) {
-          forgeVersion = v;
-          break;
-        }
-      }
-
-      if (!forgeVersion) {
-        throw new Error(`No se encontró versión compatible de Forge para Minecraft ${version}`);
-      }
-
-      console.log(`Usando Forge ${forgeVersion} para Minecraft ${version}`);
-
-      // Descargar el cliente de Forge (no el instalador, sino el universal)
-      const forgeClientUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-client.jar`;
-      const forgeClientPath = path.join(instancePath, 'loader', `forge-${forgeVersion}-client.jar`);
-
-      // Asegurar que la carpeta loader exista
-      const loaderDir = path.join(instancePath, 'loader');
-      if (!fs.existsSync(loaderDir)) {
-        fs.mkdirSync(loaderDir, { recursive: true });
-      }
-
-      // Descargar el archivo
-      const responseClient = await fetch(forgeClientUrl);
-      if (!responseClient.ok) {
-        // Si el cliente no está disponible, usar un fallback
-        console.log(`Cliente de Forge no disponible, usando fallback...`);
-        await minecraftDownloadService.downloadClientJar(version, instancePath);
-        return;
-      }
-
-      // Guardar el archivo
-      const buffer = Buffer.from(await responseClient.arrayBuffer());
-      fs.writeFileSync(forgeClientPath, buffer);
-
-      console.log(`Forge Client descargado en: ${forgeClientPath}`);
-    } catch (error) {
-      console.error(`Error al descargar Forge:`, error);
-      // De todas formas, descargar el client.jar base como fallback
-      await minecraftDownloadService.downloadClientJar(version, instancePath);
-      throw error;
-    }
+    // NOTA: Forge moderno NO requiere client.jar en instancePath.
+    // El installer oficial de Forge gestiona todo desde launcherDir.
+    // Este método se mantiene por compatibilidad pero no hace nada.
+    console.log(`[DEPRECADO] downloadForgeLoader llamado pero no descarga client.jar para Forge moderno.`);
+    console.log(`[DEPRECADO] Forge usa el installer oficial que se ejecuta desde src/services/descargas/forge/DownloadForge.ts`);
+    // No hacer nada - Forge no necesita client.jar aquí
   }
 
   /**
