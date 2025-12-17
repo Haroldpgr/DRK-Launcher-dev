@@ -101,8 +101,9 @@ const ContentCard: React.FC<ContentCardProps> = ({
         )}
 
         {/* Action Buttons */}
-        <div className="flex space-x-2">
+        <div className="flex space-x-2" data-tutorial="content-actions">
           <button
+            data-tutorial="content-details-btn"
             onClick={(e) => {
               e.stopPropagation(); // Prevenir que el click en el botón dispare el click en toda la tarjeta
               onDetails(id);
@@ -112,6 +113,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
             Detalles
           </button>
           <button
+            data-tutorial="content-download-btn"
             onClick={(e) => {
               e.stopPropagation(); // Prevenir que el click en el botón dispare el click en toda la tarjeta
               onDownload();

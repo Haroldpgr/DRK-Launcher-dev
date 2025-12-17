@@ -4,6 +4,9 @@ import Button from '../components/Button';
 import { Instance } from './Instances';
 import { notificationService } from '../services/notificationService';
 import { modpackImportService } from '../services/modpackImportService';
+import { integratedDownloadService } from '../services/integratedDownloadService';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { modpackImporterTutorialSteps } from '../data/tutorialSteps';
 
 type ExportType = 'mod' | 'mods' | 'resourcepack' | 'shaderpack' | 'datapack' | 'instance' | 'custom';
 
@@ -52,6 +55,24 @@ export default function ModpackImporter() {
     loadInstances();
   }, []);
 
+  // Monitorear progreso de descarga en tiempo real
+  useEffect(() => {
+    if (!isImporting) return;
+
+    const progressInterval = setInterval(async () => {
+      try {
+        const overall = await integratedDownloadService.getOverallProgress();
+        if (overall) {
+          setImportProgress(overall.progress || 0);
+        }
+      } catch (err) {
+        console.error('Error al obtener progreso:', err);
+      }
+    }, 500); // Actualizar cada 500ms
+
+    return () => clearInterval(progressInterval);
+  }, [isImporting]);
+
   const loadInstances = async () => {
     try {
       if (window.api?.instances) {
@@ -85,7 +106,44 @@ export default function ModpackImporter() {
     setCurrentStep('compatibility');
   };
 
-  // Importar modpack
+  // Importar modpack creando instancia automáticamente
+  const importPackAndCreateInstance = async () => {
+    if (!modpackMetadata) {
+      notificationService.error('No hay modpack para importar');
+      return;
+    }
+
+    setIsImporting(true);
+    setCurrentStep('importing');
+    setImportProgress(0);
+
+    try {
+      // Usar el nuevo método que crea la instancia automáticamente
+      const createdInstance = await modpackImportService.importModpackAndCreateInstance(
+        source,
+        modpackMetadata,
+        (progress) => setImportProgress(progress)
+      );
+
+      notificationService.success(`Modpack "${modpackMetadata.name}" importado exitosamente. Instancia creada: ${createdInstance.name}`);
+      
+      // Recargar la lista de instancias
+      await loadInstances();
+      
+      setCurrentStep('import');
+      setSource('');
+      setModpackMetadata(null);
+      setSelectedInstance(null);
+      setCompatibility(null);
+    } catch (error) {
+      console.error('Error al importar modpack:', error);
+      notificationService.error(`Error al importar modpack: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Importar modpack a instancia existente
   const importPack = async () => {
     if (!selectedInstance || !modpackMetadata) {
       notificationService.error('Por favor selecciona una instancia');
@@ -143,9 +201,65 @@ export default function ModpackImporter() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const filePath = (file as any).path || URL.createObjectURL(file);
+      try {
+        // Si el archivo tiene una ruta real (Electron), usarla directamente
+        if ((file as any).path) {
+          const filePath = (file as any).path;
       setSource(filePath);
       await analyzeModpack(filePath);
+        } else {
+          // Si es una URL blob, copiar el archivo a un directorio temporal
+          console.log('[ModpackImporter] Archivo sin ruta real, procesando como blob...');
+          const arrayBuffer = await file.arrayBuffer();
+          console.log('[ModpackImporter] ArrayBuffer obtenido, tamaño:', arrayBuffer.byteLength);
+          
+          // Convertir ArrayBuffer a Uint8Array para transferencia IPC
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const bufferArray = Array.from(uint8Array);
+          console.log('[ModpackImporter] Convertido a array, longitud:', bufferArray.length);
+          
+          // Verificar disponibilidad de la API
+          console.log('[ModpackImporter] window.api disponible:', !!window.api);
+          console.log('[ModpackImporter] window.api.modpackImport disponible:', !!window.api?.modpackImport);
+          console.log('[ModpackImporter] window.api.modpackImport.saveTemporaryFile disponible:', !!window.api?.modpackImport?.saveTemporaryFile);
+          
+          // Usar el proceso principal para guardar el archivo temporal
+          if (window.api?.modpackImport?.saveTemporaryFile) {
+            try {
+              console.log('[ModpackImporter] Guardando archivo temporal...');
+              const tempPath = await window.api.modpackImport.saveTemporaryFile(
+                bufferArray,
+                file.name
+              );
+              console.log('[ModpackImporter] Archivo temporal guardado en:', tempPath);
+              setSource(tempPath);
+              await analyzeModpack(tempPath);
+            } catch (error) {
+              console.error('[ModpackImporter] Error al guardar archivo temporal:', error);
+              notificationService.error(`Error al procesar el archivo: ${error instanceof Error ? error.message : 'Error desconocido'}. Por favor, intenta usar el botón "Seleccionar archivo".`);
+            }
+          } else {
+            console.warn('[ModpackImporter] API saveTemporaryFile no disponible, usando fallback');
+            // Fallback: usar el diálogo de archivos de Electron
+            if (window.api?.dialog?.showOpenDialog) {
+              notificationService.info('Por favor, selecciona el archivo usando el diálogo');
+              const result = await window.api.dialog.showOpenDialog({
+                properties: ['openFile'],
+                filters: [{ name: 'Modpacks', extensions: ['zip', 'mrpack'] }]
+              });
+              if (!result.canceled && result.filePaths.length > 0) {
+                setSource(result.filePaths[0]);
+                await analyzeModpack(result.filePaths[0]);
+              }
+            } else {
+              notificationService.error('No se pudo procesar el archivo. Por favor, usa el botón "Seleccionar archivo" en su lugar.');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error al procesar archivo:', error);
+        notificationService.error('Error al procesar el archivo. Por favor, intenta de nuevo.');
+      }
     }
   };
 
@@ -160,16 +274,59 @@ export default function ModpackImporter() {
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      const filePath = (file as any).path || URL.createObjectURL(file);
+      try {
+        // Si el archivo tiene una ruta real (Electron), usarla directamente
+        if ((file as any).path) {
+          const filePath = (file as any).path;
       setSource(filePath);
-      analyzeModpack(filePath);
+          await analyzeModpack(filePath);
+        } else {
+          // Si es una URL blob, copiar el archivo a un directorio temporal
+          const arrayBuffer = await file.arrayBuffer();
+          
+          // Convertir ArrayBuffer a Uint8Array para transferencia IPC
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          // Usar el proceso principal para guardar el archivo temporal
+          if (window.api?.modpackImport?.saveTemporaryFile) {
+            try {
+              const tempPath = await window.api.modpackImport.saveTemporaryFile(
+                Array.from(uint8Array), // Convertir a Array normal para IPC
+                file.name
+              );
+              setSource(tempPath);
+              await analyzeModpack(tempPath);
+            } catch (error) {
+              console.error('Error al guardar archivo temporal:', error);
+              notificationService.error('Error al procesar el archivo. Por favor, intenta usar el botón "Seleccionar archivo".');
+            }
+          } else {
+            // Fallback: usar el diálogo de archivos de Electron
+            if (window.api?.dialog?.showOpenDialog) {
+              const result = await window.api.dialog.showOpenDialog({
+                properties: ['openFile'],
+                filters: [{ name: 'Modpacks', extensions: ['zip', 'mrpack'] }]
+              });
+              if (!result.canceled && result.filePaths.length > 0) {
+                setSource(result.filePaths[0]);
+                await analyzeModpack(result.filePaths[0]);
+              }
+            } else {
+              notificationService.error('No se pudo procesar el archivo arrastrado. Por favor, usa el botón "Seleccionar archivo" en su lugar.');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error al procesar archivo arrastrado:', error);
+        notificationService.error('Error al procesar el archivo. Por favor, intenta de nuevo.');
+      }
     }
   };
 
@@ -420,7 +577,29 @@ export default function ModpackImporter() {
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold text-white mb-3">Seleccionar instancia de destino</h3>
+            <h3 className="text-lg font-semibold text-white mb-3">Opciones de importación</h3>
+            
+            {/* Opción para crear nueva instancia automáticamente */}
+            <div className="mb-4 p-4 rounded-xl border-2 border-blue-500/50 bg-blue-500/10">
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <div className="font-semibold text-white mb-1">Crear nueva instancia automáticamente</div>
+                  <div className="text-sm text-gray-300">
+                    Se creará una instancia llamada "{modpackMetadata.name}" con Minecraft {modpackMetadata.mcVersion} y {modpackMetadata.loader}
+                  </div>
+                </div>
+                <Button
+                  onClick={importPackAndCreateInstance}
+                  disabled={isImporting}
+                >
+                  {isImporting ? 'Importando...' : 'Crear e Importar'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Opción para importar a instancia existente */}
+            <div className="mb-4">
+              <div className="text-sm text-gray-400 mb-2">O importar a una instancia existente:</div>
             <div className="grid gap-3">
               {instances.map(instance => (
                 <div
@@ -447,6 +626,7 @@ export default function ModpackImporter() {
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           </div>
 
@@ -552,7 +732,9 @@ export default function ModpackImporter() {
           <div className="text-sm text-gray-400 mt-2">{importProgress}% completado</div>
         </div>
       )}
+
+      {/* Tutorial Overlay */}
+      <TutorialOverlay pageId="modpack-importer" steps={modpackImporterTutorialSteps} />
     </Card>
   );
 }
-

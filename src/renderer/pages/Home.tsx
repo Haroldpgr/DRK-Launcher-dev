@@ -6,6 +6,9 @@ import ProfileDropdown from '../components/ProfileDropdown'
 import { Profile } from '../services/profileService';
 import HomeServerCard from '../components/HomeServerCard';
 import { getDefaultPlaceholder } from '../utils/imagePlaceholder';
+import AdWidget from '../components/AdWidget';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { homeTutorialSteps } from '../data/tutorialSteps';
 
 type NewsItem = { id: string; title: string; body: string }
 type Instance = { id: string; name: string; version: string; loader?: string }
@@ -30,6 +33,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
   const [servers, setServers] = useState<any[]>([]); // Estado para almacenar servidores
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isLaunching, setIsLaunching] = useState(false); // CRÍTICO: Protección contra dobles clics
+  const [runningInstances, setRunningInstances] = useState<Set<string>>(new Set()); // Instancias en ejecución
   const last = useMemo(() => instances[instances.length - 1], [instances])
 
   useEffect(() => {
@@ -246,13 +250,60 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
     };
   }, [currentUser, staticServers]) // Agregar currentUser como dependencia para refrescar cuando cambie el perfil
 
+  // Polling para verificar instancias en ejecución
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    const checkRunningGames = async () => {
+      if (window.api?.game?.isRunning) {
+        try {
+          const runningIds = await window.api.game.isRunning();
+          setRunningInstances(new Set(runningIds));
+        } catch (err) {
+          console.error('[Home] Error al verificar juegos en ejecución:', err);
+        }
+      }
+    };
+
+    if (window.api) {
+      intervalId = setInterval(checkRunningGames, 3000); // Verificar cada 3 segundos
+      checkRunningGames(); // Verificar inmediatamente
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, []);
+
+  // Función para cancelar el juego
+  const handleCancelGame = async (instanceId: string) => {
+    if (!window.api?.game?.kill) {
+      setNotification({ message: 'La API para cancelar el juego no está disponible.', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+    try {
+      await window.api.game.kill(instanceId);
+      setNotification({ message: 'Juego cancelado exitosamente', type: 'success' });
+      setTimeout(() => setNotification(null), 3000);
+      setRunningInstances(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(instanceId);
+        return newSet;
+      });
+    } catch (error) {
+      console.error(`[Home] Error al cancelar juego ${instanceId}:`, error);
+      setNotification({ message: 'Error al cancelar el juego', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+    }
+  };
+
   // CRÍTICO: Protección contra dobles clics y ejecuciones múltiples
   const play = useCallback(async () => {
     if (!last) return;
     
-    // CRÍTICO: Verificar si ya hay un lanzamiento en progreso
-    if (isLaunching) {
-      console.warn(`[Home] ⚠️ BLOQUEADO: Ya hay un lanzamiento en progreso para la instancia ${last.id}. Ignorando doble clic.`);
+    // CRÍTICO: Verificar si ya hay un lanzamiento en progreso o el juego está corriendo
+    if (isLaunching || runningInstances.has(last.id)) {
+      console.warn(`[Home] ⚠️ BLOQUEADO: Ya hay un lanzamiento en progreso o el juego está corriendo para la instancia ${last.id}. Ignorando doble clic.`);
       return;
     }
     
@@ -271,7 +322,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
         console.log(`[Home] Flag de lanzamiento limpiado para instancia: ${last.id}`);
       }, 5000); // 5 segundos deberían ser suficientes
     }
-  }, [last, isLaunching, onPlay]);
+  }, [last, isLaunching, onPlay, runningInstances]);
 
   const connectToServer = (ip: string) => {
     navigator.clipboard.writeText(ip)
@@ -303,18 +354,41 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
           <div className="text-2xl font-bold text-gray-100">¡Bienvenido, {currentUser || 'Usuario'}!</div>
         </Card>
 
-        <Card>
+        <Card data-tutorial="recent-instances">
           <div className="text-xl font-semibold mb-4 text-gray-200">Continuar</div>
           {last ? (
             <div className="flex items-center justify-between bg-gray-800/60 backdrop-blur-sm p-4 rounded-xl border border-gray-700/50">
-              <div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
                 <div className="font-medium text-gray-100">{last.name}</div>
+                  {runningInstances.has(last.id) && (
+                    <div className="flex items-center gap-1.5 bg-green-500/20 border border-green-500/50 rounded-full px-2 py-0.5">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                      <span className="text-xs text-green-400 font-medium">En ejecución</span>
+                    </div>
+                  )}
+                  {isLaunching && !runningInstances.has(last.id) && (
+                    <div className="flex items-center gap-1.5 bg-blue-500/20 border border-blue-500/50 rounded-full px-2 py-0.5">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
+                      <span className="text-xs text-blue-400 font-medium">Iniciando...</span>
+                    </div>
+                  )}
+                </div>
                 <div className="text-sm text-gray-400">{last.version} {last.loader}</div>
               </div>
               <div className="flex gap-2">
+                {runningInstances.has(last.id) ? (
+                  <Button 
+                    onClick={() => handleCancelGame(last.id)}
+                    variant="danger"
+                  >
+                    Cancelar
+                  </Button>
+                ) : (
                 <Button onClick={play} disabled={isLaunching || !last}>
                   {isLaunching ? 'Iniciando...' : 'Jugar'}
                 </Button>
+                )}
                 <Button variant="secondary" onClick={() => location.assign('#/instances')}>Más opciones</Button>
               </div>
             </div>
@@ -323,7 +397,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
           )}
         </Card>
 
-        <Card>
+        <Card data-tutorial="recommended-modpacks">
           <div className="flex items-center justify-between mb-4">
             <div className="text-xl font-semibold text-gray-200">Descubre un modpack de Modrinth</div>
             <Button variant="secondary" onClick={() => location.assign('#/contenido/modpacks?platform=modrinth')}>Ver más</Button>
@@ -531,57 +605,44 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
           />
         </Card>
 
-        {/* Recuadros de anuncios */}
+        {/* Zona de Anuncios */}
         <Card>
           <div className="text-xl font-semibold mb-4 text-gray-200">Anuncios</div>
-          <div className="space-y-3">
-            {/* Anuncio 1 */}
-            <div className="p-4 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 backdrop-blur-sm rounded-xl border border-blue-700/30 hover:border-blue-600/50 transition-all cursor-pointer">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center">
-                  <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-white">¡Nueva Actualización!</div>
-                  <div className="text-xs text-blue-300">Descubre las últimas mejoras</div>
-                </div>
-              </div>
-            </div>
+          <div className="space-y-4">
+            {/* Anuncio 1 - Puedes usar anuncios propios o Google AdSense */}
+            <AdWidget 
+              adId="home-ad-1" 
+              type="card"
+              showPlaceholder={false} // Cambiar a false cuando tengas anuncios reales
+              // Para anuncios propios, descomenta y configura:
+              // adUrl="https://tu-sitio.com"
+              // adImage="/ruta/a/imagen.jpg"
+              // adTitle="Título del Anuncio"
+              // adDescription="Descripción del anuncio aquí"
+              className="w-full"
+            />
 
             {/* Anuncio 2 */}
-            <div className="p-4 bg-gradient-to-r from-purple-900/40 to-pink-900/40 backdrop-blur-sm rounded-xl border border-purple-700/30 hover:border-purple-600/50 transition-all cursor-pointer">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-purple-600/20 rounded-lg flex items-center justify-center">
-                  <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-white">Modpacks Destacados</div>
-                  <div className="text-xs text-purple-300">Explora los más populares</div>
-                </div>
-              </div>
-            </div>
+            <AdWidget 
+              adId="home-ad-2" 
+              type="card"
+              showPlaceholder={false} // Cambiar a false cuando tengas anuncios reales
+              className="w-full"
+            />
 
             {/* Anuncio 3 */}
-            <div className="p-4 bg-gradient-to-r from-green-900/40 to-emerald-900/40 backdrop-blur-sm rounded-xl border border-green-700/30 hover:border-green-600/50 transition-all cursor-pointer">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center">
-                  <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-white">Soporte Premium</div>
-                  <div className="text-xs text-green-300">Obtén ayuda prioritaria</div>
-                </div>
-              </div>
-            </div>
+            <AdWidget 
+              adId="home-ad-3" 
+              type="card"
+              showPlaceholder={false} // Cambiar a false cuando tengas anuncios reales
+              className="w-full"
+            />
           </div>
         </Card>
       </div>
+
+      {/* Tutorial Overlay */}
+      <TutorialOverlay pageId="home" steps={homeTutorialSteps} />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, session } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, session, globalShortcut } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -56,6 +56,22 @@ app.whenReady().then(async () => {
 
   await createWindow();
   
+  // En producción: bloquear acceso a DevTools
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    // Bloquear todos los atajos que podrían abrir DevTools
+    globalShortcut.register('CommandOrControl+Shift+I', () => {});
+    globalShortcut.register('F12', () => {});
+    globalShortcut.register('CommandOrControl+Shift+J', () => {});
+    globalShortcut.register('CommandOrControl+Shift+C', () => {});
+    
+    // Deshabilitar DevTools desde el menú contextual
+    if (win) {
+      win.webContents.on('devtools-opened', () => {
+        win?.webContents.closeDevTools();
+      });
+    }
+  }
+  
   // Manejar URLs de protocolo personalizado (para OAuth callback)
   app.on('open-url', (event, url) => {
     event.preventDefault();
@@ -86,13 +102,22 @@ async function createWindow() {
     backgroundColor: '#0f0f10',
     autoHideMenuBar: true, // Ocultar automáticamente la barra de menú
     frame: true, // Mantener el marco para mantener la funcionalidad de ventana
+    icon: path.join(__dirname, '..', '..', '..', 'Icono', 'Logo.png'), // Ruta simple al icono
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      devTools: !!process.env.VITE_DEV_SERVER_URL // Solo DevTools en desarrollo
     }
   });
+
+  // Deshabilitar menú contextual en producción
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    win.webContents.on('context-menu', (e) => {
+      e.preventDefault();
+    });
+  }
 
   const url = process.env.VITE_DEV_SERVER_URL;
   if (url) {
@@ -485,6 +510,8 @@ type UserProfile = {
 
 // CRÍTICO: Protección contra ejecuciones múltiples del mismo juego
 const activeLaunches = new Map<string, boolean>();
+// Mapa para almacenar los procesos de juego activos por instancia
+const activeGameProcesses = new Map<string, import('child_process').ChildProcess>();
 
 ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: UserProfile }) => {
   // CRÍTICO: Obtener información del proceso que está llamando
@@ -704,6 +731,9 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
       onData: onGameData // Agregar callback para capturar logs
     });
 
+    // Almacenar el proceso activo
+    activeGameProcesses.set(i.id, childProcess);
+
     logProgressService.success(`Minecraft lanzado exitosamente para la instancia ${i.name}`, {
       instanceId: i.id,
       pid: childProcess.pid
@@ -715,6 +745,7 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
         instanceId: i.id
       });
       activeLaunches.delete(i.id);
+      activeGameProcesses.delete(i.id);
     });
 
     childProcess.on('error', () => {
@@ -722,6 +753,7 @@ ipcMain.handle('game:launch', async (_e, p: { instanceId: string, userProfile?: 
         instanceId: i.id
       });
       activeLaunches.delete(i.id);
+      activeGameProcesses.delete(i.id);
     });
 
     return { started: true, pid: childProcess.pid }
@@ -771,6 +803,133 @@ ipcMain.handle('instance:resume-download', async (_e, downloadId: string) => {
   }
 });
 
+// Handler para cancelar la creación de una instancia
+ipcMain.handle('instance:cancel-creation', async (_e, instanceId: string) => {
+  try {
+    enhancedInstanceCreationService.cancelInstanceCreation(instanceId);
+    
+    // También cancelar en el servicio de persistencia
+    const { instanceDownloadPersistenceService } = require('./services/instanceDownloadPersistenceService');
+    instanceDownloadPersistenceService.cancel(instanceId);
+    
+    logProgressService.info(`[InstanceCreation] Creación de instancia cancelada: ${instanceId}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error al cancelar creación de instancia:', error);
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+// Handlers para importación de modpacks
+ipcMain.handle('modpack-import:analyze-file', async (_e, filePath: string) => {
+  try {
+    return await fileAnalyzerService.analyzeFile(filePath);
+  } catch (error) {
+    console.error('Error al analizar archivo de modpack:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('modpack-import:analyze-url', async (_e, url: string) => {
+  try {
+    return await fileAnalyzerService.analyzeUrl(url);
+  } catch (error) {
+    console.error('Error al analizar URL de modpack:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('modpack-import:extract-and-install', async (_e, sourcePath: string, targetPath: string) => {
+  try {
+    return await fileAnalyzerService.extractAndInstall(sourcePath, targetPath);
+  } catch (error) {
+    console.error('Error al extraer e instalar modpack:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('modpack-import:download-and-extract-from-url', async (_e, url: string, targetPath: string) => {
+  try {
+    return await fileAnalyzerService.downloadAndExtractFromUrl(url, targetPath);
+  } catch (error) {
+    console.error('Error al descargar y extraer modpack desde URL:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('modpack-import:download-modpack-from-modrinth', async (_e, projectId: string, targetPath: string, mcVersion: string, loader: string) => {
+  try {
+    return await fileAnalyzerService.downloadModpackFromModrinth(projectId, targetPath, mcVersion, loader);
+  } catch (error) {
+    console.error('Error al descargar modpack de Modrinth:', error);
+    throw error;
+  }
+});
+
+// Handler para importar modpack y crear instancia automáticamente
+ipcMain.handle('modpack-import:import-and-create-instance', async (_e, source: string, metadata: any) => {
+  try {
+    logProgressService.info(`[ModpackImport] Iniciando importación de modpack: ${metadata.name}`);
+    
+    // Paso 1: Crear la instancia base
+    logProgressService.info(`[ModpackImport] Creando instancia: ${metadata.name}`);
+    const instanceConfig = await enhancedInstanceCreationService.createInstance({
+      name: metadata.name,
+      version: metadata.mcVersion,
+      loader: metadata.loader || 'vanilla',
+      loaderVersion: undefined, // Se detectará automáticamente si es necesario
+      javaVersion: '17',
+      maxMemory: 4096,
+      minMemory: 1024
+    });
+    
+    logProgressService.info(`[ModpackImport] Instancia creada: ${instanceConfig.id}`);
+    
+    // Paso 2: Importar el modpack (extraer y descargar archivos)
+    logProgressService.info(`[ModpackImport] Importando archivos del modpack...`);
+    await fileAnalyzerService.importModpackWithDownloads(source, instanceConfig.path, metadata);
+    
+    logProgressService.success(`[ModpackImport] Modpack importado exitosamente: ${metadata.name}`);
+    return instanceConfig;
+  } catch (error) {
+    logProgressService.error(`[ModpackImport] Error al importar modpack: ${error}`);
+    throw error;
+  }
+});
+
+// Handler para guardar un archivo temporal desde el renderer
+ipcMain.handle('modpack-import:save-temporary-file', async (_e, bufferArray: number[], fileName: string) => {
+  try {
+    const os = require('os');
+    const path = require('path');
+    const fs = require('fs');
+    
+    // Crear directorio temporal si no existe
+    const tempDir = path.join(os.tmpdir(), 'drk_launcher_temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    
+    // Generar nombre único para el archivo
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 9);
+    const extension = path.extname(fileName) || '.zip';
+    const baseName = path.basename(fileName, extension);
+    const tempFileName = `${baseName}_${timestamp}_${randomStr}${extension}`;
+    const tempPath = path.join(tempDir, tempFileName);
+    
+    // Convertir el array de números a Buffer y escribir el archivo
+    const nodeBuffer = Buffer.from(bufferArray);
+    fs.writeFileSync(tempPath, nodeBuffer);
+    
+    logProgressService.info(`[ModpackImport] Archivo temporal guardado: ${tempPath} (${bufferArray.length} bytes)`);
+    return tempPath;
+  } catch (error) {
+    console.error('Error al guardar archivo temporal:', error);
+    throw error;
+  }
+});
+
 // Handlers para logs del juego
 ipcMain.handle('game:get-logs', async (_e, instanceId: string) => {
   try {
@@ -791,7 +950,48 @@ ipcMain.handle('game:clear-logs', async (_e, instanceId: string) => {
   }
 });
 
-ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; loaderVersion?: string; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[] }) => {
+// Handler para cancelar un juego en ejecución
+ipcMain.handle('game:kill', async (_e, instanceId: string) => {
+  try {
+    const process = activeGameProcesses.get(instanceId);
+    if (process && !process.killed) {
+      process.kill('SIGTERM');
+      // Si no termina en 5 segundos, forzar terminación
+      setTimeout(() => {
+        if (process && !process.killed) {
+          process.kill('SIGKILL');
+        }
+      }, 5000);
+      
+      activeLaunches.delete(instanceId);
+      activeGameProcesses.delete(instanceId);
+      
+      logProgressService.info(`[GameLaunch] Juego cancelado para instancia ${instanceId}`);
+      return { success: true };
+    }
+    return { success: false, error: 'No hay proceso activo para esta instancia' };
+  } catch (error) {
+    logProgressService.error(`[GameLaunch] Error al cancelar juego: ${error}`);
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+// Handler para verificar si un juego está en ejecución
+ipcMain.handle('game:isRunning', async (_e) => {
+  const runningIds: string[] = [];
+  activeGameProcesses.forEach((process, instanceId) => {
+    if (process && !process.killed) {
+      runningIds.push(instanceId);
+    } else {
+      // Limpiar procesos muertos
+      activeGameProcesses.delete(instanceId);
+      activeLaunches.delete(instanceId);
+    }
+  });
+  return runningIds;
+});
+
+ipcMain.handle('instance:create-full', async (_e, payload: { name: string; version: string; loader?: Instance['loader']; loaderVersion?: string; javaVersion?: string; maxMemory?: number; minMemory?: number; jvmArgs?: string[]; instanceId?: string }) => {
   try {
     logProgressService.info(`Iniciando creación de instancia: ${payload.name}`, {
       name: payload.name,
@@ -810,7 +1010,7 @@ ipcMain.handle('instance:create-full', async (_e, payload: { name: string; versi
       maxMemory: payload.maxMemory,
       minMemory: payload.minMemory,
       jvmArgs: payload.jvmArgs
-    });
+    }, payload.instanceId);
 
     logProgressService.success(`Instancia creada exitosamente: ${payload.name}`, {
       id: instance.id,
@@ -2345,5 +2545,7 @@ ipcMain.handle('progress:get-download-statuses', async () => {
 });
 
 app.on('window-all-closed', () => {
+  // Limpiar atajos de teclado al cerrar la aplicación
+  globalShortcut.unregisterAll();
   if (process.platform !== 'darwin') app.quit()
 })

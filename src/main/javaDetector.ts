@@ -122,7 +122,7 @@ export class JavaDetector {
             }
           }
         } catch (error) {
-          console.error(`Error scanning ${basePath}:`, error);
+          // Silenciar errores de escaneo
         }
       }
     }
@@ -188,7 +188,7 @@ export class JavaDetector {
     try {
       // Verificar JavaSoft registry entries
       const javaRuntimeRegPath = 'SOFTWARE\\JavaSoft\\Java Runtime Environment';
-      const javaRuntimeRegResults = execSync(`reg query "${javaRuntimeRegPath}" /s`, { encoding: 'utf8' });
+      const javaRuntimeRegResults = execSync(`reg query "${javaRuntimeRegPath}" /s`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 
       // Buscar instalaciones registradas en el registro de Java
       const runtimeMatches = javaRuntimeRegResults.match(/HKEY_LOCAL_MACHINE\\[^\\]+\\JavaSoft\\Java Runtime Environment\\([0-9.]+)/g);
@@ -223,7 +223,7 @@ export class JavaDetector {
 
       // Probar también con JDK registry entries
       const javaJdkRegPath = 'SOFTWARE\\JavaSoft\\Java Development Kit';
-      const javaJdkRegResults = execSync(`reg query "${javaJdkRegPath}" /s`, { encoding: 'utf8' });
+      const javaJdkRegResults = execSync(`reg query "${javaJdkRegPath}" /s`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 
       const jdkMatches = javaJdkRegResults.match(/HKEY_LOCAL_MACHINE\\[^\\]+\\JavaSoft\\Java Development Kit\\([0-9.]+)/g);
       if (jdkMatches) {
@@ -254,9 +254,8 @@ export class JavaDetector {
           }
         }
       }
-    } catch (error) {
+    } catch {
       // No hay entradas de Java en el registro o no se puede acceder
-      console.info('Registry query failed - this may be normal on some systems');
     }
   }
 
@@ -390,10 +389,10 @@ export class JavaDetector {
   private which(command: string): string | null {
     try {
       if (process.platform === 'win32') {
-        const result = execSync(`where ${command}`, { encoding: 'utf8' });
+        const result = execSync(`where ${command}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
         return result.trim().split('\n')[0].trim();
       } else {
-        const result = execSync(`which ${command}`, { encoding: 'utf8' });
+        const result = execSync(`which ${command}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
         return result.trim();
       }
     } catch (error) {
@@ -402,33 +401,34 @@ export class JavaDetector {
   }
 
   public getJavaVersion(javaPath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(javaPath, ['-version']);
+    return new Promise((resolve) => {
+      try {
+        const child = spawn(javaPath, ['-version'], { 
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true 
+        });
 
-      let output = '';
-      let errorOutput = '';
+        let errorOutput = '';
 
-      child.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
+        child.stderr.on('data', (data) => {
+          errorOutput += data.toString();
+        });
 
-      child.on('close', (code) => {
-        if (code === 0 || errorOutput) {
-          // La versión generalmente se imprime en stderr para java -version
+        child.on('close', () => {
           const versionMatch = errorOutput.match(/version\s+"([^"]+)"/i);
           if (versionMatch && versionMatch[1]) {
             resolve(this.normalizeVersion(versionMatch[1]));
           } else {
             resolve('unknown');
           }
-        } else {
-          reject(new Error(`Failed to get Java version: ${errorOutput}`));
-        }
-      });
+        });
 
-      child.on('error', (error) => {
-        reject(error);
-      });
+        child.on('error', () => {
+          resolve('unknown');
+        });
+      } catch {
+        resolve('unknown');
+      }
     });
   }
 

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+// Los handlers IPC se registran en main.ts
 
 export class FileAnalyzerService {
   /**
@@ -227,26 +227,26 @@ export class FileAnalyzerService {
           for (const entryName in entries) {
             const entry = entries[entryName];
 
-            if (!entry.isDirectory) {
-              // Determinar destino según la ruta dentro del ZIP
-              let targetDir = targetPath; // Por defecto, raíz de la instancia
+            // Saltar archivos de manifiesto
+            if (entryName.includes('modrinth.index.json') || entryName.includes('manifest.json') || entryName.includes('mmc-pack.json')) {
+              continue;
+            }
 
-              if (entryName.startsWith('mods/')) {
-                targetDir = modsDir;
-              } else if (entryName.startsWith('resourcepacks/')) {
-                targetDir = resourcepacksDir;
-              } else if (entryName.startsWith('shaderpacks/')) {
-                targetDir = shaderpacksDir;
-              } else if (entryName.startsWith('config/')) {
-                targetDir = configDir;
-              } else if (entryName.startsWith('datapacks/')) {
-                targetDir = datapacksDir;
+            if (!entry.isDirectory) {
+              let targetFile: string;
+              
+              // Si está en overrides/, copiar a la raíz de la instancia preservando la estructura completa
+              if (entryName.startsWith('overrides/')) {
+                const relativePath = entryName.replace('overrides/', '');
+                targetFile = path.join(targetPath, relativePath);
+              }
+              // Si está en cualquier otra carpeta, copiar directamente preservando la estructura completa
+              else {
+                targetFile = path.join(targetPath, entryName);
               }
 
               // Crear directorios intermedios si no existen
-              const targetFile = path.join(targetDir, path.basename(entryName));
               const targetDirPath = path.dirname(targetFile);
-
               if (!fs.existsSync(targetDirPath)) {
                 fs.mkdirSync(targetDirPath, { recursive: true });
               }
@@ -255,6 +255,7 @@ export class FileAnalyzerService {
               await new Promise((fileResolve, fileReject) => {
                 zip.extract(entryName, targetFile, (err: Error | null) => {
                   if (err) {
+                    console.error(`Error al extraer ${entryName}:`, err);
                     fileReject(err);
                   } else {
                     fileResolve(undefined);
@@ -264,12 +265,14 @@ export class FileAnalyzerService {
 
               processedFiles++;
 
-              // Notificar progreso (aunque aquí no tenemos un callback de progreso)
-              if (processedFiles % 5 === 0) { // Actualizar cada 5 archivos
-                console.log(`Progreso: ${Math.round((processedFiles / totalFiles) * 100)}% (${processedFiles}/${totalFiles})`);
+              // Notificar progreso
+              if (processedFiles % 10 === 0) {
+                console.log(`[ModpackImport] Progreso: ${Math.round((processedFiles / totalFiles) * 100)}% (${processedFiles}/${totalFiles})`);
               }
             }
           }
+          
+          console.log(`[ModpackImport] Total de archivos extraídos: ${processedFiles}`);
 
           zip.close();
           resolve();
@@ -402,27 +405,273 @@ export class FileAnalyzerService {
     const match = url.match(/modrinth\.com\/(mod|modpack)\/([^\/]+)/);
     return match ? match[2] : null;
   }
+
+  /**
+   * Extrae todos los archivos de un ZIP a la instancia
+   */
+  private async extractAllFiles(zip: any, targetPath: string): Promise<void> {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const entries = zip.entries();
+    const totalEntries = Object.keys(entries).length;
+    let extractedCount = 0;
+    
+    for (const entryName in entries) {
+      const entry = entries[entryName];
+      
+      // Saltar archivos de manifiesto
+      if (entryName.includes('modrinth.index.json') || entryName.includes('manifest.json') || entryName.includes('mmc-pack.json')) {
+        continue;
+      }
+      
+      if (!entry.isDirectory) {
+        let targetFile: string;
+        
+        // Si está en overrides/, copiar a la raíz preservando estructura
+        if (entryName.startsWith('overrides/')) {
+          const relativePath = entryName.replace('overrides/', '');
+          targetFile = path.join(targetPath, relativePath);
+        }
+        // Si está en cualquier carpeta conocida, copiar directamente
+        else {
+          targetFile = path.join(targetPath, entryName);
+        }
+        
+        // Crear directorios intermedios
+        const targetDirPath = path.dirname(targetFile);
+        if (!fs.existsSync(targetDirPath)) {
+          fs.mkdirSync(targetDirPath, { recursive: true });
+        }
+        
+        // Extraer archivo
+        await new Promise((fileResolve, fileReject) => {
+          zip.extract(entryName, targetFile, (err: Error | null) => {
+            if (err) {
+              console.error(`Error al extraer ${entryName}:`, err);
+              fileReject(err);
+            } else {
+              extractedCount++;
+              if (extractedCount % 10 === 0) {
+                console.log(`[ModpackImport] Archivos extraídos: ${extractedCount}/${totalEntries}`);
+              }
+              fileResolve(undefined);
+            }
+          });
+        });
+      }
+    }
+    
+    console.log(`[ModpackImport] Total de archivos extraídos: ${extractedCount}`);
+  }
+
+  /**
+   * Importa un modpack extrayendo archivos y descargando los que faltan
+   */
+  public async importModpackWithDownloads(sourcePath: string, targetPath: string, metadata: any): Promise<void> {
+    const nodeStreamZip = require('node-stream-zip');
+    const fs = require('fs');
+    const path = require('path');
+    const { downloadQueueService } = require('./downloadQueueService');
+    const { modrinthDownloadService } = require('./modrinthDownloadService');
+
+    return new Promise((resolve, reject) => {
+      const zip = new nodeStreamZip({
+        file: sourcePath,
+        storeEntries: true
+      });
+
+      zip.on('ready', async () => {
+        try {
+          // Buscar el archivo de manifiesto
+          let manifestEntry = Object.keys(zip.entries()).find(entry => 
+            entry === 'modrinth.index.json' || entry.endsWith('modrinth.index.json')
+          );
+
+          if (!manifestEntry) {
+            // Si no es un modpack de Modrinth, buscar manifest.json (CurseForge)
+            manifestEntry = Object.keys(zip.entries()).find(entry => 
+              entry === 'manifest.json' || entry === 'mmc-pack.json'
+            );
+            
+            if (!manifestEntry) {
+              // Si no tiene manifiesto, extraer todo directamente
+              console.log('[ModpackImport] No se encontró manifiesto, extrayendo todos los archivos...');
+              await this.extractAllFiles(zip, targetPath);
+              zip.close();
+              resolve();
+              return;
+            }
+          }
+
+          // Leer el manifiesto
+          const manifestData = await new Promise((manifestResolve, manifestReject) => {
+            zip.stream(manifestEntry, (err: Error | null, stm: any) => {
+              if (err) {
+                manifestReject(err);
+                return;
+              }
+
+              const chunks: Buffer[] = [];
+              stm.on('data', (chunk: Buffer) => chunks.push(chunk));
+              stm.on('end', () => {
+                try {
+                  const data = Buffer.concat(chunks);
+                  const manifest = JSON.parse(data.toString('utf-8'));
+                  manifestResolve(manifest);
+                } catch (parseError) {
+                  manifestReject(parseError);
+                }
+              });
+              stm.on('error', manifestReject);
+            });
+          });
+
+          const manifest = manifestData as any;
+
+          // Crear directorios necesarios
+          const modsDir = path.join(targetPath, 'mods');
+          const resourcepacksDir = path.join(targetPath, 'resourcepacks');
+          const shaderpacksDir = path.join(targetPath, 'shaderpacks');
+          const configDir = path.join(targetPath, 'config');
+          const datapacksDir = path.join(targetPath, 'datapacks');
+          const overridesDir = path.join(targetPath, 'overrides');
+
+          [modsDir, resourcepacksDir, shaderpacksDir, configDir, datapacksDir, overridesDir].forEach(dir => {
+            if (!fs.existsSync(dir)) {
+              fs.mkdirSync(dir, { recursive: true });
+            }
+          });
+
+          // Extraer TODOS los archivos locales del modpack (overrides, configs, etc.)
+          const entries = zip.entries();
+          const totalEntries = Object.keys(entries).length;
+          let extractedCount = 0;
+          
+          for (const entryName in entries) {
+            const entry = entries[entryName];
+            
+            // Saltar el manifiesto y directorios vacíos
+            if (entryName.includes('modrinth.index.json') || entryName.includes('manifest.json') || entryName.includes('mmc-pack.json')) {
+              continue;
+            }
+            
+            if (!entry.isDirectory) {
+              let targetFile: string;
+              
+              // Si está en overrides/, copiar a la raíz de la instancia preservando la estructura
+              if (entryName.startsWith('overrides/')) {
+                const relativePath = entryName.replace('overrides/', '');
+                targetFile = path.join(targetPath, relativePath);
+              }
+              // Si está en cualquier otra carpeta, copiar directamente
+              else if (entryName.startsWith('mods/') || entryName.startsWith('resourcepacks/') || 
+                       entryName.startsWith('shaderpacks/') || entryName.startsWith('config/') ||
+                       entryName.startsWith('datapacks/') || entryName.startsWith('saves/') ||
+                       entryName.startsWith('logs/') || entryName.startsWith('options.txt') ||
+                       entryName.startsWith('optionsshaders.txt') || entryName.startsWith('servers.dat')) {
+                targetFile = path.join(targetPath, entryName);
+              }
+              // Cualquier otro archivo en la raíz del modpack
+              else {
+                targetFile = path.join(targetPath, entryName);
+              }
+              
+              // Crear directorios intermedios si no existen
+              const targetDirPath = path.dirname(targetFile);
+              if (!fs.existsSync(targetDirPath)) {
+                fs.mkdirSync(targetDirPath, { recursive: true });
+              }
+              
+              // Extraer archivo
+              await new Promise((fileResolve, fileReject) => {
+                zip.extract(entryName, targetFile, (err: Error | null) => {
+                  if (err) {
+                    console.error(`Error al extraer ${entryName}:`, err);
+                    fileReject(err);
+                  } else {
+                    extractedCount++;
+                    if (extractedCount % 10 === 0) {
+                      console.log(`[ModpackImport] Archivos extraídos: ${extractedCount}/${totalEntries}`);
+                    }
+                    fileResolve(undefined);
+                  }
+                });
+              });
+            }
+          }
+          
+          console.log(`[ModpackImport] Total de archivos extraídos del modpack: ${extractedCount}`);
+
+          // Descargar archivos del manifiesto
+          if (manifest.files && Array.isArray(manifest.files)) {
+            const downloadPromises: Promise<void>[] = [];
+            
+            for (const file of manifest.files) {
+              if (file.path && file.downloads && file.downloads.length > 0) {
+                const downloadUrl = file.downloads[0];
+                const filePath = file.path;
+                
+                // Determinar el directorio destino
+                let targetDir = targetPath;
+                if (filePath.startsWith('mods/')) {
+                  targetDir = modsDir;
+                } else if (filePath.startsWith('resourcepacks/')) {
+                  targetDir = resourcepacksDir;
+                } else if (filePath.startsWith('shaderpacks/')) {
+                  targetDir = shaderpacksDir;
+                } else if (filePath.startsWith('config/')) {
+                  targetDir = configDir;
+                } else if (filePath.startsWith('datapacks/')) {
+                  targetDir = datapacksDir;
+                }
+
+                const fileName = path.basename(filePath);
+                const targetFile = path.join(targetDir, fileName);
+
+                // Agregar a la cola de descargas
+                const downloadId = `modpack-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                downloadQueueService.addDownload({
+                  id: downloadId,
+                  url: downloadUrl,
+                  destination: targetFile,
+                  name: fileName
+                });
+
+                downloadPromises.push(
+                  new Promise((downloadResolve, downloadReject) => {
+                    const checkInterval = setInterval(() => {
+                      const status = downloadQueueService.getDownloadStatus(downloadId);
+                      if (status?.status === 'completed') {
+                        clearInterval(checkInterval);
+                        downloadResolve();
+                      } else if (status?.status === 'error') {
+                        clearInterval(checkInterval);
+                        downloadReject(new Error(status.error || 'Error en descarga'));
+                      }
+                    }, 500);
+                  })
+                );
+              }
+            }
+
+            // Esperar a que todas las descargas terminen
+            await Promise.all(downloadPromises);
+          }
+
+          zip.close();
+          resolve();
+        } catch (error) {
+          zip.close();
+          reject(error);
+        }
+      });
+
+      zip.on('error', (err: Error) => {
+        reject(err);
+      });
+    });
+  }
 }
 
 export const fileAnalyzerService = new FileAnalyzerService();
-
-// IPC handlers para Electron
-ipcMain.handle('modpack-import:analyze-file', async (_, filePath: string) => {
-  return await fileAnalyzerService.analyzeFile(filePath);
-});
-
-ipcMain.handle('modpack-import:extract-and-install', async (_, sourcePath: string, targetPath: string) => {
-  return await fileAnalyzerService.extractAndInstall(sourcePath, targetPath);
-});
-
-ipcMain.handle('modpack-import:download-and-extract-from-url', async (_, url: string, targetPath: string) => {
-  return await fileAnalyzerService.downloadAndExtractFromUrl(url, targetPath);
-});
-
-ipcMain.handle('modpack-import:download-modpack-from-modrinth', async (_, projectId: string, targetPath: string, mcVersion: string, loader: string) => {
-  return await fileAnalyzerService.downloadModpackFromModrinth(projectId, targetPath, mcVersion, loader);
-});
-
-ipcMain.handle('modpack-import:analyze-url', async (_, url: string) => {
-  return await fileAnalyzerService.analyzeUrl(url);
-});

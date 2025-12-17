@@ -98,7 +98,8 @@ contextBridge.exposeInMainWorld('api', {
   instance: {
     createFull: (payload: unknown) => ipcRenderer.invoke('instance:create-full', payload),
     getIncompleteDownloads: () => ipcRenderer.invoke('instance:get-incomplete-downloads'),
-    resumeDownload: (downloadId: string) => ipcRenderer.invoke('instance:resume-download', downloadId)
+    resumeDownload: (downloadId: string) => ipcRenderer.invoke('instance:resume-download', downloadId),
+    cancelCreation: (instanceId: string) => ipcRenderer.invoke('instance:cancel-creation', instanceId)
   },
 
   // Otros APIs
@@ -134,7 +135,9 @@ contextBridge.exposeInMainWorld('api', {
   game: {
     launch: (p: { instanceId: string, userProfile?: any }) => ipcRenderer.invoke('game:launch', p),
     getLogs: (instanceId: string) => ipcRenderer.invoke('game:get-logs', instanceId),
-    clearLogs: (instanceId: string) => ipcRenderer.invoke('game:clear-logs', instanceId)
+    clearLogs: (instanceId: string) => ipcRenderer.invoke('game:clear-logs', instanceId),
+    kill: (instanceId: string) => ipcRenderer.invoke('game:kill', instanceId),
+    isRunning: () => ipcRenderer.invoke('game:isRunning')
   },
 
   // API de detección de mods
@@ -181,7 +184,9 @@ contextBridge.exposeInMainWorld('api', {
     analyzeUrl: (url: string) => ipcRenderer.invoke('modpack-import:analyze-url', url),
     extractAndInstall: (sourcePath: string, targetPath: string) => ipcRenderer.invoke('modpack-import:extract-and-install', sourcePath, targetPath),
     downloadModpackFromModrinth: (projectId: string, targetPath: string, mcVersion: string, loader: string) => ipcRenderer.invoke('modpack-import:download-modpack-from-modrinth', projectId, targetPath, mcVersion, loader),
-    downloadAndExtractFromUrl: (url: string, targetPath: string) => ipcRenderer.invoke('modpack-import:download-and-extract-from-url', url, targetPath)
+    downloadAndExtractFromUrl: (url: string, targetPath: string) => ipcRenderer.invoke('modpack-import:download-and-extract-from-url', url, targetPath),
+    importAndCreateInstance: (source: string, metadata: any, onProgress?: (progress: number) => void) => ipcRenderer.invoke('modpack-import:import-and-create-instance', source, metadata),
+    saveTemporaryFile: (bufferArray: number[], fileName: string) => ipcRenderer.invoke('modpack-import:save-temporary-file', bufferArray, fileName)
   }
 });
 

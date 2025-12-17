@@ -119,6 +119,27 @@ export class ModpackImportService {
   }
 
   /**
+   * Importa un modpack creando una nueva instancia automáticamente
+   */
+  public async importModpackAndCreateInstance(
+    source: string,
+    metadata: ModpackMetadata,
+    onProgress?: (progress: number) => void
+  ): Promise<any> {
+    try {
+      if (!window.api?.modpackImport) {
+        throw new Error('API de importación de modpacks no disponible');
+      }
+      
+      // Crear instancia automáticamente usando el proceso principal
+      return await window.api.modpackImport.importAndCreateInstance(source, metadata, onProgress);
+    } catch (error) {
+      console.error('Error al importar modpack y crear instancia:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Genera una URL temporal para compartir un modpack o carpeta
    */
   public async generateTemporaryUrl(filePath: string): Promise<string> {

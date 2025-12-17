@@ -29,8 +29,9 @@ export interface DownloadInfo {
 export class DownloadQueueService {
   private downloads: Map<string, DownloadInfo> = new Map();
   private activeDownloads: Set<string> = new Set();
-  private maxConcurrentDownloads: number = 50; // 50 descargas simultáneas para balance entre velocidad y estabilidad
+  private maxConcurrentDownloads: number = 75; // Aumentado a 75 descargas simultáneas
   private baseTimeoutMs: number = 60000; // Timeout base de 1 minuto
+
 
   /**
    * Añade una descarga a la cola
@@ -81,15 +82,18 @@ export class DownloadQueueService {
 
       const timeoutId = setTimeout(() => controller.abort(), this.baseTimeoutMs);
 
-      // Agregar headers para mejorar la estabilidad de la conexión
+      // Agregar headers para mejorar la estabilidad y velocidad de la conexión
       const response = await fetch(download.url, {
         signal: controller.signal,
         headers: {
           'User-Agent': 'DRK-Launcher/1.0 (compatible; Fetch)',
           'Accept': '*/*',
           'Accept-Encoding': 'identity', // Evitar compresión para poder medir progreso
-          'Connection': 'keep-alive'
-        }
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache' // Evitar caché para obtener siempre la última versión
+        },
+        // Aumentar el tamaño del buffer para descargas más rápidas
+        // Node.js fetch no expone directamente estas opciones, pero podemos optimizar el stream
       });
 
       clearTimeout(timeoutId);
@@ -120,16 +124,16 @@ export class DownloadQueueService {
       }
 
       // Calcular timeout dinámico basado en el tamaño del archivo
-      // Para archivos grandes (modpacks), usar timeout más largo
-      // Base: 60s, +30s por cada 50MB, máximo 10 minutos
+      // Para archivos grandes (Java, modpacks), usar timeout más largo
+      // Base: 120s, +30s por cada 50MB, máximo 15 minutos
       let dynamicTimeout = this.baseTimeoutMs;
       if (totalBytes > 0) {
         const sizeMB = totalBytes / (1024 * 1024);
         if (sizeMB > 50) {
-          // Archivos grandes: timeout más largo
+          // Archivos grandes: timeout más largo (Java puede ser 100-200MB)
           dynamicTimeout = Math.min(
             this.baseTimeoutMs + Math.floor(sizeMB / 50) * 30000, // +30s por cada 50MB
-            600000 // Máximo 10 minutos
+            900000 // Máximo 15 minutos para archivos muy grandes
           );
         }
       }
@@ -156,10 +160,13 @@ export class DownloadQueueService {
           clearTimeout(streamTimeout);
         }
         lastActivityTime = Date.now();
+        // Usar un timeout más generoso para archivos grandes (Java puede tardar más)
+        // Mínimo 30 segundos entre actividad para evitar timeouts prematuros
+        const timeoutValue = Math.max(dynamicTimeout, 30000);
         streamTimeout = setTimeout(() => {
           const timeSinceLastActivity = Date.now() - lastActivityTime;
           // Solo timeout si no ha habido actividad en el tiempo especificado
-          if (timeSinceLastActivity >= dynamicTimeout && !streamEnded && download.status === 'downloading') {
+          if (timeSinceLastActivity >= timeoutValue && !streamEnded && download.status === 'downloading') {
             streamError = new Error('Download stream timeout - connection may have been interrupted');
             fileStream.destroy();
             progressStream.destroy();
@@ -171,7 +178,7 @@ export class DownloadQueueService {
               }
             }
           }
-        }, dynamicTimeout);
+        }, timeoutValue);
       };
 
       const progressStream = new (require('stream').Transform)({

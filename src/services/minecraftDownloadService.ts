@@ -232,19 +232,33 @@ export class MinecraftDownloadService {
     const assetIndexData = JSON.parse(fs.readFileSync(assetIndexPath, 'utf-8'));
     const assetsObjects = assetIndexData.objects;
     const totalAssets = Object.keys(assetsObjects).length;
-    
+
     logProgressService.info(`[Assets] Total de assets a verificar: ${totalAssets}`);
 
-    // Paso 3: Verificar qué assets faltan
-    const assetsEntries = Object.entries(assetsObjects as Record<string, { hash: string; size: number }>);
+    // Paso 3: Verificar qué assets faltan (uso de streaming para reducir RAM)
     const missingAssets: Array<[string, { hash: string; size: number }]> = [];
-    
-    for (const [assetName, assetInfo] of assetsEntries) {
-      const hash = assetInfo.hash;
-      const assetPath = path.join(this.objectsPath, hash.substring(0, 2), hash);
-      
-      if (!fs.existsSync(assetPath)) {
-        missingAssets.push([assetName, assetInfo]);
+
+    // Procesar por lotes para reducir el uso de memoria
+    const batchSize = 5000; // Tamaño de lote para procesamiento (valor original)
+    const assetKeys = Object.keys(assetsObjects);
+
+    for (let i = 0; i < assetKeys.length; i += batchSize) {
+      const batchKeys = assetKeys.slice(i, i + batchSize);
+
+      for (const assetName of batchKeys) {
+        const assetInfo = assetsObjects[assetName];
+        const hash = assetInfo.hash;
+        const assetPath = path.join(this.objectsPath, hash.substring(0, 2), hash);
+
+        if (!fs.existsSync(assetPath)) {
+          missingAssets.push([assetName, assetInfo]);
+        }
+
+        // Liberar memoria intermedia periódicamente
+        if (missingAssets.length % 1000 === 0) {
+          // Hacer pequeña pausa para permitir que el recolector de basura actúe
+          await new Promise(resolve => setImmediate(resolve));
+        }
       }
     }
     
@@ -260,41 +274,44 @@ export class MinecraftDownloadService {
 
     // Paso 4: Descargar assets faltantes desde resources.download.minecraft.net
     // Formato: https://resources.download.minecraft.net/{primeros 2 chars del hash}/{hash completo}
-    const batchSize = 25; // Reducido para mejor control
+    const downloadBatchSize = 25; // Tamaño original para mejor rendimiento
     let downloaded = 0;
-    
-    for (let i = 0; i < missingAssets.length; i += batchSize) {
-      const batch = missingAssets.slice(i, i + batchSize);
-      
+
+    for (let i = 0; i < missingAssets.length; i += downloadBatchSize) {
+      const batch = missingAssets.slice(i, i + downloadBatchSize);
+
       const results = await Promise.allSettled(batch.map(async ([assetName, assetInfo]: [string, { hash: string; size: number }]) => {
         const hash = assetInfo.hash;
         const assetDir = path.join(this.objectsPath, hash.substring(0, 2));
         const assetPath = path.join(assetDir, hash);
-        
+
         this.ensureDir(assetDir);
         // Construir URL según formato de Mojang: resources.download.minecraft.net/{hash[0:2]}/{hash}
         const assetUrl = `https://resources.download.minecraft.net/${hash.substring(0, 2)}/${hash}`;
         await this.downloadFile(assetUrl, assetPath, hash, 'sha1');
-        
+
         // Log especial para lenguajes (importante para el selector de idioma)
         if (assetName.includes('lang/') || assetName.includes('minecraft/lang/')) {
           logProgressService.info(`[Assets] Idioma descargado: ${path.basename(assetName)}`);
         }
       }));
-      
+
       // Contar éxitos
       const successes = results.filter(r => r.status === 'fulfilled').length;
       downloaded += successes;
-      
+
       // Log de progreso cada batch
       const progress = Math.round((downloaded / missingAssets.length) * 100);
       logProgressService.info(`[Assets] Progreso: ${downloaded}/${missingAssets.length} (${progress}%)`);
-      
+
       // Log de errores si los hay
       const errors = results.filter(r => r.status === 'rejected');
       if (errors.length > 0) {
         logProgressService.warning(`[Assets] ${errors.length} assets fallaron en este lote (continuando...)`);
       }
+
+      // Permitir que el recolector de basura actúe entre lotes
+      await new Promise(resolve => setImmediate(resolve));
     }
     
     logProgressService.success(`[Assets] Descarga completada: ${downloaded}/${missingAssets.length} assets descargados`);

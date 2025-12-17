@@ -12,20 +12,24 @@ const SplashScreen: React.FC = () => {
     }, 300);
 
     // Animación de la línea pasando por cada letra
+    // Repetir la animación durante los 10 segundos del splash
     const interval = setInterval(() => {
       setCurrentLetter((prev) => {
         if (prev >= letters.length - 1) {
-          // Mantener en la última letra
+          // Reiniciar la animación después de un breve delay para que se repita
+          setTimeout(() => {
+            setCurrentLetter(-1);
+          }, 500);
           return prev;
         }
         return prev + 1;
       });
-    }, 500); // Velocidad de la animación (500ms por letra)
+    }, 600); // Velocidad de la animación (600ms por letra)
 
-    // Limpiar después de que termine la animación completa
+    // Limpiar después de 10 segundos (duración del splash)
     const cleanup = setTimeout(() => {
       clearInterval(interval);
-    }, 500 * letters.length + 1000);
+    }, 10000);
 
     return () => {
       clearTimeout(startDelay);
@@ -36,11 +40,9 @@ const SplashScreen: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-[#0f0f10] flex flex-col items-center justify-center z-50">
-      {/* Logo/Ícono arriba: igual al loader actual del launcher */}
+      {/* Logo/Ícono arriba - Animación de carga como en el launcher */}
       <div className="mb-12">
-        <div className="w-24 h-24 rounded-2xl bg-[#0b1a2f] flex items-center justify-center shadow-lg shadow-blue-500/40">
-          <div className="w-16 h-16 border-4 border-blue-500 border-b-transparent rounded-xl animate-spin"></div>
-        </div>
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-500"></div>
       </div>
 
       {/* Texto DRK con animación de línea */}
@@ -107,6 +109,7 @@ const SplashScreen: React.FC = () => {
             transform: scaleX(1);
           }
         }
+
       `}</style>
     </div>
   );

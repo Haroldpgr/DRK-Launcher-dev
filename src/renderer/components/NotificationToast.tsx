@@ -18,9 +18,10 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ notification }) =
 
   const handleDismiss = () => {
     setIsLeaving(true);
-    setTimeout(() => {
-      notification.onDismiss?.();
-    }, 300);
+    // Llamar al callback de dismiss inmediatamente
+    if (notification.onDismiss) {
+      notification.onDismiss();
+    }
   };
 
   const getNotificationStyle = () => {

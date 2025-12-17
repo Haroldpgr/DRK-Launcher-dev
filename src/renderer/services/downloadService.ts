@@ -559,6 +559,20 @@ export class DownloadService {
     }
   }
 
+  removeDownload(downloadId: string) {
+    if (this.downloads.has(downloadId)) {
+      this.downloads.delete(downloadId);
+      this.persistDownloads();
+      this.notifyObservers();
+    }
+  }
+
+  clearAllDownloads() {
+    this.downloads.clear();
+    this.persistDownloads();
+    this.notifyObservers();
+  }
+
   getDownload(downloadId: string): Download | undefined {
     return this.downloads.get(downloadId);
   }

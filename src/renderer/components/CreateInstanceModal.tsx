@@ -57,6 +57,8 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
   // Estados para progreso
   const [currentProgress, setCurrentProgress] = useState<ProgressStatus | null>(null);
   const [overallProgress, setOverallProgress] = useState<{ progress: number; statusText: string; activeOperations: number } | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
 
   // Cargar la memoria total del sistema y configurar Java estándar
   useEffect(() => {
@@ -334,12 +336,53 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
       if (onCreated) {
         onCreated();
       }
+      
+      // Limpiar estados
+      setIsCreating(false);
+      setCurrentInstanceId(null);
       onClose();
     } catch (err) {
       console.error('Error al crear instancia:', err);
-      setError(`Error al crear la instancia: ${(err as Error).message || 'Error desconocido'}`);
+      const errorMessage = (err as Error).message || 'Error desconocido';
+      
+      // Si el error es por cancelación, no mostrar error
+      if (errorMessage.includes('cancelada')) {
+        setError(null);
+      } else {
+        setError(`Error al crear la instancia: ${errorMessage}`);
+      }
+      
+      setIsCreating(false);
+      setCurrentInstanceId(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCancelCreation = async () => {
+    if (!currentInstanceId) return;
+    
+    try {
+      // Cancelar la creación de la instancia
+      if (window.api?.instance?.cancelCreation) {
+        await window.api.instance.cancelCreation(currentInstanceId);
+      } else {
+        // Fallback: usar el servicio directamente
+        // Usar el servicio ya importado estáticamente
+        await integratedDownloadService.cancelInstanceCreation(currentInstanceId);
+      }
+      
+      setIsCreating(false);
+      setCurrentInstanceId(null);
+      setLoading(false);
+      setError(null);
+      setCurrentProgress(null);
+      setOverallProgress(null);
+      
+      // No cerrar el modal, solo limpiar el estado
+    } catch (err) {
+      console.error('Error al cancelar creación:', err);
+      setError('Error al cancelar la creación de la instancia');
     }
   };
 
@@ -398,6 +441,32 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                   </svg>
                 </button>
               </div>
+
+              {/* Indicador de creación en progreso */}
+              {isCreating && (
+                <div className="mb-6 p-4 bg-gradient-to-r from-blue-900/50 to-purple-900/30 border border-blue-700/50 rounded-xl text-blue-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <svg className="w-6 h-6 animate-spin text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <div>
+                        <div className="font-semibold text-blue-300">Creando instancia...</div>
+                        <div className="text-sm text-blue-400/80">Por favor, espera mientras se descargan los archivos necesarios</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleCancelCreation}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors font-medium flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Cancelar creación
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="mb-6 p-4 bg-gradient-to-r from-red-900/50 to-red-800/30 border border-red-700/50 rounded-xl text-red-200 flex items-start">
@@ -724,9 +793,9 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
                   </button>
                   <motion.button
                     type="submit"
-                    disabled={loading || !canCreateInstance}
-                    whileHover={canCreateInstance && !loading ? { scale: 1.05 } : {}}
-                    whileTap={canCreateInstance && !loading ? { scale: 0.95 } : {}}
+                    disabled={loading || !canCreateInstance || isCreating}
+                    whileHover={canCreateInstance && !loading && !isCreating ? { scale: 1.05 } : {}}
+                    whileTap={canCreateInstance && !loading && !isCreating ? { scale: 0.95 } : {}}
                     animate={{
                       opacity: canCreateInstance ? 1 : 0.5,
                       boxShadow: canCreateInstance && !loading 

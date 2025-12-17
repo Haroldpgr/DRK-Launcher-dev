@@ -1,4 +1,21 @@
-import { platform } from 'os';
+// Función para detectar la plataforma de forma segura (funciona tanto en main como en renderer)
+function getPlatform(): string {
+  // En Electron, process.platform está disponible tanto en main como en renderer
+  if (typeof process !== 'undefined' && process.platform) {
+    return process.platform;
+  }
+  
+  // Si no está disponible, detectar desde el navegador
+  if (typeof navigator !== 'undefined') {
+    const platformStr = navigator.platform || navigator.userAgent || '';
+    if (platformStr.includes('Win')) return 'win32';
+    if (platformStr.includes('Mac')) return 'darwin';
+    if (platformStr.includes('Linux')) return 'linux';
+  }
+  
+  // Default a win32
+  return 'win32';
+}
 
 /**
  * Servicio para obtener parámetros Java estándar optimizados por loader y sistema operativo
@@ -12,7 +29,7 @@ export class JavaConfigService {
     ramMb: number
   ): string[] {
     const minMem = Math.max(512, Math.floor(ramMb / 4));
-    const os = platform();
+    const os = getPlatform();
     
     // Parámetros base comunes para todos los loaders
     // Basados en flags optimizadas para Minecraft con mods

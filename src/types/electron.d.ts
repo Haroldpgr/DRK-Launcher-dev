@@ -95,6 +95,8 @@ declare global {
         extractAndInstall: (sourcePath: string, targetPath: string) => Promise<void>;
         downloadModpackFromModrinth: (projectId: string, targetPath: string, mcVersion: string, loader: string) => Promise<void>;
         downloadAndExtractFromUrl: (url: string, targetPath: string, onProgress?: (progress: number) => void) => Promise<void>;
+        importAndCreateInstance: (source: string, metadata: any) => Promise<any>;
+        saveTemporaryFile: (bufferArray: number[], fileName: string) => Promise<string>;
       };
       dialog: {
         showOpenDialog: (options: any) => Promise<any>;

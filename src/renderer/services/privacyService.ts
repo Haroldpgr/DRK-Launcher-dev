@@ -1,6 +1,6 @@
 // src/renderer/services/privacyService.ts
 import { settingsService, Settings } from './settingsService';
-import { trackEvent } from './telemetryService';
+// Usar solo imports dinámicos de telemetryService para evitar advertencias de Vite
 
 class PrivacyService {
   // Limpieza de caché
@@ -15,11 +15,13 @@ class PrivacyService {
       // return result.success;
       
       // Simulación
-      trackEvent('cache_cleared', { method: 'manual' });
+      const telemetry = await import('./telemetryService');
+      telemetry.trackEvent('cache_cleared', { method: 'manual' });
       return true;
     } catch (error) {
       console.error('Error al limpiar la caché:', error);
-      trackEvent('cache_clear_error', { error: (error as Error).message });
+      const telemetry = await import('./telemetryService');
+      telemetry.trackEvent('cache_clear_error', { error: (error as Error).message });
       return false;
     }
   }
@@ -49,11 +51,13 @@ class PrivacyService {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      trackEvent('settings_exported', { method: 'manual' });
+      const telemetry = await import('./telemetryService');
+      telemetry.trackEvent('settings_exported', { method: 'manual' });
       return true;
     } catch (error) {
       console.error('Error al exportar configuración:', error);
-      trackEvent('settings_export_error', { error: (error as Error).message });
+      const telemetry = await import('./telemetryService');
+      telemetry.trackEvent('settings_export_error', { error: (error as Error).message });
       return false;
     }
   }

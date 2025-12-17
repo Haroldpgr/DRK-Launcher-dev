@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import Card from '../components/Card';
 import CreateInstanceModal from '../components/CreateInstanceModal';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { createInstanceTutorialSteps } from '../data/tutorialSteps';
 
 export default function CreateInstance() {
   const [showCreateModal, setShowCreateModal] = useState(true);
@@ -30,6 +32,9 @@ export default function CreateInstance() {
           window.location.hash = '#/instances';
         }}
       />
+
+      {/* Tutorial Overlay */}
+      <TutorialOverlay pageId="create-instance" steps={createInstanceTutorialSteps} />
     </Card>
   );
 }

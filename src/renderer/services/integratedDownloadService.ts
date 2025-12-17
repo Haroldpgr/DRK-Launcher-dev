@@ -17,11 +17,19 @@ export class IntegratedDownloadService {
     maxMemory?: number;
     minMemory?: number;
     jvmArgs?: string[];
-  }): Promise<any> {
+  }, instanceId?: string): Promise<any> {
     if (!window.api?.instance?.createFull) {
       throw new Error('API de creación de instancias no disponible');
     }
-    return await window.api.instance.createFull(payload);
+    // Pasar el instanceId si está disponible
+    return await window.api.instance.createFull({ ...payload, instanceId });
+  }
+
+  async cancelInstanceCreation(instanceId: string): Promise<void> {
+    if (!window.api?.instance?.cancelCreation) {
+      throw new Error('API de cancelación de creación de instancias no disponible');
+    }
+    await window.api.instance.cancelCreation(instanceId);
   }
 
   async getIncompleteDownloads(): Promise<any[]> {

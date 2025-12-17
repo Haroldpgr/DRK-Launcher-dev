@@ -543,6 +543,7 @@ export class JavaDownloadService {
 
   /**
    * Espera a que una descarga se complete
+   * Optimizado para verificar más frecuentemente y reducir latencia
    */
   private async waitForDownload(downloadId: string): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -558,8 +559,8 @@ export class JavaDownloadService {
         } else if (status.status === 'error' || status.status === 'cancelled') {
           reject(new Error(status.error || 'Download failed or cancelled'));
         } else {
-          // Continuar verificando cada 500ms
-          setTimeout(checkStatus, 500);
+          // Continuar verificando cada 200ms para respuesta más rápida
+          setTimeout(checkStatus, 200);
         }
       };
 

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import ServerCard from '../components/ServerCard';
 import Button from '../components/Button';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { serversTutorialSteps } from '../data/tutorialSteps';
 
 interface ServerInfo {
   id: string;
@@ -660,6 +662,9 @@ export default function Servers() {
       {/* Modals */}
       {showAddModal && <AddServerModal />}
       {serverToDelete && <DeleteConfirmationModal />}
+
+      {/* Tutorial Overlay */}
+      <TutorialOverlay pageId="servers" steps={serversTutorialSteps} />
     </div>
   );
 }

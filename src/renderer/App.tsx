@@ -1,4 +1,4 @@
-import React, { useEffect, useState, Suspense, lazy, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, Suspense, lazy, useCallback, useMemo, Component, ErrorInfo, ReactNode } from 'react'
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import { profileService, type Profile } from './services/profileService' // Import the actual profile service
@@ -7,13 +7,61 @@ import { processMonitorService } from './services/processMonitorService';
 import NotificationContainer from './components/NotificationContainer';
 import DownloadProgressWidget from './components/DownloadProgressWidget';
 import SplashScreen from './components/SplashScreen';
+import WelcomeModal from './components/WelcomeModal';
+import { tutorialService } from './services/tutorialService';
 
-// Lazy loading de componentes pesados para optimizar memoria
+// Error Boundary para capturar errores en producción
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    console.error('[App ErrorBoundary] Error capturado:', error);
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[App ErrorBoundary] Error en componente:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6" style={{ minHeight: '100%', backgroundColor: '#0f0f10' }}>
+          <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-4 text-red-200">
+            <h2 className="text-lg font-bold mb-2">Error al cargar componente</h2>
+            <p className="mb-4">{this.state.error?.message || 'Error desconocido'}</p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors"
+            >
+              Recargar Página
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Importaciones directas para componentes críticos que fallan en producción con lazy loading
+import Instances from './pages/Instances';
+import CreateInstance from './pages/CreateInstance';
+
+// Lazy loading de componentes pesados para optimizar memoria (solo los que funcionan bien)
 const Home = lazy(() => import('./pages/Home'));
 const ContentPage = lazy(() => import('./pages/ContentPage'));
 const SkinsPage = lazy(() => import('./pages/SkinsPage'));
-const Instances = lazy(() => import('./pages/Instances'));
-const CreateInstance = lazy(() => import('./pages/CreateInstance'));
 const Servers = lazy(() => import('./pages/Servers'));
 const CrashAnalyzer = lazy(() => import('./pages/CrashAnalyzer'));
 const ModpackImporter = lazy(() => import('./pages/ModpackImporter'));
@@ -37,6 +85,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<Profile[]>([]);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [showSplash, setShowSplash] = useState(true); // Estado para mostrar/ocultar splash screen
+  const [showWelcome, setShowWelcome] = useState(false); // Estado para modal de bienvenida
 
   // Escuchar eventos de actualización de perfiles
   useEffect(() => {
@@ -58,10 +107,41 @@ export default function App() {
   const loc = useLocation()
 
   useEffect(() => {
-    // Mostrar splash screen por un tiempo mínimo (2.5 segundos para que se vea la animación completa)
-    const splashTimer = setTimeout(() => {
-      setShowSplash(false);
-    }, 2500);
+    // Pre-cargar el componente Home en segundo plano mientras se muestra el splash
+    const preloadHome = async () => {
+      try {
+        // Pre-cargar el módulo Home
+        const homeModule = await import('./pages/Home');
+        console.log('[App] Componente Home pre-cargado');
+        
+        // Pre-cargar datos que necesita Home
+        if (window.api) {
+          // Pre-cargar instancias
+          if (window.api.instances?.scanAndRegister) {
+            try {
+              await window.api.instances.scanAndRegister();
+            } catch (err) {
+              console.warn('[App] Error al pre-cargar instancias:', err);
+            }
+          }
+          
+          // Pre-cargar modpacks recomendados
+          if (window.api.modrinth?.search) {
+            window.api.modrinth.search({
+              contentType: 'modpacks',
+              search: ''
+            }).catch((err: any) => {
+              console.warn('[App] Error al pre-cargar modpacks:', err);
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[App] Error al pre-cargar Home:', error);
+      }
+    };
+
+    // Iniciar pre-carga inmediatamente
+    preloadHome();
 
     // Load profiles and current user from service
     const initialProfiles = profileService.getAllProfiles();
@@ -96,6 +176,17 @@ export default function App() {
         });
       }
     }
+
+    // Mostrar splash screen por 10 segundos mientras se carga todo en segundo plano
+    const splashTimer = setTimeout(() => {
+      setShowSplash(false);
+      console.log('[App] Splash screen completado, mostrando aplicación');
+      
+      // Mostrar modal de bienvenida si es la primera vez
+      if (!tutorialService.hasSeenWelcome()) {
+        setShowWelcome(true);
+      }
+    }, 10000);
 
     return () => clearTimeout(splashTimer);
   }, [])
@@ -367,7 +458,11 @@ export default function App() {
         <Suspense fallback={<LoadingFallback />}>
           <Routes>
             <Route path="/" element={<Home onAddAccount={handleAddAccount} onDeleteAccount={handleDeleteAccount} onSelectAccount={handleSelectAccount} onLoginClick={handleLoginClick} onPlay={handlePlay} currentUser={currentUser} accounts={accounts} />} />
-            <Route path="/instances" element={<Instances onPlay={handlePlay} />} />
+            <Route path="/instances" element={
+              <ErrorBoundary>
+                <Instances onPlay={handlePlay} />
+              </ErrorBoundary>
+            } />
             <Route path="/create" element={<CreateInstance />} />
             {/* <Route path="/settings" element={<Settings />} /> */} {/* The route is no longer needed */}
             <Route path="/servers" element={<Servers />} />
@@ -396,6 +491,10 @@ export default function App() {
         />
       </Suspense>
       <NotificationContainer />
+      <WelcomeModal 
+        isOpen={showWelcome} 
+        onClose={() => setShowWelcome(false)} 
+      />
     </div>
   )
 }

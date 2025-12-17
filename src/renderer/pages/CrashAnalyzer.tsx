@@ -3,6 +3,8 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import { qwenService } from '../services/aiService';
 import ConfirmationModal from '../components/ConfirmationModal';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { crashAnalyzerTutorialSteps } from '../data/tutorialSteps';
 
 type CrashRecord = {
   id: string;
@@ -655,6 +657,9 @@ export default function CrashAnalyzer() {
           confirmColor="danger"
         />
       )}
+
+      {/* Tutorial Overlay */}
+      <TutorialOverlay pageId="crash-analyzer" steps={crashAnalyzerTutorialSteps} />
     </div>
   );
 }

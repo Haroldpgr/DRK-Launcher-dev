@@ -7,6 +7,8 @@ import { modernSkins } from "../data/skins";
 import { WalkingAnimation, RunningAnimation, IdleAnimation } from 'skinview3d';
 import * as THREE from 'three';
 import { showModernAlert, showModernConfirm } from '../utils/uiUtils';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { skinsTutorialSteps } from '../data/tutorialSteps';
 
 // Añadir estilos CSS para renderizado pixelado
 const customStyles = `
@@ -967,6 +969,9 @@ return (
         </Card>
       </div>
     </div>
+
+    {/* Tutorial Overlay */}
+    <TutorialOverlay pageId="skins" steps={skinsTutorialSteps} />
   </div>
 );
 };

@@ -4,6 +4,8 @@ import Card from './Card';
 import Button from './Button';
 import { integratedDownloadService } from '../services/integratedDownloadService';
 import { notificationService } from '../services/notificationService';
+import TutorialOverlay from './TutorialOverlay';
+import { downloadsTutorialSteps } from '../data/tutorialSteps';
 
 interface Download {
   id: string;
@@ -683,6 +685,9 @@ const DownloadsView = () => {
           </div>
         )}
       </Card>
+
+      {/* Tutorial Overlay */}
+      <TutorialOverlay pageId="downloads" steps={downloadsTutorialSteps} />
     </div>
   );
 };

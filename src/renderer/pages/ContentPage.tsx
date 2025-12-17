@@ -15,7 +15,10 @@ import SingleDownloadModal from '../components/SingleDownloadModal';
 import MultipleDownloadModal from '../components/MultipleDownloadModal';
 import MultipleDownloadQueue from '../components/MultipleDownloadQueue';
 import DownloadHistoryModal from '../components/DownloadHistoryModal';
+import { multipleDownloadQueueService } from '../services/multipleDownloadQueueService';
 import { showModernAlert, showModernConfirm } from '../utils/uiUtils';
+import TutorialOverlay from '../components/TutorialOverlay';
+import { contentTutorialSteps } from '../data/tutorialSteps';
 
 type ContentType = 'modpacks' | 'mods' | 'resourcepacks' | 'datapacks' | 'shaders';
 type SortBy = 'popular' | 'recent' | 'name';
@@ -723,10 +726,8 @@ const ContentPage: React.FC = () => {
     // Agregar los elementos a la cola de descargas múltiples
     console.log('Agregando a cola múltiple:', queueItems);
 
-    // Importar y usar el servicio de cola
-    import('../services/multipleDownloadQueueService').then(({ multipleDownloadQueueService }) => {
+    // Usar el servicio de cola (import estático para evitar advertencias de Vite)
       multipleDownloadQueueService.addToQueue(queueItems);
-    });
 
     // Cerrar el modal de descarga múltiple
     setShowMultipleDownloadModal(false);
@@ -1950,7 +1951,7 @@ const ContentPage: React.FC = () => {
       <style dangerouslySetInnerHTML={{ __html: scrollbarStyles }} />
       
       {/* Content Type Tabs */}
-      <div className="relative mb-6">
+      <div className="relative mb-6" data-tutorial="content-tabs">
         <div className="absolute inset-0 bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-2xl -z-10 blur-xl opacity-50"></div>
         <div className="flex flex-wrap gap-2 overflow-x-auto pb-2">
           {['modpacks', 'mods', 'resourcepacks', 'datapacks', 'shaders'].map((tab) => (
@@ -1980,7 +1981,7 @@ const ContentPage: React.FC = () => {
         <div className="lg:w-72 flex-shrink-0">
           <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-5 border border-gray-700/50 shadow-lg">
             {/* Platform Selection Buttons - Inside the Filter Box */}
-            <div className="flex flex-col items-center gap-3 mb-6 overflow-x-auto pb-2 relative">
+            <div className="flex flex-col items-center gap-3 mb-6 overflow-x-auto pb-2 relative" data-tutorial="content-platforms">
               {(['modrinth', 'curseforge'] as Platform[]).map((platform) => (
                 <button
                   key={platform}
@@ -1992,21 +1993,29 @@ const ContentPage: React.FC = () => {
                   }`}
                 >
                   <span className="flex items-center justify-center relative z-10 w-full">
-                    <img
-                      src={platform === 'modrinth' ? 'https://cdn.modrinth.com/static/logo-cubeonly.5f38e9dd.png' : 'https://www.curseforge.com/themes/custom/cf/images/logos/curseforge.svg'}
-                      alt={platform === 'modrinth' ? 'Modrinth' : 'CurseForge'}
-                      className="w-5 h-5 mr-2"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.onerror = null;
-                        if (platform === 'modrinth') {
+                    {platform === 'modrinth' ? (
+                      <img
+                        src="https://cdn.modrinth.com/static/logo-cubeonly.5f38e9dd.png"
+                        alt="Modrinth"
+                        className="w-5 h-5 mr-2"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.onerror = null;
                           target.src = 'https://modrinth.com/favicon.ico';
-                        } else {
-                          // If SVG fails, use PNG version of CurseForge logo
-                          target.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/CurseForge_Logo.svg/640px-CurseForge_Logo.svg.png';
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                    ) : (
+                      <img
+                        src="https://www.curseforge.com/favicon.ico"
+                        alt="CurseForge"
+                        className="w-5 h-5 mr-2"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.onerror = null;
+                          target.style.display = 'none';
+                        }}
+                      />
+                    )}
                     {platform === 'modrinth' ? 'Modrinth' : 'CurseForge'}
                   </span>
                 </button>
@@ -2036,7 +2045,7 @@ const ContentPage: React.FC = () => {
             {/* Search */}
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-300 mb-2">Buscar</label>
-              <div className="relative">
+              <div className="relative" data-tutorial="content-search">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -2052,84 +2061,8 @@ const ContentPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Version Filter */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">Versión de Minecraft</label>
-              <div className="relative">
-                <select
-                  value={selectedVersion}
-                  onChange={(e) => setSelectedVersion(e.target.value)}
-                  className="appearance-none w-full bg-gray-700/50 border border-gray-600 rounded-xl text-white pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                >
-                  <option value="all">Todas las versiones</option>
-                  {/* Versiones principales de Minecraft, de más reciente a más antigua (futuro 2025) */}
-                  <option value="1.21.10">1.21.10</option>
-                  <option value="1.21.9">1.21.9</option>
-                  <option value="1.21.8">1.21.8</option>
-                  <option value="1.21.7">1.21.7</option>
-                  <option value="1.21.6">1.21.6</option>
-                  <option value="1.21.5">1.21.5</option>
-                  <option value="1.21.4">1.21.4</option>
-                  <option value="1.21.3">1.21.3</option>
-                  <option value="1.21.2">1.21.2</option>
-                  <option value="1.21.1">1.21.1</option>
-                  <option value="1.21">1.21</option>
-                  <option value="1.20.6">1.20.6</option>
-                  <option value="1.20.5">1.20.5</option>
-                  <option value="1.20.4">1.20.4</option>
-                  <option value="1.20.3">1.20.3</option>
-                  <option value="1.20.2">1.20.2</option>
-                  <option value="1.20.1">1.20.1</option>
-                  <option value="1.19.4">1.19.4</option>
-                  <option value="1.19.3">1.19.3</option>
-                  <option value="1.19.2">1.19.2</option>
-                  <option value="1.18.2">1.18.2</option>
-                  <option value="1.17.1">1.17.1</option>
-                  <option value="1.16.5">1.16.5</option>
-                  <option value="1.15.2">1.15.2</option>
-                  <option value="1.14.4">1.14.4</option>
-                  <option value="1.13.2">1.13.2</option>
-                  <option value="1.12.2">1.12.2</option>
-                  <option value="1.11.2">1.11.2</option>
-                  <option value="1.10.2">1.10.2</option>
-                  <option value="1.9.4">1.9.4</option>
-                  <option value="1.8.9">1.8.9</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 20 20" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* Loader Filter */}
-            {type === 'modpacks' || type === 'mods' ? (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">Loader</label>
-              <div className="relative">
-                <select
-                  value={selectedLoader}
-                  onChange={(e) => setSelectedLoader(e.target.value)}
-                  className="appearance-none w-full bg-gray-700/50 border border-gray-600 rounded-xl text-white pl-3 pr-8 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                >
-                  <option value="">Todos los loaders</option>
-                  <option value="forge">Forge</option>
-                  <option value="fabric">Fabric</option>
-                  <option value="quilt">Quilt</option>
-                  <option value="neoforge">NeoForge</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 20 20" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            ) : null}
-
             {/* Sort By */}
-            <div>
+            <div data-tutorial="content-sort">
               <label className="block text-sm font-medium text-gray-300 mb-2">Ordenar por</label>
               <div className="relative">
                 <select
@@ -2517,6 +2450,9 @@ const ContentPage: React.FC = () => {
       isOpen={showDownloadHistoryModal}
       onClose={() => setShowDownloadHistoryModal(false)}
     />
+
+    {/* Tutorial Overlay */}
+    <TutorialOverlay pageId="content" steps={contentTutorialSteps} />
   </div>
 );
 };

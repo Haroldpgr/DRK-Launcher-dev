@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
+import path from 'path'
 
 // Configuración para resolver módulos de Node.js correctamente
 export default defineConfig({
@@ -27,20 +28,9 @@ export default defineConfig({
     sourcemap: false, // Desactivar sourcemaps en producción para reducir tamaño
     minify: 'esbuild', // Usar esbuild (más rápido y viene incluido)
     rollupOptions: {
-      external: ['path', 'fs', 'os', 'stream', 'crypto', 'child_process', 'util', 'net', 'tls', 'zlib'],
+      // NO externalizar estos módulos para el renderer - deben ser polyfills
+      // external: ['path', 'fs', 'os', 'stream', 'crypto', 'child_process', 'util', 'net', 'tls', 'zlib'],
       output: {
-        globals: {
-          path: 'require("path")',
-          fs: 'require("fs")',
-          os: 'require("os")',
-          stream: 'require("stream")',
-          crypto: 'require("crypto")',
-          child_process: 'require("child_process")',
-          util: 'require("util")',
-          net: 'require("net")',
-          tls: 'require("tls")',
-          zlib: 'require("zlib")'
-        },
         // Code splitting manual mejorado para optimizar el tamaño de los chunks
         manualChunks: (id) => {
           // Separar Three.js en su propio chunk (librería muy grande ~500KB+)
@@ -100,15 +90,28 @@ export default defineConfig({
   resolve: {
     alias: {
       // Asegurar que los módulos de Node.js se resuelvan adecuadamente
-      path: 'path-browserify',
-      fs: 'empty-module',
-      os: 'os-browserify/browser',
-      stream: 'stream-browserify',
-      crypto: 'crypto-browserify'
+      // En el renderer, estos módulos deben ser polyfills o vacíos
+      'path': 'path-browserify',
+      'fs': path.resolve(__dirname, 'src/utils/empty-module.js'),
+      'os': path.resolve(__dirname, 'src/utils/os-polyfill.ts'),
+      'stream': 'stream-browserify',
+      'crypto': 'crypto-browserify',
+      // También manejar imports de node:os
+      'node:os': path.resolve(__dirname, 'src/utils/os-polyfill.ts'),
+      'node:path': 'path-browserify',
+      'node:fs': path.resolve(__dirname, 'src/utils/empty-module.js')
     }
   },
   optimizeDeps: {
-    include: ['path-browserify', 'os-browserify', 'stream-browserify', 'crypto-browserify']
+    include: ['path-browserify', 'os-browserify', 'stream-browserify', 'crypto-browserify'],
+    esbuildOptions: {
+      define: {
+        global: 'globalThis'
+      }
+    }
+  },
+  ssr: {
+    noExternal: ['os-browserify', 'path-browserify', 'stream-browserify', 'crypto-browserify']
   }
 })
 

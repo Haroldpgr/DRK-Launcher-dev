@@ -35,7 +35,10 @@ class NotificationService {
     const newNotification: Notification = {
       ...notification,
       id,
-      createdAt: new Date()
+      createdAt: new Date(),
+      onDismiss: () => {
+        this.dismiss(id);
+      }
     };
 
     this.notifications = [newNotification, ...this.notifications];
@@ -87,6 +90,39 @@ class NotificationService {
 
   getAll() {
     return this.notifications;
+  }
+
+  // Métodos helper para facilitar el uso
+  success(message: string, title: string = 'Éxito') {
+    return this.show({
+      title,
+      message,
+      type: 'success'
+    });
+  }
+
+  error(message: string, title: string = 'Error') {
+    return this.show({
+      title,
+      message,
+      type: 'error'
+    });
+  }
+
+  info(message: string, title: string = 'Información') {
+    return this.show({
+      title,
+      message,
+      type: 'info'
+    });
+  }
+
+  warning(message: string, title: string = 'Advertencia') {
+    return this.show({
+      title,
+      message,
+      type: 'warning'
+    });
   }
 }
 

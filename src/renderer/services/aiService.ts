@@ -1,6 +1,8 @@
 // Servicio mínimo para interactuar con la API de OpenRouter
 // Sin limitaciones de tasa, solo funcionalidad esencial
 
+import { encrypt, decrypt } from '../utils/encryption';
+
 // Tipos para manejar conversaciones
 interface Message {
   id: string;
@@ -24,18 +26,46 @@ export class QwenAIService {
   private maxMessagesPerConversation: number = 5; // Límite de 5 mensajes por conversación
   private conversationTimeout: number = 3600000; // 1 hora de inactividad antes de cerrar conversación
   private last429ErrorTime: number = 0; // Momento del último error 429
-  private cooldownPeriod: number = 30000; // 30 segundos de enfriamiento tras error 429
+  private cooldownPeriod: number = 60000; // 60 segundos de enfriamiento tras error 429 (aumentado para evitar 429)
 
   constructor() {
-    // Recuperar la clave API almacenada localmente
+    // API key correcta proporcionada por el usuario
+    const correctApiKey = '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';
+    const oldApiKey = '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';
+    
+    // Recuperar la clave API almacenada localmente (encriptada)
+    const storedKeyEncrypted = localStorage.getItem('openrouter-api-key-encrypted');
+    if (storedKeyEncrypted) {
+      try {
+        const decryptedKey = decrypt(storedKeyEncrypted);
+        // Si es la API key antigua, reemplazarla con la nueva
+        if (decryptedKey === oldApiKey || decryptedKey.startsWith('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')) {
+          this.setApiKey(correctApiKey);
+        } else {
+          this.apiKey = decryptedKey;
+        }
+      } catch (error) {
+        // Usar la nueva API key por defecto
+        this.setApiKey(correctApiKey);
+      }
+    } else {
+      // Verificar si hay una versión sin encriptar (migración)
     const storedKey = localStorage.getItem('openrouter-api-key');
     if (storedKey) {
+        // Si la clave almacenada es la antigua, reemplazarla con la nueva
+        if (storedKey === oldApiKey || storedKey.startsWith('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')) {
+          this.setApiKey(correctApiKey);
+        } else {
       this.apiKey = storedKey;
+          // Migrar a formato encriptado
+          this.setApiKey(storedKey);
+          // Eliminar versión sin encriptar
+          localStorage.removeItem('openrouter-api-key');
+        }
     } else {
-      // Almacenar la clave API por defecto si no existe
-      const defaultKey = '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';
-      localStorage.setItem('openrouter-api-key', defaultKey);
-      this.apiKey = defaultKey;
+        // Usar la API key proporcionada por el usuario
+        this.setApiKey(correctApiKey);
+      }
     }
 
     // Inicializar una nueva conversación
@@ -63,7 +93,7 @@ export class QwenAIService {
     try {
       conversations = JSON.parse(conversationsStr);
     } catch (e) {
-      console.error('Error al parsear conversaciones:', e);
+      // Error silencioso al parsear conversaciones
     }
 
     return conversations[conversationId] || null;
@@ -135,8 +165,22 @@ export class QwenAIService {
       return `La IA está temporalmente ocupada. Por favor, espera ${remainingCooldown} segundos antes de enviar otra pregunta.`;
     }
 
-    // Verificar clave API
-    const currentApiKey = this.apiKey || localStorage.getItem('openrouter-api-key');
+    // Verificar clave API (desencriptar si es necesario)
+    let currentApiKey = this.apiKey;
+    if (!currentApiKey) {
+      const storedKeyEncrypted = localStorage.getItem('openrouter-api-key-encrypted');
+      if (storedKeyEncrypted) {
+        try {
+          currentApiKey = decrypt(storedKeyEncrypted);
+        } catch (error) {
+          // Error silencioso al desencriptar
+        }
+      }
+      // Fallback a versión sin encriptar (migración)
+      if (!currentApiKey) {
+        currentApiKey = localStorage.getItem('openrouter-api-key');
+      }
+    }
     if (!currentApiKey) {
       return "Por favor, configura tu clave de API de OpenRouter.";
     }
@@ -166,8 +210,6 @@ export class QwenAIService {
 
       return response;
     } catch (error) {
-      console.error('Error al llamar a la API de OpenRouter:', error);
-
       // Manejar diferentes tipos de errores
       if (error.message) {
         if (error.message.includes('401') || error.message.includes('Unauthorized')) {
@@ -176,7 +218,7 @@ export class QwenAIService {
         if (error.message.includes('429')) {
           // Registrar el tiempo del error 429 para activar el período de enfriamiento
           this.last429ErrorTime = Date.now();
-          return "Demasiadas solicitudes al proveedor. La IA está temporalmente ocupada, por favor espera un momento.";
+          return "Demasiadas solicitudes. Por favor, espera unos momentos antes de intentar de nuevo.";
         }
       }
 
@@ -185,7 +227,22 @@ export class QwenAIService {
   }
 
   private async getAIResponseFromAPI(prompt: string, context: string = ''): Promise<string> {
-    const currentApiKey = this.apiKey || localStorage.getItem('openrouter-api-key');
+    // Obtener y desencriptar la API key
+    let currentApiKey = this.apiKey;
+    if (!currentApiKey) {
+      const storedKeyEncrypted = localStorage.getItem('openrouter-api-key-encrypted');
+      if (storedKeyEncrypted) {
+        try {
+          currentApiKey = decrypt(storedKeyEncrypted);
+        } catch (error) {
+          // Error silencioso al desencriptar
+        }
+      }
+      // Fallback a versión sin encriptar (migración)
+      if (!currentApiKey) {
+        currentApiKey = localStorage.getItem('openrouter-api-key');
+      }
+    }
     if (!currentApiKey) {
       throw new Error('No se encontró la clave de API.');
     }
@@ -217,7 +274,9 @@ export class QwenAIService {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentApiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin || 'https://drk-launcher.app',
+          'X-Title': 'DRK Launcher'
         },
         body: JSON.stringify({
           model: 'qwen/qwen3-235b-a22b:free',  // Modelo Qwen gratuito correcto según tu ejemplo
@@ -236,9 +295,17 @@ export class QwenAIService {
         const errorMessage = errorData.error?.message || response.statusText;
         const errorCode = response.status;
 
-        // En lugar de lanzar un error para 429, devolvemos un mensaje informativo
+        // Manejar errores específicos
+        if (errorCode === 401) {
+          throw new Error(`401 - Clave de API inválida. Por favor, verifica tu clave de API de OpenRouter.`);
+        }
+
         if (errorCode === 429) {
-          return "Demasiadas solicitudes al proveedor de IA. La IA está temporalmente ocupada, por favor intenta de nuevo en unos momentos.";
+          // Registrar el tiempo del error 429 para activar el período de enfriamiento
+          this.last429ErrorTime = Date.now();
+          // Aumentar el período de enfriamiento después de un 429
+          this.cooldownPeriod = Math.min(this.cooldownPeriod * 1.5, 120000); // Máximo 2 minutos
+          return "Demasiadas solicitudes. Por favor, espera unos momentos antes de intentar de nuevo.";
         }
 
         throw new Error(`${errorCode} - ${errorMessage}`);
@@ -265,8 +332,19 @@ export class QwenAIService {
   }
 
   public setApiKey(apiKey: string): void {
-    this.apiKey = apiKey;
-    localStorage.setItem('openrouter-api-key', apiKey);
+    if (!apiKey || !apiKey.trim()) {
+      return;
+    }
+    this.apiKey = apiKey.trim();
+    // Guardar encriptada
+    const encryptedKey = encrypt(this.apiKey);
+    localStorage.setItem('openrouter-api-key-encrypted', encryptedKey);
+    // Eliminar versión sin encriptar si existe (migración)
+    localStorage.removeItem('openrouter-api-key');
+  }
+
+  public getApiKey(): string | null {
+    return this.apiKey;
   }
 
   public hasApiKey(): boolean {
@@ -284,3 +362,20 @@ export class QwenAIService {
 
 // Instancia singleton
 export const qwenService = new QwenAIService();
+
+// Exponer función global para configurar la API key desde la consola
+if (typeof window !== 'undefined') {
+  (window as any).setOpenRouterApiKey = (apiKey: string) => {
+    qwenService.setApiKey(apiKey);
+  };
+  
+  // Verificar y actualizar la API key si es necesario al cargar
+  setTimeout(() => {
+    const currentKey = qwenService.getApiKey();
+    const correctKey = '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';
+    const oldKey = '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';
+    if (currentKey && (currentKey === oldKey || currentKey.startsWith('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'))) {
+      qwenService.setApiKey(correctKey);
+    }
+  }, 100);
+}

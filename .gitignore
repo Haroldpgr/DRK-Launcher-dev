@@ -1,20 +1,24 @@
-# Dependencias y carpetas de compilación
+# Dependencias
 node_modules/
+
+# Build / Compilación
 dist/
-build/
-coverage/
-temp/
-docs/build/
+dist-electron/
+release/
+build/*.exe
+build/*.dll
+
+# Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Archivos específicos del sistema operativo
+# Sistema operativo
 .DS_Store
 Thumbs.db
-ANALISIS_MINECRAFT_LAUNCHER
-# Editores e IDEs (Opcional)
+
+# IDEs
 .vscode/
 .idea/
 *.swp
@@ -25,13 +29,24 @@ ANALISIS_MINECRAFT_LAUNCHER
 .env.local
 .env.*.local
 
-# Archivos temporales de pruebas o binarios grandes (como tu problema anterior)
+# Temporales
+temp/
+coverage/
+*.tmp
+
+# Electron
+electron/
+electron-v*-win32-x64/
+
+# Binarios
 *.exe
 *.dll
 *.so
 *.app
 *.bin
-electron/
-electron-v*.*.*-win32-x64/
+
+# Otros
+ANALISIS_MINECRAFT_LAUNCHER
 web/
-release/
+Instalador/
+Mobil/

@@ -10,7 +10,8 @@ import { logProgressService } from './logProgressService';
 export class GameLogsService {
   private static instance: GameLogsService;
   private logs: Map<string, string[]> = new Map();
-  private maxLogsPerInstance = 10000; // Máximo de líneas por instancia
+  private maxLogsPerInstance = 10000; // Máximo de líneas por instancia (valor original)
+  private maxInstances = 50; // Límite de instancias en memoria (valor original estimado)
   private instancePaths: Map<string, string> = new Map(); // instanceId -> instancePath
   private instanceLoaders: Map<string, 'fabric' | 'forge' | 'quilt' | 'neoforge'> = new Map();
   private analyzedMods: Map<string, Set<string>> = new Map(); // instanceId -> Set<modNames>
@@ -69,6 +70,7 @@ export class GameLogsService {
     // Analizar el log en tiempo real para detectar mods incompatibles
     this.analyzeLogForIncompatibleMods(instanceId, log);
   }
+
 
   /**
    * Analiza un log en tiempo real para detectar mods incompatibles
