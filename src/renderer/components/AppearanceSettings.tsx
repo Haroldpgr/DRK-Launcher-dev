@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { settingsService, Settings } from '../services/settingsService';
 import { themeService } from '../services/themeService';
+import ToggleSwitch from './ToggleSwitch';
 
 interface AppearanceSettingsProps {
   settings: Settings['appearance'];
@@ -89,75 +90,67 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-200 mb-3">Tema</h3>
+        <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Tema</h3>
         <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => handleThemeChange('dark')}
-            className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-              settings.theme === 'dark'
-                ? 'border-blue-500 bg-blue-900/30'
-                : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-gray-700"></div>
-              <span className="text-white">Oscuro</span>
-            </div>
-          </button>
-          <button
-            onClick={() => handleThemeChange('light')}
-            className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-              settings.theme === 'light'
-                ? 'border-blue-500 bg-blue-900/30'
-                : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-gray-300"></div>
-              <span className="text-white">Claro</span>
-            </div>
-          </button>
-          <button
-            onClick={() => handleThemeChange('oled')}
-            className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-              settings.theme === 'oled'
-                ? 'border-blue-500 bg-blue-900/30'
-                : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-black"></div>
-              <span className="text-white">OLED</span>
-            </div>
-          </button>
-          <button
-            onClick={() => handleThemeChange('system')}
-            className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-              settings.theme === 'system'
-                ? 'border-blue-500 bg-blue-900/30'
-                : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <div className={`w-4 h-4 rounded-full ${systemTheme === 'dark' ? 'bg-gray-700' : 'bg-gray-300'}`}></div>
-              <span className="text-white">Sistema</span>
-            </div>
-          </button>
+          {[
+            { id: 'dark', label: 'Oscuro', color: '#1c1d1f' },
+            { id: 'light', label: 'Claro', color: '#ffffff' },
+            { id: 'oled', label: 'OLED', color: '#000000' },
+            { id: 'system', label: 'Sistema', color: systemTheme === 'dark' ? '#1c1d1f' : '#ffffff' }
+          ].map((theme) => (
+            <button
+              key={theme.id}
+              onClick={() => handleThemeChange(theme.id as any)}
+              className="p-4 rounded-xl border-2 transition-all duration-300"
+              style={{
+                borderColor: settings.theme === theme.id ? 'var(--global-accent-color)' : 'var(--border)',
+                backgroundColor: settings.theme === theme.id 
+                  ? `color-mix(in srgb, var(--global-accent-color) 20%, transparent)` 
+                  : 'var(--panel)',
+                color: 'var(--text-primary)'
+              }}
+              onMouseEnter={(e) => {
+                if (settings.theme !== theme.id) {
+                  e.currentTarget.style.borderColor = 'var(--border-light)';
+                  e.currentTarget.style.backgroundColor = 'var(--panel-hover)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (settings.theme !== theme.id) {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.backgroundColor = 'var(--panel)';
+                }
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-4 h-4 rounded-full" 
+                  style={{ backgroundColor: theme.color }}
+                ></div>
+                <span>{theme.label}</span>
+              </div>
+            </button>
+          ))}
         </div>
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold text-gray-200 mb-3">Color de Énfasis</h3>
+        <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Color de Énfasis</h3>
+        <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+          Este color se aplicará a botones, enlaces y elementos destacados
+        </p>
         <div className="flex items-center gap-4">
           <div className="flex flex-wrap gap-2">
-            {['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'].map((color) => (
+            {['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316'].map((color) => (
               <button
                 key={color}
                 onClick={() => handleAccentColorChange(color)}
-                className={`w-8 h-8 rounded-full border-2 ${
-                  settings.accentColor === color ? 'border-white ring-2 ring-offset-2 ring-offset-gray-900 ring-white' : 'border-gray-600'
-                }`}
-                style={{ backgroundColor: color }}
+                className="w-10 h-10 rounded-full border-2 transition-all"
+                style={{ 
+                  backgroundColor: color,
+                  borderColor: settings.accentColor === color ? '#ffffff' : 'var(--border)',
+                  boxShadow: settings.accentColor === color ? `0 0 0 2px var(--bg), 0 0 0 4px ${color}` : 'none'
+                }}
                 title={`Color ${color}`}
               ></button>
             ))}
@@ -166,29 +159,69 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
                 type="color"
                 value={settings.accentColor}
                 onChange={(e) => handleAccentColorChange(e.target.value)}
-                className="w-8 h-8 rounded-full border border-gray-600 cursor-pointer"
+                className="w-10 h-10 rounded-full border cursor-pointer"
+                style={{ borderColor: 'var(--border)' }}
                 title="Selector de color personalizado"
               />
               <button
                 onClick={() => handleAccentColorChange(getRandomColor())}
-                className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-gray-700 text-white text-xs flex items-center justify-center"
+                className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full text-xs flex items-center justify-center transition-all"
+                style={{ 
+                  backgroundColor: 'var(--panel-hover)',
+                  color: 'var(--text-primary)'
+                }}
                 title="Color aleatorio"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--global-accent-color)';
+                  e.currentTarget.style.color = '#ffffff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--panel-hover)';
+                  e.currentTarget.style.color = 'var(--text-primary)';
+                }}
               >
-                ?
+                🎲
               </button>
             </div>
           </div>
-          <div className="text-sm text-gray-400 ml-2">
+          <div className="text-sm ml-2 font-mono" style={{ color: 'var(--text-secondary)' }}>
             {settings.accentColor}
+          </div>
+        </div>
+        {/* Vista previa del color de énfasis */}
+        <div className="mt-4 p-4 rounded-lg" style={{ 
+          backgroundColor: 'var(--panel)',
+          border: '1px solid var(--border)'
+        }}>
+          <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>Vista previa:</p>
+          <div className="flex gap-2">
+            <button 
+              className="px-4 py-2 rounded-lg font-medium transition-all"
+              style={{ 
+                backgroundColor: settings.accentColor,
+                color: '#ffffff'
+              }}
+            >
+              Botón de ejemplo
+            </button>
+            <span 
+              className="px-4 py-2 rounded-lg font-medium"
+              style={{ 
+                color: settings.accentColor,
+                border: `2px solid ${settings.accentColor}`
+              }}
+            >
+              Texto destacado
+            </span>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <h3 className="text-lg font-semibold text-gray-200 mb-3">Tamaño de Fuente</h3>
+          <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Tamaño de Fuente</h3>
           <div className="space-y-2">
-            <div className="flex justify-between text-sm text-gray-400">
+            <div className="flex justify-between text-sm" style={{ color: 'var(--text-secondary)' }}>
               <span>Pequeño</span>
               <span>{Math.round(settings.globalFontSize * 100)}%</span>
               <span>Grande</span>
@@ -200,15 +233,19 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
               step="0.05"
               value={settings.globalFontSize}
               onChange={(e) => handleFontSizeChange(parseFloat(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+              style={{
+                backgroundColor: 'var(--panel-hover)',
+                accentColor: 'var(--global-accent-color)'
+              }}
             />
           </div>
         </div>
 
         <div>
-          <h3 className="text-lg font-semibold text-gray-200 mb-3">Esquinas Redondeadas</h3>
+          <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Esquinas Redondeadas</h3>
           <div className="space-y-2">
-            <div className="flex justify-between text-sm text-gray-400">
+            <div className="flex justify-between text-sm" style={{ color: 'var(--text-secondary)' }}>
               <span>0px</span>
               <span>{settings.borderRadius}px</span>
               <span>20px</span>
@@ -220,7 +257,11 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
               step="1"
               value={settings.borderRadius}
               onChange={(e) => handleBorderRadiusChange(parseInt(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+              style={{
+                backgroundColor: 'var(--panel-hover)',
+                accentColor: 'var(--global-accent-color)'
+              }}
             />
           </div>
         </div>
@@ -229,22 +270,20 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Renderizado Avanzado</h3>
-            <p className="text-sm text-gray-400">Mejora la apariencia visual pero puede afectar el rendimiento</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Renderizado Avanzado</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Mejora la apariencia visual pero puede afectar el rendimiento</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.advancedRendering}
-              onChange={(e) => onSettingsChange({ advancedRendering: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.advancedRendering}
+            onChange={(checked) => onSettingsChange({ advancedRendering: checked })}
+          />
         </div>
         {settings.advancedRendering && (
-          <div className="p-3 bg-yellow-900/30 border border-yellow-700/50 rounded-lg">
-            <p className="text-sm text-yellow-200 flex items-start">
+          <div className="p-3 rounded-lg" style={{
+            backgroundColor: `color-mix(in srgb, #F59E0B 20%, transparent)`,
+            border: `1px solid #F59E0B`
+          }}>
+            <p className="text-sm flex items-start" style={{ color: 'var(--text-primary)' }}>
               <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"></path>
               </svg>
@@ -257,23 +296,18 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Animaciones de Transición</h3>
-            <p className="text-sm text-gray-400">Habilita/deshabilita las transiciones CSS suaves</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Animaciones de Transición</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Habilita/deshabilita las transiciones CSS suaves</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.enableTransitions}
-              onChange={(e) => onSettingsChange({ enableTransitions: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.enableTransitions}
+            onChange={(checked) => onSettingsChange({ enableTransitions: checked })}
+          />
         </div>
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold text-gray-200 mb-3">Filtro de Color</h3>
+        <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Filtro de Color</h3>
         <div className="grid grid-cols-4 gap-3">
           {[
             { value: 'none', label: 'Ninguno' },
@@ -284,11 +318,26 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
             <button
               key={filter.value}
               onClick={() => handleColorFilterChange(filter.value as any)}
-              className={`p-3 rounded-lg border transition-all ${
-                settings.colorFilter === filter.value
-                  ? 'border-blue-500 bg-blue-900/30 text-white'
-                  : 'border-gray-700 bg-gray-800/50 text-gray-300 hover:border-gray-600'
-              }`}
+              className="p-3 rounded-lg border transition-all"
+              style={{
+                borderColor: settings.colorFilter === filter.value ? 'var(--global-accent-color)' : 'var(--border)',
+                backgroundColor: settings.colorFilter === filter.value 
+                  ? `color-mix(in srgb, var(--global-accent-color) 20%, transparent)` 
+                  : 'var(--panel)',
+                color: 'var(--text-primary)'
+              }}
+              onMouseEnter={(e) => {
+                if (settings.colorFilter !== filter.value) {
+                  e.currentTarget.style.borderColor = 'var(--border-light)';
+                  e.currentTarget.style.backgroundColor = 'var(--panel-hover)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (settings.colorFilter !== filter.value) {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.backgroundColor = 'var(--panel)';
+                }
+              }}
             >
               {filter.label}
             </button>
@@ -297,7 +346,7 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
       </div>
 
       <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-gray-200">Fondo Personalizado</h3>
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Fondo Personalizado</h3>
         <div className="flex flex-col sm:flex-row gap-3">
           <input
             type="text"
@@ -307,18 +356,33 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
               onSettingsChange({ customBackgroundPath: e.target.value });
             }}
             placeholder="Ruta a la imagen de fondo"
-            className="flex-1 p-2 rounded-lg bg-gray-700/80 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 p-2 rounded-lg border focus:outline-none focus:ring-2"
+            style={{
+              backgroundColor: 'var(--panel-hover)',
+              borderColor: 'var(--border)',
+              color: 'var(--text-primary)'
+            }}
           />
           <button
             onClick={handleBrowseBackground}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            className="px-4 py-2 rounded-lg transition-colors"
+            style={{
+              backgroundColor: 'var(--global-accent-color)',
+              color: '#ffffff'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = '0.9';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = '1';
+            }}
           >
             Explorar
           </button>
         </div>
         {customBackgroundPath && (
           <div className="space-y-2">
-            <div className="flex justify-between text-sm text-gray-400">
+            <div className="flex justify-between text-sm" style={{ color: 'var(--text-secondary)' }}>
               <span>Opacidad: {Math.round(settings.backgroundOpacity * 100)}%</span>
             </div>
             <input
@@ -328,16 +392,30 @@ export default function AppearanceSettings({ settings, onSettingsChange }: Appea
               step="0.05"
               value={settings.backgroundOpacity}
               onChange={(e) => handleBackgroundOpacityChange(parseFloat(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+              style={{
+                backgroundColor: 'var(--panel-hover)',
+                accentColor: 'var(--global-accent-color)'
+              }}
             />
           </div>
         )}
       </div>
 
-      <div className="pt-4 border-t border-gray-700">
+      <div className="pt-4" style={{ borderTop: '1px solid var(--border)' }}>
         <button
           onClick={handleResetThemes}
-          className="px-5 py-2.5 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-500 hover:to-gray-600 text-white font-medium rounded-lg transition-all"
+          className="px-5 py-2.5 font-medium rounded-lg transition-all"
+          style={{
+            background: 'var(--panel-hover)',
+            color: 'var(--text-primary)'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--border)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--panel-hover)';
+          }}
         >
           Reiniciar temas
         </button>

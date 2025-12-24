@@ -14,6 +14,26 @@
   animation: gradient-x 2s ease infinite;
 }
 
+/* Animación de brillo suave para el logo - optimizada para evitar lag */
+@keyframes softGlow {
+  0%, 100% { 
+    opacity: 0.3;
+    transform: translateZ(0) scale(1);
+  }
+  50% { 
+    opacity: 0.5;
+    transform: translateZ(0) scale(1.02);
+  }
+}
+
+/* Asegurar que la animación use GPU acceleration */
+.logo-glow {
+  will-change: opacity, transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
 /* Minecraft skin rendering */
 .skin-render {
   image-rendering: pixelated;
@@ -26,48 +46,74 @@
 }
 
 :root {
-  /* Default theme - dark */
-  --bg: #0f0f10;
-  --panel: #1c1d1f;
-  --accent: #123983;
-  --text-primary: #e5e7eb;
-  --text-secondary: #9ca3af;
-  --border: #374151;
-  
   /* CSS variables para la apariencia dinámica */
   --global-accent-color: #3B82F6; /* Color de énfasis por defecto */
   --global-font-size: 1.0; /* Factor de escala de fuente */
   --global-border-radius: 8px; /* Border radius global */
   --background-opacity: 0.3; /* Opacidad del fondo */
   --global-filter: none; /* Filtro de color */
-}
-
-/* Temas específicos */
-.theme-dark {
+  
+  /* Variables de tema - Default Dark */
   --bg: #0f0f10;
+  --bg-secondary: #1a1a1b;
   --panel: #1c1d1f;
+  --panel-hover: #252628;
   --accent: #123983;
   --text-primary: #e5e7eb;
   --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
   --border: #374151;
+  --border-light: #4b5563;
+  --shadow: rgba(0, 0, 0, 0.3);
+  --overlay: rgba(0, 0, 0, 0.75);
 }
 
+/* Tema Oscuro */
+.theme-dark {
+  --bg: #0f0f10;
+  --bg-secondary: #1a1a1b;
+  --panel: #1c1d1f;
+  --panel-hover: #252628;
+  --accent: #123983;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
+  --border: #374151;
+  --border-light: #4b5563;
+  --shadow: rgba(0, 0, 0, 0.3);
+  --overlay: rgba(0, 0, 0, 0.75);
+}
+
+/* Tema Claro - TODO BLANCO */
 .theme-light {
-  --bg: #f8fafc;
-  --panel: #e2e8f0;
-  --accent: #3b82f6;
+  --bg: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --panel: #ffffff;
+  --panel-hover: #f1f3f5;
+  --accent: var(--global-accent-color);
   --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --border: #cbd5e1;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --border: #e2e8f0;
+  --border-light: #cbd5e1;
+  --shadow: rgba(0, 0, 0, 0.1);
+  --overlay: rgba(255, 255, 255, 0.9);
 }
 
+/* Tema OLED */
 .theme-oled {
   --bg: #000000;
+  --bg-secondary: #000000;
   --panel: #000000;
+  --panel-hover: #0a0a0a;
   --accent: #123983;
   --text-primary: #f9fafb;
   --text-secondary: #d1d5db;
+  --text-tertiary: #9ca3af;
   --border: #1f2937;
+  --border-light: #374151;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --overlay: rgba(0, 0, 0, 0.9);
 }
 
 /* Aplicación de estilos dinámicos */
@@ -118,12 +164,52 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus {
   outline: 2px solid var(--global-accent-color) !important;
   outline-offset: -2px;
+  border-color: var(--global-accent-color) !important;
 }
 
 /* Estilos para botones */
 button {
   transition: all 0.2s ease;
   border-radius: var(--global-border-radius) !important;
+}
+
+/* Aplicar colores de tema a elementos comunes */
+.bg-gray-800, .bg-gray-800\/50, .bg-gray-800\/70, .bg-gray-800\/80, .bg-gray-800\/90 {
+  background-color: var(--panel) !important;
+}
+
+.bg-gray-700, .bg-gray-700\/50, .bg-gray-700\/80 {
+  background-color: var(--panel-hover) !important;
+}
+
+.bg-gray-900, .bg-gray-900\/50, .bg-gray-900\/80 {
+  background-color: var(--bg) !important;
+}
+
+.text-gray-200, .text-gray-300, .text-white {
+  color: var(--text-primary) !important;
+}
+
+.text-gray-400 {
+  color: var(--text-secondary) !important;
+}
+
+.text-gray-500 {
+  color: var(--text-tertiary) !important;
+}
+
+.border-gray-700, .border-gray-600 {
+  border-color: var(--border) !important;
+}
+
+/* Modales y overlays */
+.bg-black\/75, .bg-black\/50 {
+  background-color: var(--overlay) !important;
+}
+
+/* Cards y paneles */
+.bg-gradient-to-br.from-gray-800.to-gray-900 {
+  background: linear-gradient(to bottom right, var(--panel), var(--bg-secondary)) !important;
 }
 
 /* Aplicar color de énfasis global */

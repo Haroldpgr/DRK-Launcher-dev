@@ -1,6 +1,6 @@
 {
   "name": "drk-launcher",
-  "version": "0.1.0",
+  "version": "0.1.23",
   "private": true,
   "type": "module",
   "description": "DRK Launcher - Minecraft Launcher",
@@ -11,6 +11,10 @@
     "build": "node scripts/build-electron.mjs && vite build",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder",
+    "dist:publish": "node scripts/publish-release.mjs",
+    "release": "npm version patch --no-git-tag-version && npm run dist:publish",
+    "release:minor": "npm version minor --no-git-tag-version && npm run dist:publish",
+    "release:major": "npm version major --no-git-tag-version && npm run dist:publish",
     "start": "npm run build && electron ."
   },
   "dependencies": {
@@ -18,6 +22,7 @@
     "@types/node-fetch": "^2.6.13",
     "@types/yauzl": "^2.10.3",
     "archiver": "^7.0.1",
+    "electron-updater": "^6.1.7",
     "framer-motion": "^12.23.25",
     "node-fetch": "^2.7.0",
     "node-stream-zip": "^1.15.0",
@@ -64,6 +69,13 @@
   "build": {
     "appId": "com.drk.launcher",
     "productName": "DRK Launcher",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Haroldpgr",
+        "repo": "DRK-Launcher-dev"
+      }
+    ],
     "files": [
       "dist/**",
       "build-electron/**",
@@ -117,10 +129,14 @@
       "allowToChangeInstallationDirectory": true,
       "differentialPackage": true,
       "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
       "installerIcon": "build/Logo.ico",
       "uninstallerIcon": "build/Logo.ico",
       "include": "build/installer.nsh",
-      "license": "build/License.txt"
+      "license": "build/License.txt",
+      "warningsAsErrors": false
     },
     "compression": "maximum",
     "removePackageScripts": true,

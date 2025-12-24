@@ -28,8 +28,12 @@ class ThemeService {
     // 1. Aplica la clase del tema (dark, light, oled, system)
     this.applyThemeClass();
     
-    // 2. Aplica el color de énfasis dinámico
-    root.style.setProperty('--global-accent-color', this.settings.accentColor);
+    // 2. Aplica el color de énfasis dinámico (con mejor contraste)
+    const accentColor = this.settings.accentColor || '#3B82F6';
+    root.style.setProperty('--global-accent-color', accentColor);
+    
+    // Aplicar color de énfasis también a --accent para consistencia
+    root.style.setProperty('--accent', accentColor);
     
     // 3. Aplica el tamaño de fuente global
     root.style.setProperty('--global-font-size', `${this.settings.globalFontSize}`);
@@ -60,6 +64,15 @@ class ThemeService {
     
     // 8. Aplica filtro de color
     this.applyColorFilter();
+    
+    // 9. Forzar actualización de todos los elementos con clases de Tailwind
+    this.forceThemeUpdate();
+  }
+  
+  private forceThemeUpdate() {
+    // Forzar re-renderizado de elementos con clases de Tailwind
+    const event = new CustomEvent('theme-changed', { detail: { theme: this.settings.theme } });
+    window.dispatchEvent(event);
   }
 
   private applyThemeClass() {

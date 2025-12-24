@@ -133,17 +133,50 @@ export class DownloadFabric {
 
     const profile = await response.json();
     
-    // Descargar librerías del perfil
+    // Descargar librerías del perfil con descargas paralelas (hasta 75 simultáneas)
     if (profile.libraries && Array.isArray(profile.libraries)) {
-      logProgressService.info(`[Fabric] Descargando ${profile.libraries.length} librerías...`);
+      logProgressService.info(`[Fabric] Descargando ${profile.libraries.length} librerías en paralelo (hasta 75 simultáneas)...`);
       
-      const downloadPromises = profile.libraries.map((lib: any) => 
-        this.downloadLibrary(lib)
-      );
+      const maxConcurrent = 75;
+      let downloaded = 0;
+      const total = profile.libraries.length;
       
-      await Promise.allSettled(downloadPromises);
+      // Procesar en lotes de hasta 75 descargas simultáneas
+      for (let i = 0; i < profile.libraries.length; i += maxConcurrent) {
+        const batch = profile.libraries.slice(i, i + maxConcurrent);
+        
+        const results = await Promise.allSettled(
+          batch.map(async (lib: any) => {
+            try {
+              await this.downloadLibrary(lib);
+              downloaded++;
+              
+              // Log de progreso cada 10 descargas
+              if (downloaded % 10 === 0) {
+                const progress = Math.round((downloaded / total) * 100);
+                logProgressService.info(`[Fabric] Progreso librerías: ${downloaded}/${total} (${progress}%)`);
+              }
+            } catch (error) {
+              logProgressService.warning(`[Fabric] Error al descargar librería:`, error);
+              throw error;
+            }
+          })
+        );
+        
+        const successes = results.filter(r => r.status === 'fulfilled').length;
+        const errors = results.filter(r => r.status === 'rejected').length;
+        
+        if (errors > 0) {
+          logProgressService.warning(`[Fabric] ${errors} librerías fallaron en este lote (continuando...)`);
+        }
+        
+        // Pequeña pausa entre lotes
+        if (i + maxConcurrent < profile.libraries.length) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+      }
       
-      logProgressService.info(`[Fabric] Librerías descargadas`);
+      logProgressService.success(`[Fabric] Librerías descargadas: ${downloaded}/${total}`);
     }
   }
 

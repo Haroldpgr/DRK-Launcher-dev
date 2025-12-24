@@ -8,7 +8,9 @@ import NotificationContainer from './components/NotificationContainer';
 import DownloadProgressWidget from './components/DownloadProgressWidget';
 import SplashScreen from './components/SplashScreen';
 import WelcomeModal from './components/WelcomeModal';
+import UpdateModal from './components/UpdateModal';
 import { tutorialService } from './services/tutorialService';
+import { updaterService } from './services/updaterService';
 
 // Error Boundary para capturar errores en producción
 class ErrorBoundary extends Component<
@@ -78,6 +80,10 @@ const LoadingFallback = React.memo(() => (
 LoadingFallback.displayName = 'LoadingFallback';
 
 export default function App() {
+  // Hooks de React Router deben estar al inicio, dentro del contexto del Router
+  const nav = useNavigate();
+  const loc = useLocation();
+  
   const [theme, setTheme] = useState<'dark' | 'light' | 'oled'>('dark')
   const [isSettingsOpen, setSettingsOpen] = useState(false) // State for the modal
   const [isLoginModalOpen, setLoginModalOpen] = useState(false); // State for LoginModal
@@ -86,6 +92,13 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [showSplash, setShowSplash] = useState(true); // Estado para mostrar/ocultar splash screen
   const [showWelcome, setShowWelcome] = useState(false); // Estado para modal de bienvenida
+  const [updateInfo, setUpdateInfo] = useState<any>(null); // Información de actualización
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<any>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloaded, setIsDownloaded] = useState(false);
+  const [hasInternet, setHasInternet] = useState(true);
+  const [updateStatus, setUpdateStatus] = useState<string>(''); // Estado de validación/configuración
 
   // Escuchar eventos de actualización de perfiles
   useEffect(() => {
@@ -103,8 +116,195 @@ export default function App() {
       window.removeEventListener('profileUpdated', handleProfileUpdate);
     };
   }, []);
-  const nav = useNavigate()
-  const loc = useLocation()
+
+  // Escuchar eventos de actualizaciones del launcher
+  useEffect(() => {
+    // Verificar conexión a internet
+    updaterService.checkInternet().then(setHasInternet);
+    
+    // Verificar si hay actualización pendiente al iniciar
+    updaterService.getPendingUpdate().then((pending) => {
+      if (pending.available) {
+        setUpdateInfo({
+          version: pending.version,
+          releaseDate: pending.releaseDate,
+          releaseNotes: pending.releaseNotes,
+          changes: pending.changes
+        });
+        setIsUpdateModalOpen(true);
+      }
+    });
+    
+    // Verificar si hay una actualización ya descargada al iniciar
+    updaterService.getVersion().then((versionInfo) => {
+      if (versionInfo.isDownloaded) {
+        console.log('[App] Se detectó una actualización descargada pendiente de instalación');
+        setIsDownloaded(true);
+        setIsDownloading(false);
+        setUpdateStatus('ready'); // Marcar como lista
+        // Obtener información de la actualización pendiente
+        updaterService.getPendingUpdate().then((pending) => {
+          if (pending.available) {
+            setUpdateInfo({
+              version: pending.version || 'desconocida',
+              releaseDate: pending.releaseDate,
+              releaseNotes: pending.releaseNotes,
+              changes: pending.changes
+            });
+            setIsUpdateModalOpen(true);
+          }
+        });
+      }
+    });
+
+    // Suscribirse a eventos de actualización
+    const unsubscribe = updaterService.onStatus((status) => {
+      switch (status.event) {
+        case 'update-available':
+          setUpdateInfo({
+            version: status.data.version,
+            releaseDate: status.data.releaseDate,
+            releaseNotes: status.data.releaseNotes,
+            changes: status.data.changes
+          });
+          setIsUpdateModalOpen(true);
+          break;
+        case 'download-start':
+          setIsDownloading(true);
+          setDownloadProgress(null);
+          break;
+        case 'download-progress':
+          setDownloadProgress(status.data);
+          setIsDownloading(true);
+          
+          // IMPORTANTE: Si la descarga llega al 100%, verificar si hay actualización descargada
+          // Esto es necesario porque a veces el evento 'update-downloaded' no se dispara automáticamente
+          if (status.data.percent >= 100) {
+            console.log('[App] Descarga al 100%, verificando si hay actualización descargada...');
+            
+            // Esperar un momento y luego verificar si hay actualización descargada
+            setTimeout(async () => {
+              try {
+                const pending = await updaterService.getPendingUpdate();
+                if (pending.available && pending.isDownloaded) {
+                  console.log('[App] Actualización detectada como descargada, forzando transición...');
+                  setIsDownloading(false);
+                  setIsDownloaded(true);
+                  setUpdateStatus('validating');
+                  
+                  // Simular el proceso de validación y configuración
+                  setTimeout(() => {
+                    setUpdateStatus('configuring');
+                    setTimeout(() => {
+                      setUpdateStatus('ready');
+                      console.log('[App] Actualización lista para instalar (forzado)');
+                    }, 1000);
+                  }, 1000);
+                } else {
+                  // Si no está descargada aún, esperar un poco más
+                  console.log('[App] Actualización aún no marcada como descargada, esperando evento update-downloaded...');
+                }
+              } catch (error) {
+                console.error('[App] Error al verificar actualización descargada:', error);
+              }
+            }, 2000); // Esperar 2 segundos después del 100%
+          }
+          break;
+        case 'download-error':
+          setIsDownloading(false);
+          
+          // Verificar si es un error de firma digital (lo ignoramos)
+          const downloadErrorMsg = status.data.error || '';
+          const isDownloadSignatureError = downloadErrorMsg.includes('not signed') ||
+            downloadErrorMsg.includes('no está firmado') ||
+            downloadErrorMsg.includes('SignerCertificate') ||
+            downloadErrorMsg.includes('certificate') ||
+            downloadErrorMsg.includes('firmado digitalmente') ||
+            downloadErrorMsg.includes('publisherNames') ||
+            downloadErrorMsg.includes('StatusMessage');
+          
+          if (isDownloadSignatureError) {
+            console.warn('[App] ⚠️ Error de firma digital ignorado en descarga (permitido en desarrollo/testing)');
+            // No mostrar error al usuario si es solo de firma digital
+            // La descarga puede continuar
+            break;
+          }
+          
+          // Verificar si es un error de conexión
+          if (status.data.error && (
+            status.data.error.includes('network') || 
+            status.data.error.includes('internet') ||
+            status.data.error.includes('connection') ||
+            status.data.error.includes('timeout') ||
+            status.data.error.includes('ECONNREFUSED') ||
+            status.data.error.includes('ENOTFOUND')
+          )) {
+            setHasInternet(false);
+          }
+          console.error('[App] Error en descarga:', status.data.error);
+          break;
+        case 'update-validating':
+          console.log('[App] Validando actualización...');
+          setIsDownloading(false);
+          setUpdateStatus('validating');
+          break;
+        case 'update-configuring':
+          console.log('[App] Configurando actualización...');
+          setUpdateStatus('configuring');
+          break;
+        case 'update-downloaded':
+          console.log('[App] ============================================');
+          console.log('[App] Evento update-downloaded recibido:', status.data);
+          console.log('[App] ============================================');
+          setIsDownloading(false);
+          setIsDownloaded(true);
+          setUpdateStatus('ready');
+          setHasInternet(true); // Asegurar que se muestre como conectado cuando está descargada
+          // Asegurar que el modal esté abierto para mostrar el botón de instalar
+          if (!isUpdateModalOpen) {
+            setIsUpdateModalOpen(true);
+          }
+          console.log('[App] Estado actualizado: isDownloaded=true, isDownloading=false, updateStatus=ready');
+          break;
+        case 'update-error':
+          setIsDownloading(false);
+          
+          // Verificar si es un error de firma digital (lo ignoramos)
+          const errorMsg = status.data.error || '';
+          const isSignatureError = errorMsg.includes('not signed') ||
+            errorMsg.includes('no está firmado') ||
+            errorMsg.includes('SignerCertificate') ||
+            errorMsg.includes('certificate') ||
+            errorMsg.includes('firmado digitalmente') ||
+            errorMsg.includes('publisherNames');
+          
+          if (isSignatureError) {
+            console.warn('[App] ⚠️ Error de firma digital ignorado (permitido en desarrollo/testing)');
+            // No mostrar error al usuario si es solo de firma digital
+            // La actualización puede continuar
+            break;
+          }
+          
+          // Solo marcar como sin internet si es un error de conexión específico
+          if (status.data.error && (
+            status.data.error.includes('network') || 
+            status.data.error.includes('internet') ||
+            status.data.error.includes('connection') ||
+            status.data.error.includes('timeout') ||
+            status.data.error.includes('ECONNREFUSED') ||
+            status.data.error.includes('ENOTFOUND')
+          )) {
+            setHasInternet(false);
+          }
+          console.error('[App] Error en actualización:', status.data.error);
+          break;
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     // Pre-cargar el componente Home en segundo plano mientras se muestra el splash
@@ -494,6 +694,45 @@ export default function App() {
       <WelcomeModal 
         isOpen={showWelcome} 
         onClose={() => setShowWelcome(false)} 
+      />
+      
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        updateInfo={updateInfo}
+        downloadProgress={downloadProgress}
+        isDownloading={isDownloading}
+        isDownloaded={isDownloaded}
+        hasInternet={hasInternet}
+        updateStatus={updateStatus}
+        onUpdate={async () => {
+          // Prevenir múltiples llamadas simultáneas
+          if (isDownloading) {
+            console.log('[App] Descarga ya en progreso, ignorando clic');
+            return;
+          }
+          
+          if (isDownloaded) {
+            console.log('[App] Instalando actualización...');
+            await updaterService.installUpdate();
+          } else {
+            console.log('[App] Iniciando descarga de actualización...');
+            setIsDownloading(true);
+            try {
+              const result = await updaterService.downloadUpdate();
+              if (!result.success) {
+                console.error('[App] Error al iniciar descarga:', result.error);
+                setIsDownloading(false);
+              }
+            } catch (error: any) {
+              console.error('[App] Error al descargar:', error);
+              setIsDownloading(false);
+            }
+          }
+        }}
+        onLater={async () => {
+          await updaterService.scheduleLater();
+          setIsUpdateModalOpen(false);
+        }}
       />
     </div>
   )

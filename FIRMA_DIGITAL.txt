@@ -1,0 +1,175 @@
+================================================================================
+                    FIRMA DIGITAL PARA DRK LAUNCHER
+================================================================================
+
+INFORMACION GENERAL
+-------------------
+El error de firma digital aparece porque Windows requiere que los ejecutables
+esten firmados digitalmente para garantizar la seguridad y autenticidad del
+software.
+
+ESTADO ACTUAL
+-------------
+- Estado: Las actualizaciones NO estan firmadas digitalmente
+- Configuracion: El sistema esta configurado para IGNORAR errores de firma
+  en desarrollo/testing
+- Ubicacion del codigo: src/main/updaterService.ts (lineas 20-30)
+
+QUE ES LA FIRMA DIGITAL?
+------------------------
+La firma digital es un certificado que:
+- Verifica que el software proviene del desarrollador autentico
+- Garantiza que no ha sido modificado o alterado
+- Elimina advertencias de seguridad en Windows
+- Mejora la confianza del usuario
+
+DONDE OBTENER UN CERTIFICADO DE FIRMA DE CODIGO
+------------------------------------------------
+
+OPCION 1: CERTIFICADOS COMERCIALES (Recomendado para Produccion)
+
+1. DigiCert (Mas Popular)
+   - Sitio Web: https://www.digicert.com/code-signing/
+   - Precio: Desde ~$200 USD/ano
+   - Ventajas: Ampliamente reconocido, confianza alta
+   - Proceso: Validacion de identidad requerida
+
+2. Sectigo (anteriormente Comodo)
+   - Sitio Web: https://sectigo.com/ssl-certificates-tls/code-signing
+   - Precio: Desde ~$200 USD/ano
+   - Ventajas: Precio competitivo, buena reputacion
+
+3. GlobalSign
+   - Sitio Web: https://www.globalsign.com/en/code-signing-certificate
+   - Precio: Desde ~$200 USD/ano
+   - Ventajas: Empresa establecida, buen soporte
+
+4. SSL.com
+   - Sitio Web: https://www.ssl.com/certificates/code-signing/
+   - Precio: Desde ~$200 USD/ano
+   - Ventajas: Precio competitivo
+
+OPCION 2: CERTIFICADOS DE WINDOWS STORE (Gratis para Apps de Microsoft Store)
+   - Sitio Web: https://partner.microsoft.com/
+   - Precio: Gratis (requiere cuenta de desarrollador)
+   - Limitacion: Solo para apps publicadas en Microsoft Store
+
+OPCION 3: CERTIFICADOS DE PRUEBA (Solo para Desarrollo)
+   - Herramienta: makecert.exe o signtool.exe (incluidos en Windows SDK)
+   - Limitacion: Solo funcionan en tu maquina, no son validos para distribucion
+
+COMO CONFIGURAR LA FIRMA DIGITAL
+---------------------------------
+
+PASO 1: Obtener el Certificado
+   1. Compra un certificado de una autoridad certificadora (CA)
+   2. Completa el proceso de validacion de identidad
+   3. Descarga el certificado (.pfx o .p12)
+
+PASO 2: Configurar en package.json
+   {
+     "build": {
+       "win": {
+         "sign": {
+           "certificateFile": "path/to/certificate.pfx",
+           "certificatePassword": "tu_contraseña",
+           "signingHashAlgorithms": ["sha256"],
+           "timestampServer": "http://timestamp.digicert.com"
+         },
+         "publisherName": "DRK Team"
+       }
+     }
+   }
+
+PASO 3: Configurar Variables de Entorno (Recomendado)
+   NO guardes la contraseña en el codigo. Usa variables de entorno:
+   
+   {
+     "build": {
+       "win": {
+         "sign": {
+           "certificateFile": "${env.CSC_LINK}",
+           "certificatePassword": "${env.CSC_KEY_PASSWORD}"
+         }
+       }
+     }
+   }
+   
+   Luego configura las variables:
+   Windows PowerShell:
+   $env:CSC_LINK="path/to/certificate.pfx"
+   $env:CSC_KEY_PASSWORD="tu_contraseña"
+
+NOTAS IMPORTANTES
+-----------------
+
+SEGURIDAD:
+- NUNCA subas el certificado (.pfx) al repositorio Git
+- Usa variables de entorno para contraseñas
+- Guarda el certificado en un lugar seguro
+- Haz backup del certificado
+
+COSTOS:
+- Los certificados comerciales cuestan aproximadamente $200-400 USD/ano
+- Algunos proveedores ofrecen descuentos para multiples anos
+- Los certificados EV (Extended Validation) son mas caros pero ofrecen
+  mejor confianza
+
+PROCESO DE VALIDACION:
+- La mayoria de CAs requieren validacion de identidad
+- Puede tomar 1-3 dias habiles
+- Requiere documentacion oficial (pasaporte, identificacion, etc.)
+
+ALTERNATIVAS PARA DESARROLLO/TESTING
+-------------------------------------
+
+OPCION ACTUAL (Implementada):
+- El sistema ignora errores de firma digital
+- Funciona para desarrollo y testing
+- NO recomendado para produccion publica
+
+OPCION TEMPORAL:
+- Usar certificados de prueba (solo funcionan localmente)
+- No requiere compra
+- No es valido para distribucion
+
+RECURSOS ADICIONALES
+--------------------
+- Documentacion de electron-builder: https://www.electron.build/code-signing
+- Documentacion de Windows: 
+  https://docs.microsoft.com/en-us/windows/win32/seccrypto/cryptography-tools
+- Guia de firma de codigo: 
+  https://www.digicert.com/kb/code-signing/microsoft-authenticode.htm
+
+CONFIGURACION ACTUAL EN EL CODIGO
+----------------------------------
+Archivo: src/main/updaterService.ts
+
+Lineas 20-30:
+// IMPORTANTE: Deshabilitar verificacion de firma digital para desarrollo/testing
+if (process.platform === 'win32') {
+  (autoUpdater as any).verifySignatureAndIntegrity = false;
+  console.log('[Updater] Verificacion de firma digital deshabilitada 
+               (modo desarrollo/testing)');
+}
+
+Nota: Esta configuracion permite que las actualizaciones funcionen sin firma
+digital, pero deberia deshabilitarse cuando se obtenga un certificado valido.
+
+CHECKLIST PARA IMPLEMENTAR FIRMA DIGITAL
+-----------------------------------------
+[ ] Investigar y seleccionar proveedor de certificado
+[ ] Completar proceso de validacion de identidad
+[ ] Obtener certificado (.pfx)
+[ ] Configurar variables de entorno para credenciales
+[ ] Actualizar package.json con configuracion de firma
+[ ] Probar firma en build local
+[ ] Remover codigo que ignora errores de firma
+[ ] Verificar que las actualizaciones funcionen con certificado
+[ ] Documentar proceso para el equipo
+
+================================================================================
+Ultima actualizacion: 2024-12-18
+Version del launcher: 0.1.12
+================================================================================
+

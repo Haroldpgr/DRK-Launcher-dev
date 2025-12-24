@@ -29,6 +29,11 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Token de GitHub (encriptado)
+.github/token.encrypted
+*.token
+*.encrypted
+
 # Temporales
 temp/
 coverage/

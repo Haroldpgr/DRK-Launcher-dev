@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { integratedDownloadService } from '../services/integratedDownloadService';
 import { profileService } from '../services/profileService';
 import { instanceProfileService } from '../services/instanceProfileService';
 import { JavaConfigService } from '../../services/javaConfigService';
+import { showModernAlert } from '../utils/uiUtils';
 import '../components/slider.css';
 
 interface CreateInstanceModalProps {
@@ -31,6 +33,7 @@ interface ProgressStatus {
 }
 
 const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClose, onCreated }) => {
+  const navigate = useNavigate();
   const [instanceName, setInstanceName] = useState('');
   const [loaderType, setLoaderType] = useState<'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'>('vanilla');
   const [mcVersion, setMcVersion] = useState('');
@@ -307,6 +310,17 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
       // Obtener parámetros Java estándar para el loader
       const standardJvmArgs = JavaConfigService.getStandardJvmArgs(loaderType, maxMemory);
 
+      // Mostrar mensaje informativo al inicio de la creación
+      await showModernAlert(
+        'Iniciando Creación de Instancia',
+        `La instancia "${instanceName}" está comenzando a descargarse.\n\n` +
+        `📥 Podrás ver el progreso de la descarga en:\n` +
+        `• La sección "Descargas" (icono de descarga en la barra lateral)\n` +
+        `• La zona de registros de descargas\n\n` +
+        `El proceso puede tardar varios minutos dependiendo de tu conexión.`,
+        'info'
+      );
+
       // Crear la instancia con el nuevo servicio
       console.log(`[CreateInstanceModal] Creando instancia con loaderVersion: ${finalLoaderVersion || 'NO ESPECIFICADA'}`);
       const createdInstance = await integratedDownloadService.createInstance({
@@ -337,10 +351,22 @@ const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({ isOpen, onClo
         onCreated();
       }
       
+      // Mostrar mensaje de éxito y redirigir a instancias
+      await showModernAlert(
+        '¡Instancia Creada Exitosamente!',
+        `La descarga de la instancia "${instanceName}" ha terminado.\n\n` +
+        `✅ Ya puedes ejecutarla desde la sección de Instancias.\n\n` +
+        `Serás redirigido automáticamente a la página de Instancias.`,
+        'success'
+      );
+      
       // Limpiar estados
       setIsCreating(false);
       setCurrentInstanceId(null);
       onClose();
+      
+      // Redirigir a la página de instancias
+      navigate('/instances');
     } catch (err) {
       console.error('Error al crear instancia:', err);
       const errorMessage = (err as Error).message || 'Error desconocido';

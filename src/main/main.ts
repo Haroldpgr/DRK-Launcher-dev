@@ -33,13 +33,49 @@ import { MicrosoftAuthClient, microsoftAuthClient } from './microsoftAuthClient'
 import { ModDetectionService } from '../services/modDetectionService';
 import { ModDiagnosticService } from '../services/modDiagnosticService';
 import { ModCompatibilityService } from '../services/modCompatibilityService';
+import { initializeUpdater, registerUpdaterHandlers } from './updaterService';
 
 let win: BrowserWindow | null = null;
 
 app.whenReady().then(async () => {
   const { instancesBaseDefault } = basePaths();
   ensureDir(instancesBaseDefault);
+  
+  // Verificar que los datos del usuario estén intactos después de una actualización
+  try {
+    const launcherDataPath = getLauncherDataPath();
+    console.log('[Main] Directorio de datos del launcher:', launcherDataPath);
+    
+    // Verificar que el directorio existe (se creará si no existe)
+    if (!fs.existsSync(launcherDataPath)) {
+      console.log('[Main] Creando directorio de datos del launcher...');
+      ensureDirUtil(launcherDataPath);
+    }
+    
+    // Verificar base de datos
+    const dbPath = path.join(launcherDataPath, 'drk.sqlite');
+    if (fs.existsSync(dbPath)) {
+      console.log('[Main] ✓ Base de datos encontrada y preservada después de la actualización');
+    } else {
+      console.log('[Main] Base de datos no existe aún (primera ejecución o nueva instalación)');
+    }
+    
+    // Verificar instancias
+    const instancesPath = path.join(launcherDataPath, 'instances');
+    if (fs.existsSync(instancesPath)) {
+      const instances = fs.readdirSync(instancesPath);
+      console.log(`[Main] ✓ ${instances.length} instancia(s) encontrada(s) y preservada(s)`);
+    }
+    
+    console.log('[Main] ✓ Todos los datos del usuario están intactos');
+  } catch (err) {
+    console.error('[Main] Error al verificar datos del usuario:', err);
+  }
+  
   initDB();
+
+  // Registrar handlers de actualizaciones
+  registerUpdaterHandlers();
 
   // Registrar protocolo personalizado para OAuth callback de Ely.by
   if (!app.isDefaultProtocolClient('elyby')) {
@@ -56,20 +92,28 @@ app.whenReady().then(async () => {
 
   await createWindow();
   
-  // En producción: bloquear acceso a DevTools
+  // En producción: permitir DevTools con Ctrl+Shift+M para debugging
   if (!process.env.VITE_DEV_SERVER_URL) {
-    // Bloquear todos los atajos que podrían abrir DevTools
+    // Bloquear atajos estándar de DevTools
     globalShortcut.register('CommandOrControl+Shift+I', () => {});
     globalShortcut.register('F12', () => {});
     globalShortcut.register('CommandOrControl+Shift+J', () => {});
     globalShortcut.register('CommandOrControl+Shift+C', () => {});
     
-    // Deshabilitar DevTools desde el menú contextual
-    if (win) {
-      win.webContents.on('devtools-opened', () => {
-        win?.webContents.closeDevTools();
-      });
-    }
+    // Permitir Ctrl+Shift+M para abrir DevTools (atajo personalizado para debugging)
+    globalShortcut.register('CommandOrControl+Shift+M', () => {
+      if (win && !win.isDestroyed()) {
+        if (win.webContents.isDevToolsOpened()) {
+          win.webContents.closeDevTools();
+          console.log('[Main] DevTools cerrado');
+        } else {
+          win.webContents.openDevTools({ mode: 'detach' });
+          console.log('[Main] DevTools abierto con Ctrl+Shift+M');
+        }
+      }
+    });
+    
+    console.log('[Main] DevTools disponible con Ctrl+Shift+M para debugging');
   }
   
   // Manejar URLs de protocolo personalizado (para OAuth callback)
@@ -102,13 +146,14 @@ async function createWindow() {
     backgroundColor: '#0f0f10',
     autoHideMenuBar: true, // Ocultar automáticamente la barra de menú
     frame: true, // Mantener el marco para mantener la funcionalidad de ventana
+    closable: true, // CRÍTICO: Asegurar que la ventana sea cerrable para que las actualizaciones funcionen
     icon: path.join(__dirname, '..', '..', '..', 'Icono', 'Logo.png'), // Ruta simple al icono
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      devTools: !!process.env.VITE_DEV_SERVER_URL // Solo DevTools en desarrollo
+      devTools: true // Habilitar DevTools para poder abrir con Ctrl+Shift+M
     }
   });
 
@@ -129,6 +174,9 @@ async function createWindow() {
     const htmlPath = path.join(app.getAppPath(), 'dist', 'index.html');
     await win.loadFile(htmlPath);
   }
+
+  // Inicializar sistema de actualizaciones automáticas
+  initializeUpdater(win);
 }
 
 function basePaths() {
@@ -416,6 +464,159 @@ ipcMain.handle('shell:openExternal', async (_e, url: string) => {
     return { success: false, error: error.message };
   }
 });
+
+// Handlers para información de la aplicación
+ipcMain.handle('app:getVersion', () => {
+  return app.getVersion();
+});
+
+ipcMain.handle('app:getName', () => {
+  return app.getName();
+});
+
+// Handlers para información del sistema operativo
+ipcMain.handle('os:platform', () => {
+  return os.platform();
+});
+
+ipcMain.handle('os:arch', () => {
+  return os.arch();
+});
+
+ipcMain.handle('os:release', () => {
+  return os.release();
+});
+
+// Handler para enviar feedback por correo
+ipcMain.handle('feedback:send', async (_e, data: { to: string; subject: string; body: string; type: string; userEmail?: string }) => {
+  try {
+    // Usar nodemailer para enviar correo directamente
+    const nodemailer = require('nodemailer');
+    
+    // Configurar transporter usando Gmail SMTP
+    // Nota: En producción, deberías usar variables de entorno para las credenciales
+    // Por ahora, usaremos un servicio web API como alternativa más segura
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: 'darkyvastudio@gmail.com', // Cambiar por credenciales de aplicación
+        pass: process.env.GMAIL_APP_PASSWORD || '' // Usar contraseña de aplicación de Gmail
+      }
+    });
+
+    // Si no hay contraseña configurada, usar servicio web alternativo
+    if (!process.env.GMAIL_APP_PASSWORD) {
+      return await sendFeedbackViaWebAPI(data);
+    }
+
+    // Enviar correo
+    const mailOptions = {
+      from: 'darkyvastudio@gmail.com',
+      to: data.to,
+      subject: data.subject,
+      text: data.body,
+      html: formatEmailHTML(data.body, data.type)
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('[Feedback] Correo enviado:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error: any) {
+    console.error('[Feedback] Error al enviar correo:', error);
+    // Intentar con servicio web como fallback
+    try {
+      return await sendFeedbackViaWebAPI(data);
+    } catch (fallbackError) {
+      console.error('[Feedback] Error en fallback:', fallbackError);
+      return { success: false, error: error.message || 'Error desconocido' };
+    }
+  }
+});
+
+// Función para enviar feedback usando servicio web API (alternativa)
+async function sendFeedbackViaWebAPI(data: { to: string; subject: string; body: string; type: string; userEmail?: string }) {
+  try {
+    // Usar un servicio web como FormSubmit.co o crear tu propio endpoint
+    // Por ahora, usaremos una solución simple con fetch
+    const response = await fetch('https://formsubmit.co/ajax/darkyvastudio@gmail.com', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        name: data.userEmail ? `Usuario: ${data.userEmail}` : 'DRK Launcher User',
+        email: data.userEmail || 'noreply@drklauncher.com',
+        subject: data.subject,
+        message: data.body,
+        _template: 'box',
+        _captcha: false,
+        _replyto: data.userEmail || undefined
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log('[Feedback] Enviado vía FormSubmit:', result);
+      return { success: true };
+    } else {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+  } catch (error: any) {
+    console.error('[Feedback] Error en servicio web:', error);
+    throw error;
+  }
+}
+
+// Función para formatear el correo en HTML
+function formatEmailHTML(body: string, type: string): string {
+  const typeLabels: Record<string, string> = {
+    'bug': '🐛 Reporte de Error',
+    'feature': '💡 Sugerencia de Funcionalidad',
+    'improvement': '✨ Mejora de Funcionalidad',
+    'modpack': '📦 Solicitud de Modpack',
+    'performance': '⚡ Problema de Rendimiento',
+    'ui': '🎨 Mejora de Interfaz',
+    'other': '📝 Otro Asunto'
+  };
+
+  const typeLabel = typeLabels[type] || 'Consulta General';
+  const htmlBody = body.replace(/\n/g, '<br>');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+        .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+        .type-badge { display: inline-block; background: #667eea; color: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 15px; }
+        .message { background: white; padding: 15px; border-radius: 4px; border-left: 4px solid #667eea; margin: 15px 0; }
+        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h2>Nuevo Feedback de DRK Launcher</h2>
+        </div>
+        <div class="content">
+          <div class="type-badge">${typeLabel}</div>
+          <div class="message">
+            ${htmlBody}
+          </div>
+        </div>
+        <div class="footer">
+          <p>Este mensaje fue enviado automáticamente desde DRK Launcher.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
 
 ipcMain.handle('versions:list', async () => mojangVersions())
 
@@ -2548,4 +2749,13 @@ app.on('window-all-closed', () => {
   // Limpiar atajos de teclado al cerrar la aplicación
   globalShortcut.unregisterAll();
   if (process.platform !== 'darwin') app.quit()
+})
+
+// CRÍTICO: Permitir que la aplicación se cierre cuando hay una actualización pendiente
+// NO prevenir el cierre durante las actualizaciones - esto es esencial para que quitAndInstall funcione
+app.on('before-quit', (event) => {
+  // NO prevenir el cierre - electron-updater necesita que la app se cierre para instalar
+  // Si hay una actualización descargada, quitAndInstall ya fue llamado y necesita que la app se cierre
+  console.log('[Main] before-quit: Permitiendo cierre (necesario para actualizaciones)');
+  // NO llamar event.preventDefault() - la app debe poder cerrarse libremente
 })

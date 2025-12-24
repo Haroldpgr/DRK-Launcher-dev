@@ -172,6 +172,39 @@ contextBridge.exposeInMainWorld('api', {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url)
   },
 
+  // API de aplicación y sistema
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    getName: () => ipcRenderer.invoke('app:getName')
+  },
+  
+  os: {
+    platform: () => ipcRenderer.invoke('os:platform'),
+    arch: () => ipcRenderer.invoke('os:arch'),
+    release: () => ipcRenderer.invoke('os:release')
+  },
+  
+  // API de feedback
+  feedback: {
+    send: (data: { to: string; subject: string; body: string; type: string; userEmail?: string }) => 
+      ipcRenderer.invoke('feedback:send', data)
+  },
+
+  // API de actualizaciones
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    getVersion: () => ipcRenderer.invoke('updater:get-version'),
+    getPending: () => ipcRenderer.invoke('updater:get-pending'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    later: () => ipcRenderer.invoke('updater:later'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    checkInternet: () => ipcRenderer.invoke('updater:check-internet'),
+    onStatus: (callback: (event: any, data: any) => void) => {
+      ipcRenderer.on('updater-status', callback);
+      return () => ipcRenderer.removeAllListeners('updater-status');
+    }
+  },
+
   // API de modpacks
   modpack: {
     createTemporary: (originalPath: string) => ipcRenderer.invoke('modpack:create-temporary', originalPath),

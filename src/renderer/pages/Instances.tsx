@@ -154,14 +154,17 @@ export default function Instances({ onPlay }: InstancesProps) {
       console.warn('[Instances] Error al verificar estado de instancia:', err);
     }
 
-    // Si instance.ready está explícitamente en false, no está lista
+    // IMPORTANTE: Si instance.ready está explícitamente en false, no está lista
+    // Esto significa que las descargas aún no han terminado
     if (instance.ready === false) {
       setReadyStatus(prev => ({ ...prev, [instance.id]: false }));
       return false;
     }
 
+    // Si instance.ready es undefined o true, verificar que realmente esté lista
     // Por defecto, si tiene path y no está marcada como no lista, asumir que está lista
-    const isReady = instance.ready !== false;
+    // PERO solo si realmente tiene todos los archivos necesarios
+    const isReady = instance.ready !== false && instance.ready !== undefined;
     setReadyStatus(prev => ({ ...prev, [instance.id]: isReady }));
     return isReady;
   };

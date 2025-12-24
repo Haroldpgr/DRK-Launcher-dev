@@ -106,6 +106,28 @@ declare global {
         openPath: (folderPath: string) => Promise<boolean>;
         openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
       };
+      app: {
+        getVersion: () => Promise<string>;
+        getName: () => Promise<string>;
+      };
+      os: {
+        platform: () => Promise<string>;
+        arch: () => Promise<string>;
+        release: () => Promise<string>;
+      };
+      feedback: {
+        send: (data: { to: string; subject: string; body: string; type: string; userEmail?: string }) => Promise<{ success: boolean; error?: string; messageId?: string }>;
+      };
+      updater: {
+        check: () => Promise<{ success: boolean; error?: string }>;
+        getVersion: () => Promise<{ currentVersion: string; updateAvailable: boolean; pendingUpdate?: any; isDownloading?: boolean; downloadProgress?: any }>;
+        getPending: () => Promise<{ available: boolean; version?: string; releaseDate?: string; releaseNotes?: string; changes?: string[] }>;
+        download: () => Promise<{ success: boolean; error?: string }>;
+        later: () => Promise<{ success: boolean; error?: string }>;
+        install: () => Promise<{ success: boolean; error?: string }>;
+        checkInternet: () => Promise<{ hasInternet: boolean }>;
+        onStatus: (callback: (event: any, data: any) => void) => () => void;
+      };
     };
   }
 }

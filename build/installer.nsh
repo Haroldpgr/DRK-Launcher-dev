@@ -16,3 +16,12 @@
   Delete "$SMPROGRAMS\DRK\DRK Launcher.lnk"
   RMDir "$SMPROGRAMS\DRK"
 !macroend
+
+; CRÍTICO: Asegurar que la aplicación se ejecute después de instalar
+; Esto es esencial para que las actualizaciones funcionen correctamente
+!macro customFinish
+  ; Ejecutar la aplicación después de instalar
+  ; Esto se ejecuta automáticamente cuando runAfterFinish=true en package.json
+  ; pero lo hacemos explícito aquí para asegurar que funcione
+  Exec "$INSTDIR\DRK Launcher.exe"
+!macroend

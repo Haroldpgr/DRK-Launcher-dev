@@ -16,7 +16,7 @@ await build({
   bundle: true,
   sourcemap: !isProduction,
   minify: isProduction,
-  external: ['electron']
+  external: ['electron', 'electron-updater', '@electron/remote']
 })
 
 await build({

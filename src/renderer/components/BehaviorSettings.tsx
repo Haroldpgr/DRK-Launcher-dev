@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { settingsService, Settings, JumpBackWorld } from '../services/settingsService';
+import ToggleSwitch from './ToggleSwitch';
 
 interface BehaviorSettingsProps {
   settings: Settings['behavior'];
@@ -31,102 +32,74 @@ export default function BehaviorSettings({ settings, onSettingsChange }: Behavio
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Minimizar launcher al iniciar</h3>
-            <p className="text-sm text-gray-400">Minimiza el launcher cuando se inicia un juego</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Minimizar launcher al iniciar</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Minimiza el launcher cuando se inicia un juego</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.minimizeOnLaunch}
-              onChange={(e) => onSettingsChange({ minimizeOnLaunch: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.minimizeOnLaunch}
+            onChange={(checked) => onSettingsChange({ minimizeOnLaunch: checked })}
+          />
         </div>
 
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Ocultar nametag</h3>
-            <p className="text-sm text-gray-400">Oculta las etiquetas de nombre en la interfaz</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Ocultar nametag</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Oculta las etiquetas de nombre en la interfaz</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.hideNametag}
-              onChange={(e) => onSettingsChange({ hideNametag: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.hideNametag}
+            onChange={(checked) => onSettingsChange({ hideNametag: checked })}
+          />
         </div>
 
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Decoraciones nativas</h3>
-            <p className="text-sm text-gray-400">Usar el marco de ventana nativo del sistema (requiere reinicio)</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Decoraciones nativas</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Usar el marco de ventana nativo del sistema (requiere reinicio)</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.nativeDecorations}
-              onChange={(e) => onSettingsChange({ nativeDecorations: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.nativeDecorations}
+            onChange={(checked) => onSettingsChange({ nativeDecorations: checked })}
+          />
         </div>
 
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Cerrar después de jugar</h3>
-            <p className="text-sm text-gray-400">Cerrar el launcher cuando el proceso de Minecraft termina</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Cerrar después de jugar</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Cerrar el launcher cuando el proceso de Minecraft termina</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.closeAfterPlay}
-              onChange={(e) => onSettingsChange({ closeAfterPlay: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.closeAfterPlay}
+            onChange={(checked) => onSettingsChange({ closeAfterPlay: checked })}
+          />
         </div>
 
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-200">Saltar a mundos recientes</h3>
-            <p className="text-sm text-gray-400">Mostrar mundos jugados recientemente en la página de inicio</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Saltar a mundos recientes</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Mostrar mundos jugados recientemente en la página de inicio</p>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.showRecentWorlds}
-              onChange={(e) => onSettingsChange({ showRecentWorlds: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <ToggleSwitch
+            checked={settings.showRecentWorlds}
+            onChange={(checked) => onSettingsChange({ showRecentWorlds: checked })}
+          />
         </div>
 
         <div className="flex items-center justify-between">
           <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-200">Notificaciones de sistema</h3>
-            <p className="text-sm text-gray-400">Recibir notificaciones del sistema operativo para eventos importantes</p>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Notificaciones de sistema</h3>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Recibir notificaciones del sistema operativo para eventos importantes</p>
           </div>
           <div className="flex items-center space-x-3">
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.systemNotifications}
-                onChange={(e) => onSettingsChange({ systemNotifications: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <ToggleSwitch
+              checked={settings.systemNotifications}
+              onChange={(checked) => onSettingsChange({ systemNotifications: checked })}
+            />
             <button
               onClick={() => setShowNotificationHelp(!showNotificationHelp)}
-              className="text-gray-400 hover:text-white"
+              style={{ color: 'var(--text-secondary)' }}
+              onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -136,24 +109,43 @@ export default function BehaviorSettings({ settings, onSettingsChange }: Behavio
         </div>
 
         {showNotificationHelp && (
-          <div className="p-3 bg-blue-900/30 border border-blue-700/50 rounded-lg text-sm text-blue-200">
+          <div className="p-3 rounded-lg text-sm" style={{ 
+            backgroundColor: `color-mix(in srgb, var(--global-accent-color) 20%, transparent)`,
+            border: `1px solid var(--global-accent-color)`,
+            color: 'var(--text-primary)'
+          }}>
             Las notificaciones se mostrarán para eventos como: finalización de descargas, actualizaciones completadas, o finalización de sesiones de juego.
           </div>
         )}
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold text-gray-200 mb-3">Página de inicio predeterminada</h3>
+        <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Página de inicio predeterminada</h3>
         <div className="grid grid-cols-2 gap-3">
           {['home', 'instances', 'servers', 'settings'].map((page) => (
             <button
               key={page}
               onClick={() => onSettingsChange({ defaultLandingPage: page })}
-              className={`p-3 rounded-lg border-2 transition-all duration-300 capitalize ${
-                settings.defaultLandingPage === page
-                  ? 'border-blue-500 bg-blue-900/30 text-white'
-                  : 'border-gray-700 bg-gray-800/50 text-gray-300 hover:border-gray-600'
-              }`}
+              className="p-3 rounded-lg border-2 transition-all duration-300 capitalize"
+              style={{
+                borderColor: settings.defaultLandingPage === page ? 'var(--global-accent-color)' : 'var(--border)',
+                backgroundColor: settings.defaultLandingPage === page 
+                  ? `color-mix(in srgb, var(--global-accent-color) 20%, transparent)` 
+                  : 'var(--panel)',
+                color: 'var(--text-primary)'
+              }}
+              onMouseEnter={(e) => {
+                if (settings.defaultLandingPage !== page) {
+                  e.currentTarget.style.borderColor = 'var(--border-light)';
+                  e.currentTarget.style.backgroundColor = 'var(--panel-hover)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (settings.defaultLandingPage !== page) {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  e.currentTarget.style.backgroundColor = 'var(--panel)';
+                }
+              }}
             >
               {page}
             </button>
@@ -162,27 +154,55 @@ export default function BehaviorSettings({ settings, onSettingsChange }: Behavio
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold text-gray-200 mb-3">Volver a mundos</h3>
+        <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Volver a mundos</h3>
         <div className="space-y-2">
           {settings.jumpBackWorlds.slice(0, 5).map((world) => (
             <div
               key={world.id}
-              className="flex items-center p-3 bg-gray-800/50 rounded-lg border border-gray-700 hover:bg-gray-700/50 transition-colors"
+              className="flex items-center p-3 rounded-lg border transition-colors"
+              style={{
+                backgroundColor: 'var(--panel)',
+                borderColor: 'var(--border)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--panel-hover)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--panel)';
+              }}
             >
-              <div className="w-10 h-10 rounded bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm mr-3">
+              <div 
+                className="w-10 h-10 rounded flex items-center justify-center font-bold text-sm mr-3"
+                style={{
+                  background: `linear-gradient(to bottom right, var(--global-accent-color), var(--accent))`,
+                  color: '#ffffff'
+                }}
+              >
                 {world.name.charAt(0)}
               </div>
               <div className="flex-1">
-                <div className="text-white font-medium">{world.name}</div>
-                <div className="text-xs text-gray-400">Jugado hace {formatDate(world.lastPlayed)}</div>
+                <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{world.name}</div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Jugado hace {formatDate(world.lastPlayed)}</div>
               </div>
-              <button className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm transition-colors">
+              <button 
+                className="px-3 py-1 rounded text-sm transition-colors"
+                style={{ 
+                  backgroundColor: 'var(--global-accent-color)',
+                  color: '#ffffff'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = '0.9';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = '1';
+                }}
+              >
                 Jugar
               </button>
             </div>
           ))}
           {settings.jumpBackWorlds.length === 0 && (
-            <div className="text-center py-6 text-gray-500">
+            <div className="text-center py-6" style={{ color: 'var(--text-tertiary)' }}>
               No hay mundos recientes
             </div>
           )}
@@ -190,12 +210,15 @@ export default function BehaviorSettings({ settings, onSettingsChange }: Behavio
       </div>
 
       <div className="pt-2">
-        <h3 className="text-lg font-semibold text-gray-200 mb-3">Rendimiento</h3>
-        <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+        <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Rendimiento</h3>
+        <div className="p-4 rounded-xl border" style={{ 
+          backgroundColor: 'var(--panel)',
+          borderColor: 'var(--border)'
+        }}>
           <div className="flex justify-between items-center mb-2">
             <div>
-              <h4 className="font-medium text-gray-200">Límite de FPS en segundo plano</h4>
-              <p className="text-sm text-gray-400">FPS máximos cuando la ventana está minimizada o no está en primer plano</p>
+              <h4 className="font-medium" style={{ color: 'var(--text-primary)' }}>Límite de FPS en segundo plano</h4>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>FPS máximos cuando la ventana está minimizada o no está en primer plano</p>
             </div>
             <div className="flex items-center">
               <input
@@ -204,13 +227,18 @@ export default function BehaviorSettings({ settings, onSettingsChange }: Behavio
                 max="60"
                 value={settings.backgroundFPSLimit}
                 onChange={(e) => handleLimitFPSChange(e.target.value)}
-                className="w-20 p-2 rounded-lg bg-gray-700/80 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+                className="w-20 p-2 rounded-lg border focus:outline-none focus:ring-2 text-center"
+                style={{
+                  backgroundColor: 'var(--panel-hover)',
+                  borderColor: 'var(--border)',
+                  color: 'var(--text-primary)'
+                }}
               />
-              <span className="ml-2 text-gray-400">FPS</span>
+              <span className="ml-2" style={{ color: 'var(--text-secondary)' }}>FPS</span>
             </div>
           </div>
           <div className="space-y-2">
-            <div className="flex justify-between text-sm text-gray-400">
+            <div className="flex justify-between text-sm" style={{ color: 'var(--text-secondary)' }}>
               <span>1</span>
               <span>{settings.backgroundFPSLimit} FPS</span>
               <span>60</span>
@@ -222,10 +250,14 @@ export default function BehaviorSettings({ settings, onSettingsChange }: Behavio
               step="1"
               value={settings.backgroundFPSLimit}
               onChange={(e) => handleLimitFPSChange(e.target.value)}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+              style={{
+                backgroundColor: 'var(--panel-hover)',
+                accentColor: 'var(--global-accent-color)'
+              }}
             />
           </div>
-          <p className="text-xs text-gray-500 mt-2">
+          <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
             Limitar los FPS en segundo plano puede reducir el uso de CPU y GPU cuando no estás usando activamente el launcher
           </p>
         </div>

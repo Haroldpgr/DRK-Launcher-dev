@@ -9,6 +9,7 @@ import { getDefaultPlaceholder } from '../utils/imagePlaceholder';
 import AdWidget from '../components/AdWidget';
 import TutorialOverlay from '../components/TutorialOverlay';
 import { homeTutorialSteps } from '../data/tutorialSteps';
+import FeedbackModal from '../components/FeedbackModal';
 
 type NewsItem = { id: string; title: string; body: string }
 type Instance = { id: string; name: string; version: string; loader?: string }
@@ -34,6 +35,7 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isLaunching, setIsLaunching] = useState(false); // CRÍTICO: Protección contra dobles clics
   const [runningInstances, setRunningInstances] = useState<Set<string>>(new Set()); // Instancias en ejecución
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const last = useMemo(() => instances[instances.length - 1], [instances])
 
   useEffect(() => {
@@ -578,6 +580,19 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
       </div>
 
       <div className="space-y-6">
+        {/* Botón de Feedback */}
+        <Card>
+          <Button
+            onClick={() => setShowFeedbackModal(true)}
+            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-4 rounded-lg transition-all shadow-lg hover:shadow-xl"
+          >
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-lg">💬</span>
+              <span>Enviar Recomendación o Feedback</span>
+            </div>
+          </Button>
+        </Card>
+
         <Card>
           <div className="text-xl font-semibold mb-2 text-gray-200">Noticias</div>
           <div className="space-y-2">
@@ -643,6 +658,12 @@ export default function Home({ onAddAccount, onDeleteAccount, onSelectAccount, o
 
       {/* Tutorial Overlay */}
       <TutorialOverlay pageId="home" steps={homeTutorialSteps} />
+
+      {/* Feedback Modal */}
+      <FeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+      />
     </div>
   )
 }

@@ -408,11 +408,11 @@ export class JavaDetector {
           windowsHide: true 
         });
 
-        let errorOutput = '';
+      let errorOutput = '';
 
-        child.stderr.on('data', (data) => {
-          errorOutput += data.toString();
-        });
+      child.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
 
         child.on('close', () => {
           const versionMatch = errorOutput.match(/version\s+"([^"]+)"/i);
@@ -420,12 +420,12 @@ export class JavaDetector {
             resolve(this.normalizeVersion(versionMatch[1]));
           } else {
             resolve('unknown');
-          }
-        });
+        }
+      });
 
         child.on('error', () => {
           resolve('unknown');
-        });
+      });
       } catch {
         resolve('unknown');
       }

@@ -157,25 +157,37 @@ export default function Sidebar({ currentPath, onNavigate }: Props) {
   return (
     <div data-tutorial="sidebar" className="w-16 bg-gray-900/90 backdrop-blur-sm border-r border-gray-800 p-2 flex flex-col items-center">
       <div 
-        className="w-12 h-12 rounded-2xl mb-4 shadow-lg border border-gray-700/60 overflow-hidden cursor-pointer hover:scale-105 transition-transform duration-200"
+        className="w-12 h-12 rounded-2xl mb-4 shadow-lg border border-gray-700/60 overflow-hidden cursor-pointer hover:scale-105 transition-transform duration-200 relative logo-glow"
         onClick={() => onNavigate('/')}
         title="DRK Launcher"
+        style={{
+          background: 'linear-gradient(135deg, #0f0f10 0%, #1a1a1a 50%, #0f0f10 100%)',
+          position: 'relative',
+        }}
       >
-        <img 
-          src="/Logo.png" 
-          alt="DRK Launcher" 
-          className="w-full h-full object-cover"
-          onError={(e) => {
-            // Fallback si la imagen no se carga
-            const target = e.target as HTMLImageElement;
-            target.style.display = 'none';
-            const parent = target.parentElement;
-            if (parent) {
-              parent.className = 'w-12 h-12 rounded-2xl bg-gradient-to-br from-primary via-blue-500 to-indigo-600 text-black flex items-center justify-center mb-4 text-xs font-bold shadow-lg border border-gray-700/60';
-              parent.textContent = 'DRK';
-            }
+        {/* Efecto de brillo suave - optimizado con GPU acceleration */}
+        <div 
+          className="absolute inset-0 rounded-2xl logo-glow"
+          style={{
+            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(99, 102, 241, 0.1) 50%, rgba(59, 130, 246, 0.15) 100%)',
+            animation: 'softGlow 3s ease-in-out infinite',
           }}
         />
+        {/* Letra D */}
+        <div 
+          className="w-full h-full flex items-center justify-center relative z-10"
+          style={{
+            fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+            fontWeight: 700,
+            fontSize: '28px',
+            color: '#3B82F6',
+            textShadow: '0 0 8px rgba(59, 130, 246, 0.4), 0 0 16px rgba(59, 130, 246, 0.2)',
+            userSelect: 'none',
+            willChange: 'auto',
+          }}
+        >
+          D
+        </div>
       </div>
       <Item title="Inicio" path="/" current={currentPath === '/'} onClick={() => onNavigate('/')} icon="home" />
       <Item title="Contenido" path="/contenido" current={currentPath === '/contenido'} onClick={() => onNavigate('/contenido')} icon="contenido" />

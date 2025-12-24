@@ -84,32 +84,66 @@ export class MinecraftDownloadService {
 
   /**
    * Descarga todas las librerías (artifacts + natives) de una versión
+   * OPTIMIZADO: Descargas paralelas hasta 75 simultáneas para mayor velocidad
    */
   public async downloadVersionLibraries(version: string): Promise<void> {
     const versionJsonPath = await this.downloadVersionMetadata(version);
     const versionMetadata = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
     const libraries = versionMetadata.libraries || [];
     
-    logProgressService.info(`[Libraries] Descargando ${libraries.length} librerías para ${version}...`);
-    
-    let downloaded = 0;
-    let skipped = 0;
-    
-    for (const library of libraries) {
+    // Filtrar librerías permitidas primero
+    const allowedLibraries = libraries.filter((library: any) => {
       if (library.rules && !this.isLibraryAllowed(library.rules)) {
-        skipped++;
-        continue;
+        return false;
       }
-
-      try {
-      await this.downloadLibrary(library);
-        downloaded++;
-        if (downloaded % 10 === 0) {
-          logProgressService.info(`[Libraries] Progreso: ${downloaded}/${libraries.length - skipped} librerías descargadas...`);
-        }
-      } catch (error) {
-        logProgressService.error(`[Libraries] Error al descargar librería ${library.name || 'unknown'}:`, error);
-        // Continuar con las demás librerías
+      return true;
+    });
+    
+    const skipped = libraries.length - allowedLibraries.length;
+    logProgressService.info(`[Libraries] Descargando ${allowedLibraries.length} librerías para ${version} (${skipped} omitidas por reglas)...`);
+    
+    // Descargas paralelas con límite de 75 simultáneas
+    const maxConcurrent = 75;
+    let downloaded = 0;
+    const total = allowedLibraries.length;
+    
+    // Procesar en lotes de hasta 75 descargas simultáneas
+    for (let i = 0; i < allowedLibraries.length; i += maxConcurrent) {
+      const batch = allowedLibraries.slice(i, i + maxConcurrent);
+      
+      const results = await Promise.allSettled(
+        batch.map(async (library: any) => {
+          try {
+            await this.downloadLibrary(library);
+            downloaded++;
+            
+            // Log de progreso cada 10 descargas completadas
+            if (downloaded % 10 === 0) {
+              const progress = Math.round((downloaded / total) * 100);
+              logProgressService.info(`[Libraries] Progreso: ${downloaded}/${total} (${progress}%) librerías descargadas...`);
+            }
+          } catch (error) {
+            logProgressService.error(`[Libraries] Error al descargar librería ${library.name || 'unknown'}:`, error);
+            throw error; // Re-lanzar para que Promise.allSettled lo capture
+          }
+        })
+      );
+      
+      // Contar éxitos y errores
+      const successes = results.filter(r => r.status === 'fulfilled').length;
+      const errors = results.filter(r => r.status === 'rejected').length;
+      
+      if (errors > 0) {
+        logProgressService.warning(`[Libraries] ${errors} librerías fallaron en este lote (continuando...)`);
+      }
+      
+      // Log de progreso del lote
+      const progress = Math.round((downloaded / total) * 100);
+      logProgressService.info(`[Libraries] Lote completado: ${downloaded}/${total} (${progress}%) librerías descargadas`);
+      
+      // Pequeña pausa entre lotes para evitar sobrecarga
+      if (i + maxConcurrent < allowedLibraries.length) {
+        await new Promise(resolve => setImmediate(resolve));
       }
     }
     
@@ -274,7 +308,8 @@ export class MinecraftDownloadService {
 
     // Paso 4: Descargar assets faltantes desde resources.download.minecraft.net
     // Formato: https://resources.download.minecraft.net/{primeros 2 chars del hash}/{hash completo}
-    const downloadBatchSize = 25; // Tamaño original para mejor rendimiento
+    // OPTIMIZADO: Aumentado a 75 descargas simultáneas para mayor velocidad
+    const downloadBatchSize = 75; // Aumentado de 25 a 75 para descargas más rápidas
     let downloaded = 0;
 
     for (let i = 0; i < missingAssets.length; i += downloadBatchSize) {

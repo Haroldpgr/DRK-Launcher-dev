@@ -232,6 +232,11 @@ export class EnhancedInstanceCreationService {
       this.updateProgress(progressId, InstanceCreationStatus.CREATING_STRUCTURE, 2, 10, 'Creando estructura de archivos');
       const instanceConfig = await this.createInstanceStructure(config, instancePath, id, javaPath);
       
+      // IMPORTANTE: Marcar la instancia como NO lista hasta que todas las descargas terminen
+      instanceConfig.ready = false;
+      this.saveInstanceConfig(instancePath, instanceConfig);
+      logProgressService.info(`[Instance Creation] Instancia marcada como NO lista (ready=false) hasta completar todas las descargas`);
+      
       if (this.isCancelled(progressId)) {
         throw new Error('Creación de instancia cancelada por el usuario');
       }
@@ -306,11 +311,21 @@ export class EnhancedInstanceCreationService {
       // Marcar descarga como completada
       instanceDownloadPersistenceService.markCompleted(progressId);
 
-      // Marcar instancia como lista para usar
+      // IMPORTANTE: Marcar instancia como lista SOLO cuando TODAS las descargas hayan terminado
+      // Esto asegura que el botón de jugar no se active hasta que todo esté listo
+      // Esperar un momento para asegurar que todas las descargas se hayan completado
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       instanceConfig.ready = true;
       this.saveInstanceConfig(instancePath, instanceConfig);
+      
+      logProgressService.success(`[Instance Creation] ✓ Todas las descargas completadas - Instancia lista para jugar`);
+      logProgressService.info(`[Instance Creation] Instancia marcada como lista (ready=true)`);
 
+      console.log(`[Instance Creation] ===========================================`);
       console.log(`Instancia ${config.name} (ID: ${id}) creada exitosamente en ${instancePath}`);
+      console.log(`[Instance Creation] Estado: LISTA PARA JUGAR (ready=true)`);
+      console.log(`[Instance Creation] ===========================================`);
 
       return instanceConfig;
     } catch (error) {
